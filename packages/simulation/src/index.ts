@@ -262,6 +262,491 @@ export type SimulationEvent = z.infer<typeof simulationEventSchema>;
 export type SimulationFailureCode = z.infer<typeof simulationFailureCodeSchema>;
 export type SimulationRun = z.infer<typeof simulationRunSchema>;
 
+export const RUNNER_PROTOCOL_VERSION = '1.0.0';
+export const MAX_RUNNER_REQUEST_BYTES = 8_000_000;
+export const MAX_RUNNER_CAPABILITY_TTL_MS = 120_000;
+export const MAX_RUNNER_FIRMWARE_BASE64_CHARS = Math.ceil(MAX_FIRMWARE_ARTIFACT_BYTES / 3) * 4;
+export const runnerExecutionProfileSchema = z
+  .object({
+    profileId: z.string().min(1).max(100),
+    adapterId: z.string().min(1).max(100),
+    adapterVersion: z.string().min(1).max(100),
+    engineId: z.string().min(1).max(100),
+    engineVersion: z.string().min(1).max(100),
+    imageDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    limits: z
+      .object({
+        wallTimeoutMs: z.number().int().min(1_000).max(120_000),
+        memoryBytes: z
+          .number()
+          .int()
+          .min(64 * 1024 * 1024)
+          .max(2 * 1024 ** 3),
+        cpuCount: z.number().positive().max(2),
+        pids: z.number().int().min(16).max(256),
+        outputBytes: z.number().int().min(1024).max(MAX_SIMULATION_RESULT_BYTES),
+        stdoutBytes: z.number().int().min(1024).max(1_000_000),
+      })
+      .strict(),
+    firmwareLanguages: z.array(firmwareArtifactRefSchema.shape.language).min(1).max(4),
+    boardPartIds: z.array(z.string().min(1).max(200)).min(1).max(100),
+    componentPartIds: z.array(z.string().min(1).max(200)).max(1_000),
+    // Values use the stable key `${topologyId}@${topologyVersion}`.
+    topologyIds: z.array(z.string().min(1).max(220)).max(100),
+  })
+  .strict();
+
+const runnerFirmwareSourceSchema = z
+  .string()
+  .min(4)
+  .max(MAX_RUNNER_FIRMWARE_BASE64_CHARS)
+  .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/);
+
+export const runnerExecutionPayloadSchema = z
+  .object({
+    runId: z.string().uuid(),
+    attemptId: z.string().uuid(),
+    binding: simulationBindingSchema,
+    graph: circuitGraphSchema,
+    catalog: catalogReleaseSchema,
+    validation: validationReportSchema,
+    validationReportId: z.string().uuid(),
+    validationReportDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    firmware: firmwareArtifactRefSchema,
+    firmwareReviewRevision: z.number().int().positive(),
+    firmwareBase64: runnerFirmwareSourceSchema,
+    executionProfileId: z.string().min(1).max(100),
+    deadlineAt: z.iso.datetime(),
+  })
+  .strict()
+  .superRefine((payload, ctx) => {
+    const binding = payload.binding;
+    if (
+      payload.graph.id !== binding.graphId ||
+      payload.graph.projectId !== binding.projectId ||
+      payload.graph.projectRevision !== binding.projectRevision ||
+      payload.graph.catalogReleaseId !== binding.catalogReleaseId ||
+      canonicalDigest(payload.graph) !== binding.graphDigest
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['graph'],
+        message: 'Graph does not match run binding.',
+      });
+    if (
+      payload.catalog.releaseId !== binding.catalogReleaseId ||
+      canonicalDigest(payload.catalog) !== binding.catalogDigest
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['catalog'],
+        message: 'Catalog does not match run binding.',
+      });
+    if (!validateCircuitGraph(payload.graph, { release: payload.catalog }).valid)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['graph'],
+        message: 'Graph is not structurally valid for the supplied catalog snapshot.',
+      });
+    if (
+      payload.validation.projectId !== binding.projectId ||
+      payload.validation.projectRevision !== binding.projectRevision ||
+      payload.validation.graphId !== binding.graphId ||
+      payload.validation.graphDigest !== binding.graphDigest ||
+      payload.validation.catalogReleaseId !== binding.catalogReleaseId ||
+      payload.validation.catalogDigest !== binding.catalogDigest ||
+      canonicalDigest(payload.validation) !== payload.validationReportDigest ||
+      payload.validation.status === 'fail' ||
+      payload.validation.status === 'error'
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['validation'],
+        message: 'A failed or errored validation report cannot be executed.',
+      });
+    if (
+      payload.firmware.projectId !== binding.projectId ||
+      payload.firmware.artifactId !== binding.firmwareArtifactId ||
+      payload.firmware.sha256 !== binding.firmwareDigest ||
+      payload.firmware.catalogReleaseId !== binding.catalogReleaseId
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['firmware'],
+        message: 'Firmware does not match run binding.',
+      });
+    const encodedLength = payload.firmwareBase64.length;
+    const padding = payload.firmwareBase64.endsWith('==')
+      ? 2
+      : payload.firmwareBase64.endsWith('=')
+        ? 1
+        : 0;
+    const decodedLength = (encodedLength / 4) * 3 - padding;
+    if (decodedLength !== payload.firmware.byteLength)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['firmwareBase64'],
+        message: 'Firmware length does not match its immutable reference.',
+      });
+  });
+
+export const runnerCapabilitySchema = z
+  .object({
+    keyId: z.string().min(1).max(100),
+    audience: z.literal('schemora-sandbox-runner'),
+    runId: z.string().uuid(),
+    attemptId: z.string().uuid(),
+    jti: z.string().uuid(),
+    payloadDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    notBefore: z.iso.datetime(),
+    expiresAt: z.iso.datetime(),
+    signature: z
+      .string()
+      .length(86)
+      .regex(/^[A-Za-z0-9_-]{86}$/),
+  })
+  .strict();
+
+export const runnerExecutionRequestSchema = z
+  .object({
+    protocolVersion: z.literal(RUNNER_PROTOCOL_VERSION),
+    payload: runnerExecutionPayloadSchema,
+    payloadDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    capability: runnerCapabilitySchema,
+  })
+  .strict()
+  .superRefine((request, ctx) => {
+    const digest = canonicalDigest(request.payload);
+    if (request.payloadDigest !== digest || request.capability.payloadDigest !== digest)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['payloadDigest'],
+        message: 'Execution payload digest is invalid.',
+      });
+    if (
+      request.capability.runId !== request.payload.runId ||
+      request.capability.attemptId !== request.payload.attemptId
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['capability'],
+        message: 'Capability is bound to another execution.',
+      });
+    if (Date.parse(request.capability.expiresAt) > Date.parse(request.payload.deadlineAt))
+      ctx.addIssue({
+        code: 'custom',
+        path: ['capability', 'expiresAt'],
+        message: 'Capability cannot outlive the execution deadline.',
+      });
+    const notBefore = Date.parse(request.capability.notBefore);
+    const expiresAt = Date.parse(request.capability.expiresAt);
+    if (expiresAt <= notBefore || expiresAt - notBefore > MAX_RUNNER_CAPABILITY_TTL_MS)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['capability'],
+        message: 'Capability validity window is expired, premature, or too long.',
+      });
+    if (new TextEncoder().encode(JSON.stringify(request)).byteLength > MAX_RUNNER_REQUEST_BYTES)
+      ctx.addIssue({ code: 'custom', path: [], message: 'Runner request exceeds the byte limit.' });
+  });
+
+export const runnerCleanupReceiptSchema = z
+  .object({
+    operationId: z.string().uuid(),
+    completedAt: z.iso.datetime(),
+    executionStopped: z.literal(true),
+    runtimeObjectAbsent: z.literal(true),
+    workspaceRemoved: z.literal(true),
+  })
+  .strict();
+
+export const runnerOutputManifestEntrySchema = z
+  .object({
+    path: z
+      .string()
+      .min(1)
+      .max(240)
+      .refine(
+        (path) =>
+          !path.startsWith('/') &&
+          !path.includes('\\') &&
+          path.split('/').length <= 8 &&
+          path
+            .split('/')
+            .every(
+              (part) =>
+                part.length > 0 &&
+                part !== '.' &&
+                part !== '..' &&
+                part !== '__proto__' &&
+                part !== 'constructor' &&
+                part !== 'prototype',
+            ),
+      ),
+    byteLength: z.number().int().nonnegative().max(MAX_SIMULATION_RESULT_BYTES),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  })
+  .strict();
+
+export const runnerExecutionResponseSchema = z
+  .object({
+    protocolVersion: z.literal(RUNNER_PROTOCOL_VERSION),
+    runId: z.string().uuid(),
+    attemptId: z.string().uuid(),
+    payloadDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    executionProfileId: z.string().min(1).max(100),
+    imageDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    status: z.enum(['accepted', 'running', 'completed', 'failed', 'cancelled']),
+    startedAt: z.iso.datetime().nullable(),
+    finishedAt: z.iso.datetime().nullable(),
+    terminationReason: z
+      .enum(['completed', 'failed', 'time_limit', 'cancelled', 'runtime_error'])
+      .nullable(),
+    run: simulationRunSchema.nullable(),
+    outputManifest: z.array(runnerOutputManifestEntrySchema).max(256),
+    totalOutputBytes: z.number().int().nonnegative().max(MAX_SIMULATION_RESULT_BYTES),
+    cleanupReceipt: runnerCleanupReceiptSchema.nullable(),
+  })
+  .strict()
+  .superRefine((response, ctx) => {
+    const terminal = ['completed', 'failed', 'cancelled'].includes(response.status);
+    if (terminal !== (response.cleanupReceipt !== null))
+      ctx.addIssue({
+        code: 'custom',
+        path: ['cleanupReceipt'],
+        message: 'Terminal responses require a cleanup receipt.',
+      });
+    if (
+      terminal !== (response.finishedAt !== null) ||
+      terminal !== (response.terminationReason !== null)
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['finishedAt'],
+        message: 'Terminal status, finish time, and termination reason must agree.',
+      });
+    if (response.status === 'running' && response.startedAt === null)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['startedAt'],
+        message: 'Running response requires a start time.',
+      });
+    const expectedRunStatus =
+      response.status === 'completed'
+        ? ['completed']
+        : response.status === 'failed'
+          ? ['failed', 'timed_out']
+          : response.status === 'cancelled'
+            ? ['cancelled']
+            : [];
+    if (terminal && (!response.run || !expectedRunStatus?.includes(response.run.status)))
+      ctx.addIssue({
+        code: 'custom',
+        path: ['run'],
+        message: 'Terminal response status must match its terminal run result.',
+      });
+    if (!terminal && response.run !== null)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['run'],
+        message: 'Non-terminal runner responses cannot include a final run result.',
+      });
+    if (response.status === 'completed' && response.terminationReason !== 'completed')
+      ctx.addIssue({
+        code: 'custom',
+        path: ['terminationReason'],
+        message: 'Completed response requires normal termination.',
+      });
+    if (
+      response.status === 'failed' &&
+      !['failed', 'time_limit', 'runtime_error'].includes(response.terminationReason ?? '')
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['terminationReason'],
+        message: 'Failed response requires a failure termination reason.',
+      });
+    if (response.status === 'cancelled' && response.terminationReason !== 'cancelled')
+      ctx.addIssue({
+        code: 'custom',
+        path: ['terminationReason'],
+        message: 'Cancelled response requires cancellation termination.',
+      });
+    const paths = new Set<string>();
+    let manifestBytes = 0;
+    for (const [index, entry] of response.outputManifest.entries()) {
+      if (paths.has(entry.path))
+        ctx.addIssue({
+          code: 'custom',
+          path: ['outputManifest', index, 'path'],
+          message: 'Output paths must be unique.',
+        });
+      paths.add(entry.path);
+      manifestBytes += entry.byteLength;
+    }
+    if (manifestBytes !== response.totalOutputBytes)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['totalOutputBytes'],
+        message: 'Manifest sizes do not match total output bytes.',
+      });
+    if (response.run && response.run.runId !== response.runId)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['run', 'runId'],
+        message: 'Result run ID does not match response.',
+      });
+    if (new TextEncoder().encode(JSON.stringify(response)).byteLength > MAX_SIMULATION_RESULT_BYTES)
+      ctx.addIssue({
+        code: 'custom',
+        path: [],
+        message: 'Runner response exceeds the byte limit.',
+      });
+  });
+
+export type RunnerExecutionPayload = z.infer<typeof runnerExecutionPayloadSchema>;
+export type RunnerExecutionRequest = z.infer<typeof runnerExecutionRequestSchema>;
+export type RunnerExecutionResponse = z.infer<typeof runnerExecutionResponseSchema>;
+export type RunnerExecutionProfile = z.infer<typeof runnerExecutionProfileSchema>;
+export type RunnerCapability = RunnerExecutionRequest['capability'];
+
+export function validateRunnerExecutionResponseForRequest(
+  responseInput: unknown,
+  requestInput: unknown,
+  profileInput: unknown,
+): { valid: true; response: RunnerExecutionResponse } | { valid: false; issues: string[] } {
+  const response = runnerExecutionResponseSchema.safeParse(responseInput);
+  const request = runnerExecutionRequestSchema.safeParse(requestInput);
+  const profile = runnerExecutionProfileSchema.safeParse(profileInput);
+  if (!response.success || !request.success || !profile.success)
+    return {
+      valid: false,
+      issues: ['Runner response or request failed protocol schema validation.'],
+    };
+  const value = response.data;
+  const dispatched = request.data;
+  const issues: string[] = [];
+  if (
+    value.runId !== dispatched.payload.runId ||
+    value.attemptId !== dispatched.payload.attemptId ||
+    value.payloadDigest !== dispatched.payloadDigest ||
+    value.executionProfileId !== dispatched.payload.executionProfileId
+  )
+    issues.push('Runner response does not match the dispatched run, attempt, digest, or profile.');
+  if (
+    !runnerRequestMatchesProfile(dispatched, profile.data) ||
+    value.imageDigest !== profile.data.imageDigest
+  )
+    issues.push('Runner response image or execution profile is not administrator-approved.');
+  if (
+    value.run &&
+    canonicalDigest(value.run.binding) !== canonicalDigest(dispatched.payload.binding)
+  )
+    issues.push('Runner result binding differs from the dispatched immutable binding.');
+  if (
+    value.cleanupReceipt &&
+    value.finishedAt &&
+    Date.parse(value.cleanupReceipt.completedAt) < Date.parse(value.finishedAt)
+  )
+    issues.push('Cleanup receipt predates execution completion.');
+  if (
+    value.startedAt &&
+    value.finishedAt &&
+    Date.parse(value.startedAt) > Date.parse(value.finishedAt)
+  )
+    issues.push('Runner execution finished before it started.');
+  return issues.length ? { valid: false, issues } : { valid: true, response: value };
+}
+
+/** Canonical signed bytes. Sign these UTF-8 bytes with Ed25519; verify keyId and replay state separately. */
+export function runnerCapabilitySigningMessage(capability: RunnerCapability): string {
+  return JSON.stringify({
+    protocolVersion: RUNNER_PROTOCOL_VERSION,
+    audience: capability.audience,
+    runId: capability.runId,
+    attemptId: capability.attemptId,
+    payloadDigest: capability.payloadDigest,
+    jti: capability.jti,
+    notBefore: capability.notBefore,
+    expiresAt: capability.expiresAt,
+    keyId: capability.keyId,
+  });
+}
+
+/** Apply the runner's administrator-owned profile allowlist to a structurally valid request. */
+export function runnerPayloadMatchesProfile(
+  input: unknown,
+  profileInput: unknown,
+): input is RunnerExecutionPayload {
+  const payload = runnerExecutionPayloadSchema.safeParse(input);
+  const profile = runnerExecutionProfileSchema.safeParse(profileInput);
+  if (!payload.success || !profile.success) return false;
+  const value = payload.data;
+  const allowed = profile.data;
+  const boards = new Set(allowed.boardPartIds);
+  const parts = new Set(allowed.componentPartIds);
+  const topologies = new Set(allowed.topologyIds);
+  const catalogParts = new Map(value.catalog.parts.map((part) => [part.id, part]));
+  const boardComponents = value.graph.components.filter(
+    (component) => catalogParts.get(component.catalogPartId)?.category === 'development-board',
+  );
+  return (
+    value.executionProfileId === allowed.profileId &&
+    value.binding.adapterId === allowed.adapterId &&
+    value.binding.adapterVersion === allowed.adapterVersion &&
+    value.binding.engineId === allowed.engineId &&
+    value.binding.engineVersion === allowed.engineVersion &&
+    allowed.firmwareLanguages.includes(value.firmware.language) &&
+    boards.has(value.firmware.boardPartId) &&
+    boardComponents.length === 1 &&
+    boardComponents[0]?.catalogPartId === value.firmware.boardPartId &&
+    value.graph.components.every((component) => {
+      const part = catalogParts.get(component.catalogPartId);
+      if (!part) return false;
+      return part.category === 'development-board' ? boards.has(part.id) : parts.has(part.id);
+    }) &&
+    value.graph.breadboards.every((breadboard) =>
+      topologies.has(`${breadboard.topologyId}@${breadboard.topologyVersion}`),
+    )
+  );
+}
+
+/** Validate request timing against the runner's configured hard wall-time limit. */
+export function runnerRequestMatchesProfile(input: unknown, profileInput: unknown): boolean {
+  const request = runnerExecutionRequestSchema.safeParse(input);
+  const profile = runnerExecutionProfileSchema.safeParse(profileInput);
+  if (
+    !request.success ||
+    !profile.success ||
+    !runnerPayloadMatchesProfile(request.data.payload, profile.data)
+  )
+    return false;
+  const allowedWindow = profile.data.limits.wallTimeoutMs + 15_000;
+  return (
+    Date.parse(request.data.payload.deadlineAt) - Date.parse(request.data.capability.notBefore) <=
+    allowedWindow
+  );
+}
+
+/** Verify source bytes at the runner trust boundary; schema shape checks alone are insufficient. */
+export async function verifyRunnerFirmwareDigest(input: unknown): Promise<boolean> {
+  const parsed = runnerExecutionPayloadSchema.safeParse(input);
+  if (!parsed.success) return false;
+  try {
+    const encoded = parsed.data.firmwareBase64;
+    const binary = atob(encoded);
+    if (btoa(binary) !== encoded) return false;
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+    const actual = Array.from(new Uint8Array(digest), (byte) =>
+      byte.toString(16).padStart(2, '0'),
+    ).join('');
+    return actual === parsed.data.firmware.sha256 && actual === parsed.data.binding.firmwareDigest;
+  } catch {
+    return false;
+  }
+}
+
 export type SimulationCapability = {
   providerId: string;
   providerVersion: string;

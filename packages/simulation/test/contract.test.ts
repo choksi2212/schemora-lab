@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { canonicalDigest } from '@schemora/assembly-plan';
 import { getCatalogRelease } from '@schemora/catalog';
 import { validateCircuit } from '@schemora/validation';
@@ -8,6 +9,15 @@ import {
   firmwareArtifactRefSchema,
   mapEsp32Gpio19ToLedState,
   normalizeQemuReferenceCallbacks,
+  RUNNER_PROTOCOL_VERSION,
+  runnerExecutionRequestSchema,
+  runnerExecutionResponseSchema,
+  runnerExecutionPayloadSchema,
+  runnerExecutionProfileSchema,
+  runnerPayloadMatchesProfile,
+  runnerRequestMatchesProfile,
+  verifyRunnerFirmwareDigest,
+  validateRunnerExecutionResponseForRequest,
   simulationRunSchema,
   unavailableSimulationRun,
   validateSimulationRunAgainstDesign,
@@ -118,7 +128,196 @@ const binding = {
   engineVersion: '1.0.0',
 };
 
+const runnerFirmwareBytes = Buffer.alloc(firmware.byteLength);
+const runnerFirmwareDigest = createHash('sha256').update(runnerFirmwareBytes).digest('hex');
+const runnerFirmware = { ...firmware, sha256: runnerFirmwareDigest };
+const runnerBinding = { ...binding, firmwareDigest: runnerFirmwareDigest };
+const runnerPayload = {
+  runId: '6fb8f60e-ec9a-4d29-9122-4d2bf13e9c43',
+  attemptId: 'a0359097-8a38-4650-a34d-61c039800d47',
+  binding: runnerBinding,
+  graph,
+  catalog,
+  validation: report,
+  validationReportId: 'defa8605-9f6b-41e0-bb18-311d861ce3b4',
+  validationReportDigest: canonicalDigest(report),
+  firmware: runnerFirmware,
+  firmwareReviewRevision: 3,
+  firmwareBase64: runnerFirmwareBytes.toString('base64'),
+  executionProfileId: 'test-reference-profile-v1',
+  deadlineAt: new Date(Date.now() + 120_000).toISOString(),
+};
+
+function makeRunnerRequest(payload = runnerPayload) {
+  const parsed = runnerExecutionPayloadSchema.parse({
+    ...payload,
+    deadlineAt: new Date(Date.now() + 60_000).toISOString(),
+  });
+  const payloadDigest = canonicalDigest(parsed);
+  const notBefore = new Date(Date.now() - 1_000).toISOString();
+  const expiresAt = new Date(Date.now() + 50_000).toISOString();
+  return runnerExecutionRequestSchema.parse({
+    protocolVersion: RUNNER_PROTOCOL_VERSION,
+    payload: parsed,
+    payloadDigest,
+    capability: {
+      keyId: 'worker-2026-10',
+      audience: 'schemora-sandbox-runner',
+      runId: parsed.runId,
+      attemptId: parsed.attemptId,
+      jti: '8a748297-16b7-4451-9f4f-813d1ee86c31',
+      payloadDigest,
+      notBefore,
+      expiresAt,
+      signature: 'A'.repeat(86),
+    },
+  });
+}
+
+function makeRunnerProfile() {
+  return runnerExecutionProfileSchema.parse({
+    profileId: runnerPayload.executionProfileId,
+    adapterId: runnerBinding.adapterId,
+    adapterVersion: runnerBinding.adapterVersion,
+    engineId: runnerBinding.engineId,
+    engineVersion: runnerBinding.engineVersion,
+    imageDigest: `sha256:${'c'.repeat(64)}`,
+    limits: {
+      wallTimeoutMs: 60_000,
+      memoryBytes: 128 * 1024 * 1024,
+      cpuCount: 1,
+      pids: 64,
+      outputBytes: 1_000_000,
+      stdoutBytes: 32_000,
+    },
+    firmwareLanguages: [runnerFirmware.language],
+    boardPartIds: [runnerFirmware.boardPartId],
+    componentPartIds: graph.components
+      .filter((component) => component.catalogPartId !== runnerFirmware.boardPartId)
+      .map((component) => component.catalogPartId),
+    topologyIds: [],
+  });
+}
+
 describe('simulation contracts', () => {
+  it('accepts only a versioned runner request bound to immutable design and firmware inputs', () => {
+    const request = makeRunnerRequest();
+    expect(request.payload.binding.graphDigest).toBe(canonicalDigest(graph));
+    expect(
+      runnerExecutionRequestSchema.safeParse({ ...request, injectedCommand: 'sh -c id' }).success,
+    ).toBe(false);
+    expect(
+      runnerExecutionRequestSchema.safeParse({
+        ...request,
+        payload: { ...request.payload, firmwareBase64: 'not base64' },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects runner requests whose capability, binding, or frozen graph differs', () => {
+    const request = makeRunnerRequest();
+    expect(
+      runnerExecutionRequestSchema.safeParse({
+        ...request,
+        capability: { ...request.capability, runId: 'f20d4748-979e-48cf-b76e-c4e0564d2ce4' },
+      }).success,
+    ).toBe(false);
+    expect(
+      runnerExecutionRequestSchema.safeParse({
+        ...request,
+        payload: {
+          ...request.payload,
+          graph: { ...graph, projectRevision: graph.projectRevision + 1 },
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('verifies firmware bytes against the accepted artifact digest and profile allowlist', async () => {
+    expect(await verifyRunnerFirmwareDigest(runnerPayload)).toBe(true);
+    const changedBytes = Buffer.alloc(firmware.byteLength, 1).toString('base64');
+    expect(
+      await verifyRunnerFirmwareDigest({ ...runnerPayload, firmwareBase64: changedBytes }),
+    ).toBe(false);
+    const profile = makeRunnerProfile();
+    expect(runnerPayloadMatchesProfile(runnerPayload, profile)).toBe(true);
+    expect(runnerRequestMatchesProfile(makeRunnerRequest(), profile)).toBe(true);
+    expect(
+      runnerRequestMatchesProfile(
+        makeRunnerRequest({ ...runnerPayload, executionProfileId: 'unknown-profile' }),
+        profile,
+      ),
+    ).toBe(false);
+    expect(
+      runnerPayloadMatchesProfile(runnerPayload, { ...profile, engineId: 'unapproved-engine' }),
+    ).toBe(false);
+    const extraBoardGraph = {
+      ...graph,
+      components: [
+        ...graph.components,
+        { id: 'board_2', catalogPartId: runnerFirmware.boardPartId },
+      ],
+    };
+    expect(
+      runnerPayloadMatchesProfile(
+        {
+          ...runnerPayload,
+          graph: extraBoardGraph,
+          binding: { ...runnerPayload.binding, graphDigest: canonicalDigest(extraBoardGraph) },
+        },
+        profile,
+      ),
+    ).toBe(false);
+  });
+
+  it('requires terminal runner responses to include cleanup evidence and bounded result state', () => {
+    const request = makeRunnerRequest();
+    const accepted = {
+      protocolVersion: RUNNER_PROTOCOL_VERSION,
+      runId: request.payload.runId,
+      attemptId: request.payload.attemptId,
+      payloadDigest: request.payloadDigest,
+      executionProfileId: request.payload.executionProfileId,
+      imageDigest: `sha256:${'c'.repeat(64)}`,
+      status: 'accepted',
+      startedAt: null,
+      finishedAt: null,
+      terminationReason: null,
+      run: null,
+      outputManifest: [],
+      totalOutputBytes: 0,
+      cleanupReceipt: null,
+    };
+    expect(runnerExecutionResponseSchema.parse(accepted).status).toBe('accepted');
+    const profile = makeRunnerProfile();
+    expect(validateRunnerExecutionResponseForRequest(accepted, request, profile).valid).toBe(true);
+    expect(
+      validateRunnerExecutionResponseForRequest(
+        { ...accepted, payloadDigest: 'b'.repeat(64) },
+        request,
+        profile,
+      ).valid,
+    ).toBe(false);
+    expect(runnerExecutionResponseSchema.safeParse({ ...accepted, status: 'failed' }).success).toBe(
+      false,
+    );
+    expect(
+      runnerExecutionResponseSchema.safeParse({
+        ...accepted,
+        status: 'completed',
+        finishedAt: new Date().toISOString(),
+        terminationReason: 'completed',
+        cleanupReceipt: {
+          operationId: 'f76e3fd2-4b3c-40b2-8cb8-f9f9ca55fdf2',
+          completedAt: new Date(Date.now() + 1000).toISOString(),
+          executionStopped: true,
+          runtimeObjectAbsent: true,
+          workspaceRemoved: true,
+        },
+      }).success,
+    ).toBe(false);
+  });
+
   it('normalizes the captured ordered callback golden without inventing firmware provenance or time', () => {
     const normalized = normalizeQemuReferenceCallbacks({
       trace: capturedQemuCallbackTrace,

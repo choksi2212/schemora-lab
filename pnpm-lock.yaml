@@ -67,6 +67,19 @@ importers:
         specifier: 4.20.6
         version: 4.20.6
 
+  apps/sandbox-runner:
+    dependencies:
+      '@schemora/simulation':
+        specifier: workspace:*
+        version: link:../../packages/simulation
+    devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/node@24.10.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)
+
   apps/web:
     dependencies:
       '@react-three/drei':
@@ -4673,7 +4686,7 @@ snapshots:
       esbuild: 0.28.2
       fdir: 6.5.0(picomatch@4.0.7)
       picomatch: 4.0.7
-      postcss: 8.5.29
+      postcss: 8.5.30
       rollup: 4.64.5
       tinyglobby: 0.2.17
     optionalDependencies:
