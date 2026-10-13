@@ -78,6 +78,9 @@ importers:
       '@schemora/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@schemora/teaching':
+        specifier: workspace:*
+        version: link:../../packages/teaching
       jose:
         specifier: 6.2.12
         version: 6.2.12
@@ -259,6 +262,31 @@ importers:
       '@aws-sdk/client-s3':
         specifier: 3.1150.0
         version: 3.1150.0
+
+  packages/teaching:
+    dependencies:
+      '@schemora/assembly-plan':
+        specifier: workspace:*
+        version: link:../assembly-plan
+      '@schemora/catalog':
+        specifier: workspace:*
+        version: link:../hardware-catalog
+      '@schemora/circuit-model':
+        specifier: workspace:*
+        version: link:../circuit-model
+      '@schemora/validation':
+        specifier: workspace:*
+        version: link:../validation
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
+    devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/node@24.10.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)
 
   packages/validation:
     dependencies:

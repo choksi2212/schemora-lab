@@ -175,6 +175,22 @@ test('connects exact terminals in the 3D workbench and persists graph edits', as
   await page.getByRole('button', { name: 'Generate assembly guide' }).click();
   await expect(page.getByRole('heading', { name: 'Assembly guide' })).toBeVisible();
   await expect(page.getByText(/Identify ESP32-DevKitC V4/)).toBeVisible();
+  await page
+    .getByRole('list', { name: 'Assembly steps' })
+    .getByRole('button', { name: /Identify ESP32-DevKitC V4/ })
+    .click();
+  await expect(page.getByText('Why this step?')).toBeVisible();
+  await page.getByRole('button', { name: 'Detailed' }).click();
+  await expect(page.getByText(/J3 position 8/)).toBeVisible();
+  await expect(
+    page
+      .locator('[aria-label="Contextual teaching"] article')
+      .filter({ hasText: 'GPIO: a controllable signal pin' })
+      .getByRole('link', { name: /ESP32-DevKitC V4 User Guide/ }),
+  ).toHaveAttribute('href', /docs\.espressif\.com/);
+  await page.getByRole('button', { name: 'Quick' }).click();
+  await expect(page.getByText(/Use the exact GPIO label shown in this step/)).toBeVisible();
+  await page.getByRole('list', { name: 'Assembly steps' }).getByRole('button').first().click();
   await page.getByRole('button', { name: 'Next', exact: true }).click();
   await expect(page.getByText(/Step 2 of/)).toBeVisible();
   await expect(page.getByText(/0 of .* steps confirmed/)).toBeVisible();

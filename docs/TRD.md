@@ -470,6 +470,8 @@ Progress is recorded as user actions plus server-evaluated predicate results. â€
 
 The initial teaching layer uses curated explanations for component and electrical concepts. A quick instruction shows the action; a beginner explanation states why it matters; an expert detail view exposes documented capabilities and source references. Common validation findings should have deterministic explanations. A tutor model may explain open-ended questions only from minimized, authorized context containing the current step, confirmed facts, relevant findings, and approved documentation. Tutor responses are guidance, not project truth.
 
+**Phase 5 implementation note:** The first slice adds a pure deterministic teaching package and Quick/Beginner/Detailed panel to the assembly guide. It validates lesson sources and claim tuples against the exact catalog release and withholds stale or mismatched graph/report context. Firmware behavior remains unknown because no firmware is modeled. No tutor model is integrated. Beginner study remains a required acceptance gate. See [Phase-5-Implementation.md](Phase-5-Implementation.md).
+
 ### 9.3 Firmware and simulation
 
 Firmware artifacts are immutable versions stored in private object storage and associated with a project revision. The web server never executes uploaded firmware. Static analysis, compilation, or simulation runs in bounded isolated workers.

@@ -15,6 +15,7 @@
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.1",
     "@schemora/contracts": "workspace:*",
+    "@schemora/teaching": "workspace:*",
     "jose": "6.2.12",
     "lucide-react": "1.56.0",
     "next": "16.4.0",

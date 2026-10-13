@@ -17,6 +17,11 @@ import { api, friendlyError, type Project } from '@/lib/api';
 import { CircuitScene } from './circuit-scene';
 import styles from './circuit-workspace.module.css';
 import type { AssemblyPlan } from '@schemora/assembly-plan';
+import {
+  explainAssemblyStep,
+  type ExplanationLevel,
+  type TeachingExplanation,
+} from '@schemora/teaching';
 
 type Terminal = { id: string; label: string; electricalRole: string };
 type Part = {
@@ -168,6 +173,8 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
   const [completedAssemblySteps, setCompletedAssemblySteps] = useState<string[]>([]);
   const [skippedAssemblySteps, setSkippedAssemblySteps] = useState<string[]>([]);
   const [assemblyStale, setAssemblyStale] = useState(false);
+  const [explanationLevel, setExplanationLevel] = useState<ExplanationLevel>('beginner');
+  const [teaching, setTeaching] = useState<TeachingExplanation | null>(null);
   const load = useCallback(async () => {
     setError('');
     try {
@@ -349,6 +356,49 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
       setBusy(false);
     }
   }
+  const activeAssemblyStep = assemblyPlan?.steps[assemblyStepIndex] ?? null;
+  useEffect(() => {
+    if (
+      !assemblyPlan ||
+      !activeAssemblyStep ||
+      !graph ||
+      !catalog ||
+      !report ||
+      !isCurrent ||
+      assemblyStale
+    ) {
+      setTeaching(null);
+      return;
+    }
+    let active = true;
+    setTeaching(null);
+    void explainAssemblyStep({
+      step: activeAssemblyStep,
+      graph,
+      catalog,
+      report,
+      level: explanationLevel,
+      expectedGraphDigest: assemblyPlan.graphDigest,
+    })
+      .then((result) => {
+        if (active) setTeaching(result);
+      })
+      .catch(() => {
+        if (active) setTeaching(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [
+    assemblyPlan,
+    activeAssemblyStep,
+    graph,
+    catalog,
+    report,
+    isCurrent,
+    assemblyStale,
+    explanationLevel,
+  ]);
   if (!catalog || !graph || !project)
     return (
       <div className="page">
@@ -388,7 +438,6 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
   const holes = Array.from({ length: 30 }, (_, i) => i + 1).flatMap((column) =>
     'ABCDEFGHIJ'.split('').map((row) => `${row}${column}`),
   );
-  const activeAssemblyStep = assemblyPlan?.steps[assemblyStepIndex] ?? null;
   const completedSet = new Set(completedAssemblySteps);
   const prerequisitesComplete = Boolean(
     activeAssemblyStep?.prerequisites.every((id) => completedSet.has(id)),
@@ -726,6 +775,71 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
               <h3>{activeAssemblyStep.title}</h3>
               <p>{activeAssemblyStep.instruction}</p>
               <p className="fine-text">{activeAssemblyStep.explanation}</p>
+              {teaching && (
+                <section className={styles.teaching} aria-label="Contextual teaching">
+                  <div className={styles.teachingHeading}>
+                    <div>
+                      <strong>Why this step?</strong>
+                      <p className="fine-text">
+                        Curated explanations for this step and the current circuit.
+                      </p>
+                    </div>
+                    <div className={styles.levels} role="group" aria-label="Explanation detail">
+                      {(['quick', 'beginner', 'detailed'] as const).map((level) => (
+                        <button
+                          type="button"
+                          key={level}
+                          aria-pressed={explanationLevel === level}
+                          onClick={() => setExplanationLevel(level)}
+                        >
+                          {level[0]!.toUpperCase() + level.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {teaching.lessons.length ? (
+                    teaching.lessons.map((lesson) => (
+                      <article className={styles.lesson} key={lesson.id}>
+                        <h4>{lesson.title}</h4>
+                        <p>{lesson.text}</p>
+                        {lesson.limitations.map((limitation) => (
+                          <p className="fine-text" key={limitation}>
+                            Limit: {limitation}
+                          </p>
+                        ))}
+                        <div className={styles.citations} aria-label={`${lesson.title} sources`}>
+                          {lesson.sources.map((source) => (
+                            <a key={source.id} href={source.url} target="_blank" rel="noreferrer">
+                              {source.title}
+                              {source.locator ? ` · ${source.locator}` : ''}
+                            </a>
+                          ))}
+                        </div>
+                      </article>
+                    ))
+                  ) : (
+                    <p className="fine-text">
+                      No curated teaching card matches this exact step yet. The guide’s saved
+                      targets remain authoritative.
+                    </p>
+                  )}
+                  {teaching.findings.length > 0 && (
+                    <div className={styles.teachingFindings}>
+                      <strong>Current check explanations</strong>
+                      {teaching.findings.map((finding, index) => (
+                        <article key={`${finding.ruleId}-${index}`}>
+                          <span className={`status-chip finding-${finding.status}`}>
+                            {finding.status.replaceAll('_', ' ')}
+                          </span>
+                          <strong>{finding.ruleId}</strong>
+                          <p>{finding.message}</p>
+                          <p className="fine-text">{finding.explanation}</p>
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              )}
               {activeAssemblyStep.anchors.length > 0 && (
                 <ul aria-label="Exact targets">
                   {activeAssemblyStep.anchors.map((anchor, index) => (
