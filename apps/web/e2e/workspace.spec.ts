@@ -63,6 +63,7 @@ test('imports source, links evidence, reviews superseded wiring, and persists a 
     .locator('.fact-card')
     .filter({ has: page.locator('.fact-value', { hasText: 'Connect GPIO18 to LED anode.' }) });
   await expect(earlier.getByText('Earlier claim · unreviewed')).toBeVisible();
+  await expect(earlier.getByRole('button', { name: 'Confirm', exact: true })).toBeDisabled();
   await earlier.getByRole('button', { name: 'Show source' }).click();
   await expect(page.locator('.message-content mark')).toHaveText('Connect GPIO18 to LED anode.');
   await earlier.getByRole('button', { name: 'Mark obsolete' }).click();

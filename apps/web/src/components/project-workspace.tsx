@@ -1045,7 +1045,12 @@ function FactCard({
         <div className="fact-actions">
           <button
             className="review-button"
-            disabled={busy || review?.decision === 'accept'}
+            disabled={busy || review?.decision === 'accept' || candidate.status === 'superseded'}
+            title={
+              candidate.status === 'superseded'
+                ? 'This earlier claim was superseded. Correct it or mark it obsolete.'
+                : undefined
+            }
             onClick={() => void onReview(candidate.id, 'accept')}
           >
             <Check size={14} /> Confirm

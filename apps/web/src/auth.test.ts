@@ -5,6 +5,7 @@ import { GET as signIn } from './app/api/auth/signin/route';
 import { GET as callback } from './app/api/auth/callback/route';
 import { GET as proxyGet, POST as proxyPost } from './app/api/backend/[...path]/route';
 import { flowCookie } from './auth';
+import { ApiError, friendlyError } from './lib/api';
 import {
   apiToken,
   developmentIdentity,
@@ -86,6 +87,19 @@ describe('server identity and BFF boundary', () => {
 });
 
 describe('OAuth and BFF route behavior', () => {
+  it('distinguishes revision conflicts from unavailable review actions', () => {
+    expect(
+      friendlyError(new ApiError('Archived projects are read only.', 'PROJECT_ARCHIVED', 409)),
+    ).toBe('Archived projects are read only.');
+    expect(
+      friendlyError(
+        new ApiError('Earlier claims cannot be confirmed.', 'SUPERSEDED_CANDIDATE', 409),
+      ),
+    ).toBe('Earlier claims cannot be confirmed.');
+    expect(friendlyError(new ApiError('Stale revision.', 'REVISION_CONFLICT', 409))).toContain(
+      'Refresh',
+    );
+  });
   beforeEach(() => {
     process.env.DEV_AUTH = 'false';
     process.env.AUTH_SECRET = 'test-auth-secret-with-at-least-32-characters';

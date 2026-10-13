@@ -113,7 +113,7 @@ export async function api<T>(
 }
 
 export function friendlyError(error: unknown): string {
-  if (error instanceof ApiError && error.status === 409)
+  if (error instanceof ApiError && error.code === 'REVISION_CONFLICT')
     return 'This project changed in another session. Refresh to see the latest revision; your unsaved input has been kept.';
   if (error instanceof ApiError) return error.message;
   if (error instanceof Error && error.message && error.name !== 'TypeError') return error.message;
