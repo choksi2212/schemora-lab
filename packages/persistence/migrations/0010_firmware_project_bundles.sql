@@ -72,13 +72,14 @@ BEGIN
   SELECT * INTO entrypoint_record FROM firmware_artifact_files
     WHERE project_id=artifact.project_id AND artifact_id=artifact.id
       AND path=artifact.entrypoint AND is_entrypoint;
-  IF files_count < 1 OR files_count > CASE WHEN artifact.bundle_digest IS NULL THEN 1 ELSE 128 END OR
+  IF files_count < 1 OR
+     (artifact.bundle_digest IS NULL AND files_count <> 1) OR
+     (artifact.bundle_digest IS NOT NULL AND files_count > 128) OR
      total_bytes <> artifact.total_byte_length OR
      entrypoint_record.path IS NULL OR entrypoint_record.object_key <> artifact.object_key OR
      entrypoint_record.sha256 <> artifact.sha256 OR entrypoint_record.byte_length <> artifact.byte_length OR
      (SELECT count(*) FROM firmware_artifact_files
-       WHERE project_id=artifact.project_id AND artifact_id=artifact.id AND is_entrypoint) <> 1 OR
-     (artifact.bundle_digest IS NULL AND files_count <> 1) THEN
+       WHERE project_id=artifact.project_id AND artifact_id=artifact.id AND is_entrypoint) <> 1 THEN
     RAISE EXCEPTION 'Schemora firmware bundle rows do not match the immutable manifest metadata';
   END IF;
   RETURN NULL;
