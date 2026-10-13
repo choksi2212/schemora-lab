@@ -9,6 +9,11 @@ import {
 } from '@schemora/contracts';
 import { extractCandidates, createModelExtractor } from '@schemora/intelligence';
 import { Repository, requestDigest, type Job, type ImportRow } from '@schemora/persistence';
+import {
+  simulationBindingSchema,
+  simulationRunSchema,
+  unavailableSimulationRun,
+} from '@schemora/simulation';
 import type { PrivateStorage } from '@schemora/storage';
 
 export function isolatedParse(filename: string, bytes: Uint8Array) {
@@ -93,6 +98,7 @@ export class Worker {
     );
     try {
       if (kind === 'delete_project') await this.deleteProject(job);
+      else if (kind === 'simulate_run') await this.settleSimulationUnavailable(job);
       else await this.processImport(job);
     } catch (error) {
       const code =
@@ -102,7 +108,12 @@ export class Worker {
       await this.repository.fail(
         job,
         code,
-        !['UNSUPPORTED_OR_INVALID_SOURCE', 'INVALID_PROCESSOR_OUTPUT'].includes(code),
+        ![
+          'UNSUPPORTED_OR_INVALID_SOURCE',
+          'INVALID_PROCESSOR_OUTPUT',
+          'INVALID_JOB_PAYLOAD',
+          'SIMULATION_RUN_NOT_FOUND',
+        ].includes(code),
       );
     } finally {
       clearInterval(heartbeat);
@@ -125,6 +136,63 @@ export class Worker {
       }
     }
     return true;
+  }
+  async settleSimulationUnavailable(job: Job) {
+    if (job.kind !== 'simulate_run') throw new Error('INVALID_JOB_PAYLOAD');
+    const runId = job.payload.runId;
+    if (!runId) throw new Error('INVALID_JOB_PAYLOAD');
+
+    await this.repository.transaction(async (client) => {
+      const project = await this.repository.jobScope(client, job);
+      if (!project) return;
+
+      const selected = await client.query<{
+        status: string;
+        binding: unknown;
+      }>('SELECT status,binding FROM simulation_runs WHERE id=$1 AND project_id=$2 FOR UPDATE', [
+        runId,
+        job.project_id,
+      ]);
+      const stored = selected.rows[0];
+      if (!stored) throw new Error('SIMULATION_RUN_NOT_FOUND');
+
+      const completeJob = project.status === 'active' ? 'completed' : 'cancelled';
+      if (stored.status !== 'queued') {
+        await client.query(
+          "UPDATE jobs SET status=$3,payload='{}'::jsonb,lease_until=NULL,lease_token=NULL,error_code=NULL WHERE id=$1 AND lease_token=$2 AND status='running'",
+          [job.id, job.lease_token, completeJob],
+        );
+        return;
+      }
+
+      const binding = simulationBindingSchema.parse(stored.binding);
+      const unavailable = unavailableSimulationRun({
+        runId,
+        binding,
+        reason: 'No approved simulation provider is configured.',
+      });
+      const terminalRun =
+        project.status === 'active'
+          ? unavailable
+          : simulationRunSchema.parse({
+              ...unavailable,
+              status: 'cancelled',
+              failure: {
+                code: 'CANCELLED',
+                message: 'Run cancelled because the project is no longer active.',
+              },
+              simulatedDurationMs: 0,
+            });
+
+      await client.query(
+        "UPDATE simulation_runs SET status=$3,run=$4::jsonb,updated_at=now() WHERE id=$1 AND project_id=$2 AND status='queued'",
+        [runId, job.project_id, terminalRun.status, JSON.stringify(terminalRun)],
+      );
+      await client.query(
+        "UPDATE jobs SET status=$3,payload='{}'::jsonb,lease_until=NULL,lease_token=NULL,error_code=NULL WHERE id=$1 AND lease_token=$2 AND status='running'",
+        [job.id, job.lease_token, completeJob],
+      );
+    });
   }
   async processImport(job: Job) {
     if (!job.payload.importId) throw new Error('INVALID_JOB_PAYLOAD');
@@ -280,8 +348,13 @@ export class Worker {
       const project = await this.repository.jobScope(client, job);
       if (!project || project.status !== 'deleting') return;
       await client.query('DELETE FROM reviews WHERE project_id=$1', [job.project_id]);
+      await client.query('DELETE FROM simulation_runs WHERE project_id=$1', [job.project_id]);
       await client.query('DELETE FROM firmware_reviews WHERE project_id=$1', [job.project_id]);
       await client.query('DELETE FROM firmware_artifacts WHERE project_id=$1', [job.project_id]);
+      await client.query('DELETE FROM validation_reports WHERE project_id=$1', [job.project_id]);
+      await client.query('DELETE FROM circuit_graph_snapshots WHERE project_id=$1', [
+        job.project_id,
+      ]);
       await client.query('DELETE FROM revisions WHERE project_id=$1', [job.project_id]);
       await client.query('DELETE FROM imports WHERE project_id=$1', [job.project_id]);
       await client.query('DELETE FROM import_artifacts WHERE project_id=$1', [job.project_id]);
@@ -296,7 +369,7 @@ export class Worker {
         [job.project_id],
       );
       await client.query(
-        "UPDATE jobs SET status=CASE WHEN id=$2 THEN 'completed' ELSE 'cancelled' END,payload='{}'::jsonb,lease_until=NULL WHERE project_id=$1",
+        "UPDATE jobs SET status=CASE WHEN id=$2 THEN 'completed' ELSE 'cancelled' END,payload='{}'::jsonb,lease_until=NULL,lease_token=NULL WHERE project_id=$1",
         [job.project_id, job.id],
       );
       await client.query(

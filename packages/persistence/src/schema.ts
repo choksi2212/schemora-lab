@@ -1,4 +1,15 @@
-import { pgTable, text, uuid, integer, timestamp, jsonb, primaryKey } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import {
+  pgTable,
+  text,
+  uuid,
+  integer,
+  timestamp,
+  jsonb,
+  primaryKey,
+  uniqueIndex,
+  index,
+} from 'drizzle-orm/pg-core';
 
 export const principals = pgTable('principals', {
   id: text('id').primaryKey(),
@@ -122,3 +133,32 @@ export const firmwareReviews = pgTable('firmware_reviews', {
   reason: text('reason'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
 });
+export const simulationRuns = pgTable(
+  'simulation_runs',
+  {
+    id: uuid('id').notNull(),
+    projectId: uuid('project_id').notNull(),
+    actorId: text('actor_id').notNull(),
+    projectRevision: integer('project_revision').notNull(),
+    graphSnapshotId: uuid('graph_snapshot_id').notNull(),
+    validationReportId: uuid('validation_report_id').notNull(),
+    firmwareArtifactId: uuid('firmware_artifact_id').notNull(),
+    firmwareReviewRevision: integer('firmware_review_revision').notNull(),
+    binding: jsonb('binding').notNull(),
+    bindingDigest: text('binding_digest').notNull(),
+    requestDigest: text('request_digest').notNull(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    status: text('status').notNull(),
+    run: jsonb('run').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projectId, table.id] }),
+    uniqueIndex('simulation_runs_project_idempotency').on(table.projectId, table.idempotencyKey),
+    index('simulation_runs_project_latest').on(table.projectId, table.createdAt, table.id),
+    index('simulation_runs_active')
+      .on(table.projectId, table.status, table.createdAt)
+      .where(sql`${table.status} IN ('queued','preparing','running','stopping')`),
+  ],
+);

@@ -21,6 +21,7 @@ const parsed = z
     WORKER_LEASE_SECONDS: z.coerce.number().int().min(120).max(600).default(120),
     WORKER_PROCESS_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(1),
     WORKER_DELETE_CONCURRENCY: z.coerce.number().int().min(1).max(4).default(1),
+    WORKER_SIMULATION_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(1),
     DATABASE_POOL_SIZE: z.coerce.number().int().min(1).max(50).default(10),
     JOB_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
   })
@@ -73,7 +74,7 @@ for (const signal of ['SIGINT', 'SIGTERM'])
   process.once(signal, () => {
     stopping = true;
   });
-async function loop(kind: 'process_import' | 'delete_project') {
+async function loop(kind: 'process_import' | 'delete_project' | 'simulate_run') {
   while (!stopping) {
     try {
       if (!(await worker.tick(kind))) await delay(config.WORKER_POLL_MS);
@@ -86,5 +87,6 @@ async function loop(kind: 'process_import' | 'delete_project') {
 await Promise.all([
   ...Array.from({ length: config.WORKER_PROCESS_CONCURRENCY }, () => loop('process_import')),
   ...Array.from({ length: config.WORKER_DELETE_CONCURRENCY }, () => loop('delete_project')),
+  ...Array.from({ length: config.WORKER_SIMULATION_CONCURRENCY }, () => loop('simulate_run')),
 ]);
 await repository.pool.end();

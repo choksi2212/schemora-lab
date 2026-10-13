@@ -145,6 +145,9 @@ importers:
       '@schemora/persistence':
         specifier: workspace:*
         version: link:../../packages/persistence
+      '@schemora/simulation':
+        specifier: workspace:*
+        version: link:../../packages/simulation
       '@schemora/storage':
         specifier: workspace:*
         version: link:../../packages/storage

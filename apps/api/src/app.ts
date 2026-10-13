@@ -2,6 +2,7 @@ import Fastify, { type FastifyRequest } from 'fastify';
 import { jwtVerify } from 'jose';
 import { z, ZodError } from 'zod';
 import { randomUUID } from 'node:crypto';
+import { canonicalDigest } from '@schemora/assembly-plan';
 import { currentCatalogRelease } from './catalog.js';
 import {
   Repository,
@@ -9,12 +10,18 @@ import {
   publicFirmwareArtifact,
   publicImport,
   publicReview,
+  requestDigest,
 } from '@schemora/persistence';
 import { MAX_SOURCE_BYTES, type PrivateStorage } from '@schemora/storage';
-import { MAX_FIRMWARE_ARTIFACT_BYTES } from '@schemora/simulation';
+import {
+  MAX_FIRMWARE_ARTIFACT_BYTES,
+  firmwareArtifactRefSchema,
+  simulationBindingSchema,
+  simulationRunSchema,
+} from '@schemora/simulation';
 import { circuitGraphSchema, validateCircuitGraph } from '@schemora/circuit-model';
 import { getCatalogRelease } from '@schemora/catalog';
-import { validateCircuit } from '@schemora/validation';
+import { validateCircuit, validationReportSchema } from '@schemora/validation';
 import { AssemblyPlanBlockedError, generateAssemblyPlan } from '@schemora/assembly-plan';
 import type { ApiConfig } from './config.js';
 
@@ -23,7 +30,10 @@ const expectedRevision = z.number().int().positive();
 const scope = z.object({ projectId: uuid });
 const importScope = scope.extend({ importId: uuid });
 const firmwareArtifactScope = scope.extend({ artifactId: uuid });
+const simulationRunScope = scope.extend({ runId: uuid });
 const mutation = z.object({ expectedRevision }).strict();
+const simulationRunCreateSchema = z.object({ expectedRevision, firmwareArtifactId: uuid }).strict();
+const emptyBodySchema = z.object({}).strict();
 const circuitGraphWrite = z.object({ expectedRevision, graph: circuitGraphSchema }).strict();
 const titleSchema = z.string().trim().min(1).max(120);
 const uploadSchema = z
@@ -103,6 +113,71 @@ const firmwareReviewSchema = z
   .strict();
 function key(request: FastifyRequest) {
   return uuid.parse(request.headers['idempotency-key']);
+}
+
+function decodeSimulationCursor(value: string | undefined) {
+  if (!value) return null;
+  try {
+    return z
+      .object({ createdAt: z.string().datetime(), id: uuid })
+      .strict()
+      .parse(JSON.parse(Buffer.from(value, 'base64url').toString('utf8')));
+  } catch {
+    throw new ZodError([
+      { code: 'custom', path: ['before'], message: 'Invalid simulation run cursor.' },
+    ]);
+  }
+}
+
+function simulationRunSummary(row: {
+  id: string;
+  status: string;
+  binding: unknown;
+  created_at: Date;
+  updated_at: Date;
+}) {
+  return {
+    id: row.id,
+    status: row.status,
+    binding: row.binding,
+    createdAt: row.created_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
+  };
+}
+
+type RepositoryClient = Parameters<Parameters<Repository['transaction']>[0]>[0];
+
+async function cancelQueuedSimulationRuns(
+  client: RepositoryClient,
+  projectId: string,
+  reason: string,
+) {
+  const queuedRuns = await client.query<{ id: string; run: unknown }>(
+    "SELECT id,run FROM simulation_runs WHERE project_id=$1 AND status='queued' FOR UPDATE",
+    [projectId],
+  );
+  for (const queuedRun of queuedRuns.rows) {
+    const run = simulationRunSchema.parse({
+      ...(queuedRun.run as object),
+      status: 'cancelled',
+      failure: { code: 'CANCELLED', message: reason },
+      simulatedDurationMs: 0,
+    });
+    await client.query(
+      "UPDATE simulation_runs SET status='cancelled',run=$3 WHERE project_id=$1 AND id=$2 AND status='queued'",
+      [projectId, queuedRun.id, JSON.stringify(run)],
+    );
+  }
+  const cancelledRunIds = queuedRuns.rows.map((item) => item.id);
+  if (!cancelledRunIds.length) return;
+  await client.query(
+    "UPDATE jobs SET status='cancelled',lease_token=NULL,lease_until=NULL WHERE project_id=$1 AND kind='simulate_run' AND payload->>'runId'=ANY($2::text[]) AND status='queued'",
+    [projectId, cancelledRunIds],
+  );
+  await client.query(
+    "UPDATE outbox SET delivered_at=COALESCE(delivered_at,now()) WHERE project_id=$1 AND kind='simulate_run' AND payload->>'runId'=ANY($2::text[]) AND delivered_at IS NULL",
+    [projectId, cancelledRunIds],
+  );
 }
 
 export function buildApp(config: ApiConfig, repository: Repository, storage: PrivateStorage) {
@@ -398,6 +473,340 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
     }
     return envelope(request, { plan, current: true });
   });
+  app.post('/v1/projects/:projectId/simulation-runs', async (request, reply) => {
+    const { projectId } = scope.parse(request.params);
+    const body = simulationRunCreateSchema.parse(request.body);
+    const principal = owner(request);
+    const idempotencyKey = key(request);
+    const requestBody = {
+      expectedRevision: body.expectedRevision,
+      firmwareArtifactId: body.firmwareArtifactId,
+    };
+    const fingerprint = requestDigest(requestBody);
+    const idempotencyScope = projectId + ':simulation_run_create';
+    const result = await repository.transaction(async (client) => {
+      const project = await repository.project(client, principal, projectId, true);
+      const replay = await repository.replay(
+        client,
+        principal,
+        idempotencyScope,
+        idempotencyKey,
+        fingerprint,
+      );
+      if (replay) return replay as { run: unknown };
+      if (project.status !== 'active') throw new RepositoryError('PROJECT_ARCHIVED', 409);
+      if (project.revision !== body.expectedRevision)
+        throw new RepositoryError('REVISION_CONFLICT', 409, project.revision);
+
+      const currentRevision = await client.query<{
+        snapshot: { circuitGraph?: { id: string; digest: string; revision: number } | null };
+      }>('SELECT snapshot FROM revisions WHERE project_id=$1 AND revision=$2', [
+        projectId,
+        project.revision,
+      ]);
+      const graphReference = currentRevision.rows[0]?.snapshot.circuitGraph;
+      if (!graphReference) throw new RepositoryError('VALIDATION_REQUIRED', 409, project.revision);
+      const graphResult = await client.query<{
+        id: string;
+        project_revision: number;
+        graph: unknown;
+        graph_digest: string;
+      }>(
+        'SELECT id,project_revision,graph,graph_digest FROM circuit_graph_snapshots WHERE project_id=$1 AND id=$2',
+        [projectId, graphReference.id],
+      );
+      const graphSnapshot = graphResult.rows[0];
+      if (
+        !graphSnapshot ||
+        graphReference.digest !== graphSnapshot.graph_digest ||
+        graphReference.revision !== graphSnapshot.project_revision
+      )
+        throw new RepositoryError('GRAPH_SNAPSHOT_CORRUPT', 500);
+      const graph = circuitGraphSchema.parse(graphSnapshot.graph);
+      const { release: catalog, sha256: catalogDigest } = currentCatalogRelease();
+      if (
+        graph.projectId !== projectId ||
+        graph.catalogReleaseId !== catalog.releaseId ||
+        graph.projectRevision !== graphSnapshot.project_revision ||
+        canonicalDigest(graph) !== graphSnapshot.graph_digest ||
+        !validateCircuitGraph(graph, { release: catalog }).valid
+      )
+        throw new RepositoryError('VALIDATION_REQUIRED', 409, project.revision);
+
+      const validationResult = await client.query<{
+        id: string;
+        report: unknown;
+        report_digest: string;
+      }>(
+        'SELECT id,report,report_digest FROM validation_reports WHERE project_id=$1 AND graph_snapshot_id=$2 ORDER BY created_at DESC,id DESC LIMIT 1',
+        [projectId, graphSnapshot.id],
+      );
+      const validation = validationResult.rows[0];
+      if (!validation) throw new RepositoryError('VALIDATION_REQUIRED', 409, project.revision);
+      const report = validationReportSchema.parse(validation.report);
+      const recomputed = validateCircuit({ graph, catalog });
+      if (
+        canonicalDigest(report) !== validation.report_digest ||
+        canonicalDigest(report) !== canonicalDigest(recomputed) ||
+        report.projectId !== projectId ||
+        report.graphId !== graph.id ||
+        report.graphDigest !== graphSnapshot.graph_digest ||
+        report.catalogReleaseId !== catalog.releaseId ||
+        report.catalogDigest !== catalogDigest ||
+        !['pass', 'unknown'].includes(report.status) ||
+        report.findings.some((finding) => finding.status === 'fail' || finding.status === 'error')
+      )
+        throw new RepositoryError('VALIDATION_REQUIRED', 409, project.revision);
+
+      const firmwareResult = await client.query<{
+        id: string;
+        project_revision: number;
+        sha256: string;
+        byte_length: number;
+        language: 'c' | 'cpp' | 'arduino-cpp' | 'esp-idf-c';
+        entrypoint: string;
+        board_part_id: string;
+        catalog_release_id: string;
+        review_revision: number | null;
+        review_status: string | null;
+      }>(
+        `SELECT a.id,a.project_revision,a.sha256,a.byte_length,a.language,a.entrypoint,
+                a.board_part_id,a.catalog_release_id,latest.project_revision AS review_revision,
+                latest.decision AS review_status
+         FROM firmware_artifacts a
+         LEFT JOIN LATERAL (
+           SELECT project_revision,decision FROM firmware_reviews
+           WHERE project_id=a.project_id AND artifact_id=a.id
+           ORDER BY project_revision DESC LIMIT 1
+         ) latest ON true
+         WHERE a.project_id=$1 AND a.id=$2`,
+        [projectId, body.firmwareArtifactId],
+      );
+      const artifact = firmwareResult.rows[0];
+      if (!artifact || artifact.review_status !== 'accepted' || artifact.review_revision === null)
+        throw new RepositoryError('FIRMWARE_NOT_ACCEPTED', 409, project.revision);
+      const firmware = firmwareArtifactRefSchema.parse({
+        schemaVersion: 1,
+        artifactId: artifact.id,
+        projectId,
+        projectRevision: artifact.project_revision,
+        sha256: artifact.sha256,
+        byteLength: artifact.byte_length,
+        language: artifact.language,
+        entrypoint: artifact.entrypoint,
+        boardPartId: artifact.board_part_id,
+        catalogReleaseId: artifact.catalog_release_id,
+        reviewStatus: 'accepted',
+      });
+      const board = catalog.parts.find((part) => part.id === firmware.boardPartId);
+      if (
+        board?.category !== 'development-board' ||
+        firmware.catalogReleaseId !== catalog.releaseId ||
+        !graph.components.some((component) => component.catalogPartId === firmware.boardPartId)
+      )
+        throw new RepositoryError('FIRMWARE_TARGET_UNSUPPORTED', 409, project.revision);
+
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtext('schemora_simulation_queue_global'))",
+      );
+      const projectQueue = await client.query<{ count: number }>(
+        "SELECT count(*)::int AS count FROM simulation_runs WHERE project_id=$1 AND status IN ('queued','preparing','running','stopping')",
+        [projectId],
+      );
+      const globalQueue = await client.query<{ count: number }>(
+        "SELECT count(*)::int AS count FROM simulation_runs WHERE status IN ('queued','preparing','running','stopping')",
+      );
+      if (projectQueue.rows[0]!.count >= 3 || globalQueue.rows[0]!.count >= 100)
+        throw new RepositoryError('SIMULATION_QUEUE_FULL', 429);
+
+      const runId = randomUUID();
+      const binding = simulationBindingSchema.parse({
+        projectId,
+        projectRevision: graph.projectRevision,
+        graphId: graphSnapshot.id,
+        graphDigest: graphSnapshot.graph_digest,
+        catalogReleaseId: catalog.releaseId,
+        catalogDigest,
+        firmwareArtifactId: firmware.artifactId,
+        firmwareDigest: firmware.sha256,
+        adapterId: 'schemora.unconfigured',
+        adapterVersion: '0',
+        engineId: 'none',
+        engineVersion: '0',
+      });
+      const run = simulationRunSchema.parse({
+        schemaVersion: 1,
+        contractVersion: '1.0.0',
+        runId,
+        status: 'queued',
+        binding,
+        events: [],
+        unsupportedFeatures: [],
+        limitations: [
+          'No approved simulator is configured; this queued run will finish unavailable.',
+          ...(report.status === 'unknown'
+            ? [
+                'The current circuit report contains unknown checks; this record makes no safety claim.',
+              ]
+            : []),
+        ],
+        failure: null,
+        simulatedDurationMs: null,
+      });
+      const bindingDigest = canonicalDigest(binding);
+      await client.query(
+        `INSERT INTO simulation_runs(
+           id,project_id,actor_id,project_revision,graph_snapshot_id,validation_report_id,
+           firmware_artifact_id,firmware_review_revision,binding,binding_digest,status,run,
+           idempotency_key,request_digest
+         ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'queued',$11,$12,$13)`,
+        [
+          runId,
+          projectId,
+          principal,
+          graph.projectRevision,
+          graphSnapshot.id,
+          validation.id,
+          firmware.artifactId,
+          artifact.review_revision,
+          JSON.stringify(binding),
+          bindingDigest,
+          JSON.stringify(run),
+          idempotencyScope + ':' + idempotencyKey,
+          fingerprint,
+        ],
+      );
+      await repository.enqueue(client, projectId, 'simulate_run', { runId });
+      const response = { run };
+      await repository.remember(
+        client,
+        principal,
+        idempotencyScope,
+        idempotencyKey,
+        fingerprint,
+        response,
+      );
+      return response;
+    });
+    return reply.code(202).send(envelope(request, result));
+  });
+  app.get('/v1/projects/:projectId/simulation-runs', async (request) => {
+    const { projectId } = scope.parse(request.params);
+    const query = z
+      .object({ before: z.string().max(300).optional() })
+      .strict()
+      .parse(request.query);
+    const cursor = decodeSimulationCursor(query.before);
+    const items = await repository.transaction(async (client) => {
+      await repository.project(client, owner(request), projectId, 'share');
+      const result = await client.query<{
+        id: string;
+        status: string;
+        binding: unknown;
+        created_at: Date;
+        updated_at: Date;
+      }>(
+        `SELECT id,status,binding,created_at,updated_at FROM simulation_runs
+         WHERE project_id=$1 AND ($2::timestamptz IS NULL OR (created_at,id)<($2,$3::uuid))
+         ORDER BY created_at DESC,id DESC LIMIT 51`,
+        [projectId, cursor?.createdAt ?? null, cursor?.id ?? null],
+      );
+      return result.rows;
+    });
+    const page = items.slice(0, 50).map(simulationRunSummary);
+    const tail = items.slice(0, 50).at(-1);
+    return envelope(request, {
+      items: page,
+      nextCursor:
+        items.length > 50 && tail
+          ? Buffer.from(
+              JSON.stringify({ createdAt: tail.created_at.toISOString(), id: tail.id }),
+            ).toString('base64url')
+          : null,
+    });
+  });
+  app.get('/v1/projects/:projectId/simulation-runs/:runId', async (request) => {
+    const { projectId, runId } = simulationRunScope.parse(request.params);
+    return envelope(
+      request,
+      await repository.transaction(async (client) => {
+        await repository.project(client, owner(request), projectId, 'share');
+        const result = await client.query<{ run: unknown }>(
+          'SELECT run FROM simulation_runs WHERE project_id=$1 AND id=$2',
+          [projectId, runId],
+        );
+        if (!result.rows[0]) throw new RepositoryError('NOT_FOUND', 404);
+        return { run: simulationRunSchema.parse(result.rows[0].run) };
+      }),
+    );
+  });
+  app.post('/v1/projects/:projectId/simulation-runs/:runId/cancel', async (request) => {
+    const { projectId, runId } = simulationRunScope.parse(request.params);
+    emptyBodySchema.parse(request.body);
+    const principal = owner(request);
+    const idempotencyKey = key(request);
+    const fingerprint = requestDigest({ runId });
+    const idempotencyScope = projectId + ':simulation_run_cancel:' + runId;
+    const result = await repository.transaction(async (client) => {
+      await repository.project(client, principal, projectId, true);
+      const replay = await repository.replay(
+        client,
+        principal,
+        idempotencyScope,
+        idempotencyKey,
+        fingerprint,
+      );
+      if (replay) return replay as { run: unknown };
+      const selected = await client.query<{ run: unknown; status: string }>(
+        'SELECT run,status FROM simulation_runs WHERE project_id=$1 AND id=$2 FOR UPDATE',
+        [projectId, runId],
+      );
+      const stored = selected.rows[0];
+      if (!stored) throw new RepositoryError('NOT_FOUND', 404);
+      if (stored.status === 'cancelled') {
+        const response = { run: simulationRunSchema.parse(stored.run) };
+        await repository.remember(
+          client,
+          principal,
+          idempotencyScope,
+          idempotencyKey,
+          fingerprint,
+          response,
+        );
+        return response;
+      }
+      if (stored.status !== 'queued') throw new RepositoryError('INVALID_SIMULATION_STATE', 409);
+      const run = simulationRunSchema.parse({
+        ...(stored.run as object),
+        status: 'cancelled',
+        failure: { code: 'CANCELLED', message: 'Run cancelled before execution.' },
+        simulatedDurationMs: 0,
+      });
+      await client.query(
+        "UPDATE simulation_runs SET status='cancelled',run=$3 WHERE project_id=$1 AND id=$2 AND status='queued'",
+        [projectId, runId, JSON.stringify(run)],
+      );
+      await client.query(
+        "UPDATE jobs SET status='cancelled',lease_token=NULL,lease_until=NULL WHERE project_id=$1 AND kind='simulate_run' AND payload->>'runId'=$2 AND status='queued'",
+        [projectId, runId],
+      );
+      await client.query(
+        "UPDATE outbox SET delivered_at=COALESCE(delivered_at,now()) WHERE project_id=$1 AND kind='simulate_run' AND payload->>'runId'=$2 AND delivered_at IS NULL",
+        [projectId, runId],
+      );
+      const response = { run };
+      await repository.remember(
+        client,
+        principal,
+        idempotencyScope,
+        idempotencyKey,
+        fingerprint,
+        response,
+      );
+      return response;
+    });
+    return envelope(request, result);
+  });
   app.patch('/v1/projects/:projectId', async (request) => {
     const { projectId } = scope.parse(request.params);
     const body = z.object({ expectedRevision, title: titleSchema }).strict().parse(request.body);
@@ -439,6 +848,11 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
             "UPDATE jobs SET status='cancelled' WHERE project_id=$1 AND kind='process_import' AND status IN ('queued','running')",
             [projectId],
           );
+          await cancelQueuedSimulationRuns(
+            client,
+            projectId,
+            'Project archived before simulation began.',
+          );
           return {};
         },
       ),
@@ -461,6 +875,11 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
           await client.query(
             "UPDATE jobs SET status='cancelled' WHERE project_id=$1 AND kind='process_import' AND status IN ('queued','running')",
             [projectId],
+          );
+          await cancelQueuedSimulationRuns(
+            client,
+            projectId,
+            'Project deletion began before simulation.',
           );
           await repository.enqueue(client, projectId, 'delete_project', {});
           return {};

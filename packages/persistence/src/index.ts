@@ -43,8 +43,8 @@ export interface ReviewRow extends QueryResultRow {
 export interface Job extends QueryResultRow {
   id: string;
   project_id: string;
-  kind: 'process_import' | 'delete_project';
-  payload: { importId?: string };
+  kind: 'process_import' | 'delete_project' | 'simulate_run';
+  payload: { importId?: string; runId?: string };
   lease_token: string;
   attempts: number;
 }
@@ -911,6 +911,22 @@ export class Repository {
           [job.payload.importId, job.project_id, retry ? 'queued' : 'failed', retry ? null : code],
         );
       }
+      if (
+        job.payload.runId &&
+        !retry &&
+        project.status !== 'deleting' &&
+        project.status !== 'deleted'
+      ) {
+        await client.query(
+          `UPDATE simulation_runs
+          SET status='failed',
+              run=jsonb_set(jsonb_set(jsonb_set(run,'{status}','"failed"'::jsonb),
+                '{failure}','{"code":"ENGINE_FAILED","message":"Simulation worker attempts exhausted."}'::jsonb),
+                '{simulatedDurationMs}','0'::jsonb)
+          WHERE project_id=$1 AND id=$2 AND status IN ('queued','preparing','running','stopping')`,
+          [job.project_id, job.payload.runId],
+        );
+      }
     });
   }
   async reapExpired() {
@@ -920,6 +936,18 @@ export class Repository {
     );
     await this.pool.query(
       "UPDATE imports i SET status='failed',error_code='RETRY_EXHAUSTED' WHERE status='processing' AND EXISTS(SELECT 1 FROM jobs j WHERE j.payload->>'importId'=i.id::text AND j.status='failed' AND j.error_code='RETRY_EXHAUSTED') AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.payload->>'importId'=i.id::text AND j.status IN ('queued','running'))",
+    );
+    await this.pool.query(
+      `UPDATE simulation_runs r
+      SET status='failed',
+          run=jsonb_set(jsonb_set(jsonb_set(r.run,'{status}','"failed"'::jsonb),
+            '{failure}','{"code":"ENGINE_FAILED","message":"Simulation worker attempts exhausted."}'::jsonb),
+            '{simulatedDurationMs}','0'::jsonb)
+      FROM jobs j, projects p
+      WHERE j.project_id=r.project_id AND j.payload->>'runId'=r.id::text
+        AND p.id=r.project_id AND p.status NOT IN ('deleting','deleted')
+        AND j.status='failed' AND j.error_code='RETRY_EXHAUSTED'
+        AND r.status IN ('queued','preparing','running','stopping')`,
     );
   }
 }

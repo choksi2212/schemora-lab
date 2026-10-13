@@ -13,6 +13,7 @@
     "@schemora/contracts": "workspace:*",
     "@schemora/intelligence": "workspace:*",
     "@schemora/persistence": "workspace:*",
+    "@schemora/simulation": "workspace:*",
     "@schemora/storage": "workspace:*",
     "zod": "4.3.6",
     "tsx": "4.20.6"

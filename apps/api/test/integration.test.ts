@@ -80,6 +80,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       await app.close();
       await repository.transaction(async (client) => {
         for (const table of [
+          'simulation_runs',
           'upload_intents',
           'firmware_reviews',
           'firmware_artifacts',
@@ -415,6 +416,156 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
           })
         ).status,
       ).toBe(409);
+    });
+    it('creates an immutable, idempotent simulation request and cancels it while queued', async () => {
+      const project = await create();
+      const catalog = getCatalogRelease();
+      const graph = {
+        schemaVersion: 1 as const,
+        id: 'phase6_integration_graph',
+        projectId: project.id,
+        projectRevision: project.revision + 1,
+        catalogReleaseId: catalog.releaseId,
+        components: [
+          { id: 'board_1', catalogPartId: 'board.espressif.esp32-devkitc-v4.wroom-32e.male' },
+          { id: 'resistor_1', catalogPartId: 'resistor.yageo.cfr-25jb-52-220r' },
+          { id: 'led_1', catalogPartId: 'led.kingbright.wp7113id' },
+        ],
+        breadboards: [],
+        terminalPlacements: [],
+        wires: [
+          {
+            id: 'wire_gpio_resistor',
+            source: {
+              kind: 'terminal' as const,
+              terminal: { componentInstanceId: 'board_1', catalogTerminalId: 'gpio19' },
+            },
+            target: {
+              kind: 'terminal' as const,
+              terminal: { componentInstanceId: 'resistor_1', catalogTerminalId: 'lead-a' },
+            },
+          },
+          {
+            id: 'wire_resistor_led',
+            source: {
+              kind: 'terminal' as const,
+              terminal: { componentInstanceId: 'resistor_1', catalogTerminalId: 'lead-b' },
+            },
+            target: {
+              kind: 'terminal' as const,
+              terminal: { componentInstanceId: 'led_1', catalogTerminalId: 'anode' },
+            },
+          },
+          {
+            id: 'wire_led_ground',
+            source: {
+              kind: 'terminal' as const,
+              terminal: { componentInstanceId: 'led_1', catalogTerminalId: 'cathode' },
+            },
+            target: {
+              kind: 'terminal' as const,
+              terminal: { componentInstanceId: 'board_1', catalogTerminalId: 'gnd-j3-1' },
+            },
+          },
+        ],
+      };
+      const saved = await request('PUT', '/v1/projects/' + project.id + '/circuit', {
+        expectedRevision: project.revision,
+        graph,
+      });
+      expect(saved.status).toBe(200);
+      const validation = await request('POST', '/v1/projects/' + project.id + '/circuit/validate', {
+        expectedRevision: saved.data.project.revision,
+      });
+      expect(validation.status).toBe(200);
+      expect(validation.data.current).toBe(true);
+      expect(['pass', 'unknown']).toContain(validation.data.report.report.status);
+
+      const uploaded = await request('POST', '/v1/projects/' + project.id + '/firmware-artifacts', {
+        expectedRevision: saved.data.project.revision,
+        language: 'arduino-cpp',
+        entrypoint: 'main.cpp',
+        contentBase64: Buffer.from('void setup() {}\nvoid loop() {}\n').toString('base64'),
+      });
+      expect(uploaded.status).toBe(201);
+      const accepted = await request(
+        'POST',
+        '/v1/projects/' +
+          project.id +
+          '/firmware-artifacts/' +
+          uploaded.data.artifact.id +
+          '/reviews',
+        {
+          expectedRevision: uploaded.data.project.revision,
+          decision: 'accepted',
+          reason: 'Accepted for the Phase 6 run lifecycle integration test.',
+        },
+      );
+      expect(accepted.status).toBe(200);
+
+      const runKey = randomUUID();
+      const runUrl = '/v1/projects/' + project.id + '/simulation-runs';
+      const payload = {
+        expectedRevision: accepted.data.project.revision,
+        firmwareArtifactId: uploaded.data.artifact.id,
+      };
+      const created = await request('POST', runUrl, payload, tokenA, runKey);
+      expect(created.status).toBe(202);
+      expect(created.data.run.status).toBe('queued');
+      expect(created.data.run.binding).toMatchObject({
+        graphId: saved.data.graphSnapshot.id,
+        graphDigest: saved.data.graphSnapshot.graphDigest,
+        firmwareArtifactId: uploaded.data.artifact.id,
+        adapterId: 'schemora.unconfigured',
+        adapterVersion: '0',
+        engineId: 'none',
+        engineVersion: '0',
+      });
+      const replay = await request('POST', runUrl, payload, tokenA, runKey);
+      expect(replay.status).toBe(202);
+      expect(replay.data.run.runId).toBe(created.data.run.runId);
+      const collision = await request(
+        'POST',
+        runUrl,
+        { ...payload, firmwareArtifactId: randomUUID() },
+        tokenA,
+        runKey,
+      );
+      expect(collision.status).toBe(409);
+
+      const listed = await request('GET', runUrl);
+      expect(listed.status).toBe(200);
+      expect(listed.data.items).toContainEqual(
+        expect.objectContaining({ id: created.data.run.runId, status: 'queued' }),
+      );
+      expect(
+        (await request('GET', runUrl + '/' + created.data.run.runId, undefined, tokenB)).status,
+      ).toBe(404);
+
+      const cancelUrl = runUrl + '/' + created.data.run.runId + '/cancel';
+      const cancelled = await request('POST', cancelUrl, {}, tokenA);
+      expect(cancelled.status).toBe(200);
+      expect(cancelled.data.run.status).toBe('cancelled');
+      const cancelReplay = await request('POST', cancelUrl, {}, tokenA, randomUUID());
+      expect(cancelReplay.data.run.status).toBe('cancelled');
+
+      const workerRun = await request('POST', runUrl, payload, tokenA, randomUUID());
+      expect(workerRun.status).toBe(202);
+      expect(await worker.tick('simulate_run')).toBe(true);
+      const unavailableRun = await request('GET', runUrl + '/' + workerRun.data.run.runId);
+      expect(unavailableRun.status).toBe(200);
+      expect(unavailableRun.data.run.status).toBe('unsupported');
+      expect(unavailableRun.data.run.failure.code).toBe('SIMULATOR_UNAVAILABLE');
+      expect(unavailableRun.data.run.events).toEqual([]);
+
+      const queuedBeforeArchive = await request('POST', runUrl, payload, tokenA, randomUUID());
+      expect(queuedBeforeArchive.status).toBe(202);
+      const archived = await request('POST', '/v1/projects/' + project.id + '/archive', {
+        expectedRevision: accepted.data.project.revision,
+      });
+      expect(archived.status).toBe(200);
+      const archivedRun = await request('GET', runUrl + '/' + queuedBeforeArchive.data.run.runId);
+      expect(archivedRun.data.run.status).toBe('cancelled');
     });
     it('revokes access before purge, replays deletion and removes private content', async () => {
       const project = await create();
