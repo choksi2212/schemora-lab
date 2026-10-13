@@ -28,6 +28,12 @@ export const firmwareCompilerProfileSchema = z
           .min(512 * 1024 ** 2)
           .max(8 * 1024 ** 3),
         cpuCount: z.number().positive().max(8),
+        pids: z.number().int().min(16).max(256),
+        workspaceBytes: z
+          .number()
+          .int()
+          .min(64 * 1024 ** 2)
+          .max(2 * 1024 ** 3),
         outputBytes: z
           .number()
           .int()

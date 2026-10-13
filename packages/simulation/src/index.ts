@@ -29,6 +29,12 @@ export {
   type FirmwareCompileResult,
   type FirmwareCompilerProfile,
 } from './firmware-compiler-profile.js';
+export {
+  compileFirmwareProject,
+  type FirmwareCompileArtifacts,
+  type FirmwareCompilerSandbox,
+  type FirmwareCompilerSandboxOutput,
+} from './firmware-compiler.js';
 
 export { mapEsp32Gpio19ToLedState } from './adapters/esp32-gpio19-led.js';
 export type { Esp32Gpio19Signal, LedStateMapping } from './adapters/esp32-gpio19-led.js';
