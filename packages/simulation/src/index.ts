@@ -17,6 +17,18 @@ import {
   firmwareProjectTargetSchema,
   verifyFirmwareProjectBundleSources,
 } from './firmware-project-bundle.js';
+export {
+  firmwareCompileArtifactSchema,
+  firmwareCompileDiagnosticSchema,
+  firmwareCompileResultSchema,
+  firmwareCompilerProfileDigest,
+  firmwareCompilerProfileSchema,
+  firmwareCompileResultMatchesProfile,
+  type FirmwareCompileArtifact,
+  type FirmwareCompileDiagnostic,
+  type FirmwareCompileResult,
+  type FirmwareCompilerProfile,
+} from './firmware-compiler-profile.js';
 
 export { mapEsp32Gpio19ToLedState } from './adapters/esp32-gpio19-led.js';
 export type { Esp32Gpio19Signal, LedStateMapping } from './adapters/esp32-gpio19-led.js';
