@@ -40,6 +40,104 @@
   display: grid;
   gap: 1rem;
 }
+.firmwarePanel {
+  display: grid;
+  gap: 1rem;
+}
+.firmwareGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(18rem, 0.8fr);
+  gap: 1rem;
+  align-items: start;
+}
+.firmwareEditor,
+.firmwareVersions,
+.runRecord {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--line, #dfe5de);
+  border-radius: 0.75rem;
+}
+.firmwareFields {
+  display: grid;
+  grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.25fr);
+  gap: 0.75rem;
+}
+.firmwareFields input,
+.firmwareFields select,
+.firmwareVersions select,
+.firmwareVersions textarea {
+  width: 100%;
+}
+.monacoEditor {
+  width: 100%;
+  border: 1px solid var(--line, #dfe5de);
+  border-radius: 0.55rem;
+  overflow: hidden;
+}
+.editorLoading {
+  display: grid;
+  min-height: 24rem;
+  place-items: center;
+  color: var(--muted, #65716f);
+  background: #17211e;
+}
+.firmwareActions,
+.runControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.firmwareMetadata {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+}
+.firmwareMetadata > div {
+  display: grid;
+  grid-template-columns: minmax(7rem, 0.55fr) minmax(0, 1fr);
+  gap: 0.7rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid var(--line, #dfe5de);
+}
+.firmwareMetadata dt {
+  color: var(--muted, #65716f);
+}
+.firmwareMetadata dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.firmwareMetadata code {
+  font-size: 0.78rem;
+}
+.runControls {
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line, #dfe5de);
+}
+.runRecord h3 {
+  margin-top: 0.35rem;
+}
+.serialOutput {
+  max-height: 18rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.85rem;
+  border-radius: 0.55rem;
+  background: #17211e;
+  color: #e6f2e9;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font:
+    12px/1.55 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+}
 .summary {
   display: flex;
   justify-content: space-between;
@@ -218,11 +316,16 @@
   }
 }
 @media (max-width: 850px) {
-  .grid {
+  .grid,
+  .firmwareGrid {
     grid-template-columns: 1fr;
   }
 }
 @media (max-width: 560px) {
+  .firmwareFields,
+  .firmwareMetadata > div {
+    grid-template-columns: 1fr;
+  }
   .placement {
     grid-template-columns: 1fr;
   }

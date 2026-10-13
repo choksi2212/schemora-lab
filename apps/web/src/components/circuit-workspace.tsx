@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { api, friendlyError, type Project } from '@/lib/api';
 import { CircuitScene } from './circuit-scene';
+import { FirmwareWorkspace } from './firmware-workspace';
 import styles from './circuit-workspace.module.css';
 import type { AssemblyPlan } from '@schemora/assembly-plan';
 import {
@@ -95,7 +96,8 @@ type Report = {
   catalogReleaseId: string;
   projectRevision: number;
 };
-type GraphResponse = { project: Project; graphSnapshot: { graph: Graph } | null };
+type GraphSnapshot = { id: string; projectRevision: number; graphDigest: string; graph: Graph };
+type GraphResponse = { project: Project; graphSnapshot: GraphSnapshot | null };
 type ValidationResponse = { report: { report: Report } | null; current?: boolean };
 const starterParts = {
   board: 'board.espressif.esp32-devkitc-v4.wroom-32e.male',
@@ -160,6 +162,7 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
   const [project, setProject] = useState<Project | null>(null);
   const [catalog, setCatalog] = useState<Catalog['release'] | null>(null);
   const [graph, setGraph] = useState<Graph | null>(null);
+  const [graphDigest, setGraphDigest] = useState<string | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [isCurrent, setIsCurrent] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -195,6 +198,7 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
       setGraph(
         saved.graphSnapshot?.graph ?? starterGraph(projectId, p.project.revision, c.release),
       );
+      setGraphDigest(saved.graphSnapshot?.graphDigest ?? null);
       setUndoStack([]);
       setRedoStack([]);
       setDirty(!saved.graphSnapshot);
@@ -269,12 +273,13 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
     setMessage('');
     try {
       const payload = { ...graph, projectRevision: project.revision + 1 };
-      const result = await api<{ project: Project; graphSnapshot: { graph: Graph } }>(
+      const result = await api<{ project: Project; graphSnapshot: GraphSnapshot }>(
         `/projects/${projectId}/circuit`,
         { method: 'PUT', body: { expectedRevision: project.revision, graph: payload } },
       );
       setProject(result.project);
       setGraph(result.graphSnapshot.graph);
+      setGraphDigest(result.graphSnapshot.graphDigest);
       setDirty(false);
       setMessage('Circuit saved.');
       setReport(null);
@@ -418,6 +423,9 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
       </div>
     );
   const board = graph.components.find((item) => item.catalogPartId === starterParts.board);
+  const developmentBoards = graph.components.filter(
+    (component) => partMap.get(component.catalogPartId)?.category === 'development-board',
+  );
   const connectionRows = [
     {
       id: 'gpio-resistor',
@@ -508,6 +516,25 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
         graph={graph}
         onGraphChange={edit}
         currentGraphDigest={report && isCurrent && !dirty ? report.graphDigest : null}
+      />
+      <FirmwareWorkspace
+        project={project}
+        projectId={projectId}
+        graphRevision={graph.projectRevision}
+        graphDigest={graphDigest}
+        graphDirty={dirty}
+        validationReady={Boolean(
+          report &&
+          isCurrent &&
+          report.graphDigest === graphDigest &&
+          report.status !== 'fail' &&
+          report.status !== 'error' &&
+          !report.findings.some(
+            (finding) => finding.status === 'fail' || finding.status === 'error',
+          ),
+        )}
+        boardPartId={developmentBoards.length === 1 ? developmentBoards[0]!.catalogPartId : null}
+        onProjectChange={setProject}
       />
       <div className={styles.grid}>
         <section className="panel">
