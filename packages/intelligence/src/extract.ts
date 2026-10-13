@@ -62,6 +62,7 @@ function sourceDetails(
     const pair = value.match(/\b(?:connect|wire|attach)\s+(.+?)\s+to\s+(.+?)(?:[.!]\s*$|$)/i);
     const terminal = (label: string | undefined) =>
       label &&
+      label.trim().length <= 500 &&
       /(?:GPIO\s*\d+|GND|ground|\d(?:\.\d)?\s*V|anode|cathode|terminal\s*[ab12]|SDA|SCL|data|VCC)/i.test(
         label,
       )
@@ -78,21 +79,52 @@ export function extractCandidates(conversation: NormalizedConversation): Extract
   const candidates: Candidate[] = [];
   const conflicts: ExtractionResult['conflicts'] = [];
   const missingInformation: string[] = [];
+  const partialReasons = new Set<string>();
+  const candidatesByValue = new Map<string, Candidate>();
+  const addConflict = (candidateIds: string[], description: string): void => {
+    if (conflicts.length >= 200) {
+      partialReasons.add(
+        'The 200-conflict limit was reached; additional contradictions need transcript review.',
+      );
+      return;
+    }
+    if (candidateIds.length > 100)
+      partialReasons.add(
+        'A conflict has more than 100 alternatives; additional alternatives need transcript review.',
+      );
+    conflicts.push({
+      id: `conflict_${conflicts.length + 1}`,
+      candidateIds: candidateIds.slice(0, 100),
+      description,
+    });
+  };
   const add = (
     kind: Candidate['kind'],
     value: string,
     evidence: Evidence,
     uncertainty: string | null,
-  ): Candidate => {
-    const existing = candidates.find(
-      (c) =>
-        c.kind === kind &&
-        c.value.toLowerCase() === value.toLowerCase() &&
-        c.status === 'candidate',
-    );
-    if (existing) {
-      existing.evidence.push(evidence);
+  ): Candidate | null => {
+    const key = `${kind}:${value.toLowerCase()}`;
+    const existing = candidatesByValue.get(key);
+    if (existing?.status === 'candidate') {
+      if (existing.evidence.length < 100) existing.evidence.push(evidence);
+      else
+        partialReasons.add(
+          'The 100-evidence-per-candidate limit was reached; further mentions remain in the full transcript.',
+        );
       return existing;
+    }
+    if (candidates.length >= 2_000) {
+      partialReasons.add(
+        'The 2,000-candidate limit was reached; additional source instructions were not extracted.',
+      );
+      return null;
+    }
+    if (value.length > 20_000 || evidence.quote.length > 20_000) {
+      partialReasons.add(
+        'An instruction or code block exceeds the candidate text limit; review its complete content in the transcript.',
+      );
+      return null;
     }
     const candidate = candidateSchema.parse({
       id: `candidate_${candidates.length + 1}`,
@@ -105,6 +137,7 @@ export function extractCandidates(conversation: NormalizedConversation): Extract
       uncertainty,
     });
     candidates.push(candidate);
+    candidatesByValue.set(key, candidate);
     return candidate;
   };
   const wiring = new Map<string, Candidate>();
@@ -171,7 +204,7 @@ export function extractCandidates(conversation: NormalizedConversation): Extract
           )?.[0]
           ?.toLowerCase()
           .replace(/\s+/g, ' ');
-        if (target) {
+        if (target && connection) {
           const previous = wiring.get(target);
           if (previous && previous.id !== connection.id) {
             const previousPin = previous.value.match(/\bGPIO\s*(\d+)\b/i)?.[1];
@@ -181,11 +214,10 @@ export function extractCandidates(conversation: NormalizedConversation): Extract
                 previous.status = 'superseded';
                 connection.supersedes.push(previous.id);
               } else
-                conflicts.push({
-                  id: `conflict_${conflicts.length + 1}`,
-                  candidateIds: [previous.id, connection.id],
-                  description: `Different GPIO assignments for ${target}; the user must choose the intended instruction.`,
-                });
+                addConflict(
+                  [previous.id, connection.id],
+                  `Different GPIO assignments for ${target}; the user must choose the intended instruction.`,
+                );
             }
           }
           wiring.set(target, connection);
@@ -204,7 +236,14 @@ export function extractCandidates(conversation: NormalizedConversation): Extract
         { messageId: message.id, quote: body, start, end: start + body.length },
         'Imported code is untrusted and has not been compiled or checked against hardware.',
       );
-      if (candidate.kind === 'firmware') candidate.details.language = fence[2]!.trim() || null;
+      if (candidate?.kind === 'firmware') {
+        const language = fence[2]!.trim();
+        candidate.details.language = language.length <= 500 ? language || null : null;
+        if (language.length > 500)
+          partialReasons.add(
+            'An oversized code language marker was omitted; the original remains in the transcript.',
+          );
+      }
     }
   }
   const boards = candidates.filter((c) => c.kind === 'board' && c.status === 'candidate');
@@ -216,11 +255,10 @@ export function extractCandidates(conversation: NormalizedConversation): Extract
       'Confirm the exact board manufacturer, model, and revision. Board family alone is insufficient.',
     );
   if (boards.length > 1)
-    conflicts.push({
-      id: `conflict_${conflicts.length + 1}`,
-      candidateIds: boards.map((c) => c.id),
-      description: 'Multiple board identities were mentioned. Confirm the intended final board.',
-    });
+    addConflict(
+      boards.map((c) => c.id),
+      'Multiple board identities were mentioned. Confirm the intended final board.',
+    );
   if (
     candidates.some(
       (c) =>
@@ -240,10 +278,14 @@ export function extractCandidates(conversation: NormalizedConversation): Extract
   missingInformation.push(
     'Review every candidate before using it. This phase does not verify catalog compatibility or electrical safety.',
   );
+  missingInformation.push(...partialReasons);
   return validateExternalExtraction(conversation, {
     schemaVersion: 1,
     summary:
-      'Local rule extraction: source mentions and explicit wiring instructions for human review.',
+      'Local rule extraction: source mentions and explicit wiring instructions for human review.' +
+      (partialReasons.size
+        ? ' PARTIAL extraction: output limits were reached. The complete transcript is preserved; review omitted mentions and instructions before continuing.'
+        : ''),
     candidates,
     missingInformation,
     conflicts,

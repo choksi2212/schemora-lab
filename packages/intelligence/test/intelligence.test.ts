@@ -98,6 +98,48 @@ describe('28 synthetic hardware benchmark fixtures', () => {
 });
 
 describe('structured candidate details', () => {
+  it('bounds repeated evidence without losing the complete transcript', async () => {
+    const conversation = await parse(
+      Array.from({ length: 101 }, () => 'User: ESP32 LED').join('\n'),
+    );
+    const result = extractCandidates(conversation);
+    expect(conversation.messages).toHaveLength(101);
+    expect(result.candidates).toHaveLength(2);
+    expect(result.candidates.every((c) => c.evidence.length === 100)).toBe(true);
+    expect(result.summary).toContain('PARTIAL extraction');
+    expect(result.missingInformation.join(' ')).toContain('100-evidence-per-candidate');
+  });
+  it('bounds unique candidates and warns instead of failing an otherwise valid import', async () => {
+    const conversation = await parse(
+      Array.from({ length: 2001 }, (_, i) => `User: Do not use instruction ${i}.`).join('\n'),
+    );
+    const result = extractCandidates(conversation);
+    expect(conversation.messages).toHaveLength(2001);
+    expect(result.candidates).toHaveLength(2000);
+    expect(result.summary).toContain('PARTIAL extraction');
+    expect(result.missingInformation.join(' ')).toContain('2,000-candidate');
+    for (const c of result.candidates)
+      expect(c.evidence[0]!.quote).toBe(
+        conversation.messages.find((m) => m.id === c.evidence[0]!.messageId)!.content,
+      );
+  });
+  it('bounds contradiction output and preserves its source transcript', async () => {
+    const conversation = await parse(
+      Array.from({ length: 202 }, (_, i) => `User: Connect GPIO ${i} to LED anode.`).join('\n'),
+    );
+    const result = extractCandidates(conversation);
+    expect(result.conflicts).toHaveLength(200);
+    expect(result.missingInformation.join(' ')).toContain('200-conflict');
+    expect(conversation.messages).toHaveLength(202);
+  });
+  it('preserves oversized firmware in the transcript and reports its omission', async () => {
+    const body = 'x'.repeat(20001);
+    const conversation = await parse(`Assistant:\n~~~cpp\n${body}\n~~~`);
+    const result = extractCandidates(conversation);
+    expect(conversation.messages[0]!.codeBlocks[0]!.content).toBe(body);
+    expect(result.candidates).toHaveLength(0);
+    expect(result.summary).toContain('PARTIAL extraction');
+  });
   it('keeps unspecified model, quantity and resistance null', async () => {
     const r = extractCandidates(await parse('User: ESP32 with LED and resistor.'));
     const board = r.candidates.find((c) => c.kind === 'board')!;
