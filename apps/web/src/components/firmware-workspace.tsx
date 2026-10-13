@@ -952,8 +952,9 @@ export function FirmwareWorkspace({
       )}
       {bundleExecutionUnavailable && currentArtifact && (
         <p className="warning-notice">
-          ESP-IDF bundles are stored and reviewable, but the runner protocol cannot yet execute
-          multi-file bundles. This artifact cannot be submitted as a simulation run.
+          ESP-IDF bundles are stored and reviewable, and their request format is validated. This
+          artifact cannot be submitted yet because no isolated compiler and execution service is
+          connected to the worker.
         </p>
       )}
       {currentArtifact && !validationReady && (

@@ -65,13 +65,22 @@ export function firmwareCompileResultMatchesProfile(
 ): boolean {
   const result = firmwareCompileResultSchema.safeParse(resultInput);
   const profile = firmwareCompilerProfileSchema.safeParse(profileInput);
+  if (!result.success || !profile.success || !/^[a-f0-9]{64}$/.test(expectedSourceManifestDigest))
+    return false;
+  const value = result.data;
+  const limits = profile.data.limits;
+  const totalArtifactBytes = value.artifacts.reduce(
+    (total, artifact) => total + artifact.byteLength,
+    0,
+  );
   return (
-    result.success &&
-    profile.success &&
-    result.data.sourceManifestDigest === expectedSourceManifestDigest &&
-    result.data.profileDigest === firmwareCompilerProfileDigest(profile.data) &&
-    result.data.compilerVersion === profile.data.compilerVersion &&
-    result.data.imageDigest === profile.data.imageDigest
+    value.sourceManifestDigest === expectedSourceManifestDigest &&
+    value.profileDigest === firmwareCompilerProfileDigest(profile.data) &&
+    value.compilerVersion === profile.data.compilerVersion &&
+    value.imageDigest === profile.data.imageDigest &&
+    value.durationMs <= limits.wallTimeoutMs &&
+    totalArtifactBytes <= limits.outputBytes &&
+    (value.status !== 'succeeded' || !value.diagnostics.some((item) => item.severity === 'error'))
   );
 }
 
@@ -172,6 +181,15 @@ export const firmwareCompileResultSchema = z
         code: 'custom',
         path: ['diagnostics'],
         message: 'A failed build must include at least one normalized error diagnostic.',
+      });
+    if (
+      result.status === 'succeeded' &&
+      result.diagnostics.some((diagnostic) => diagnostic.severity === 'error')
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['diagnostics'],
+        message: 'A successful build cannot contain error diagnostics.',
       });
     if (new TextEncoder().encode(JSON.stringify(result)).byteLength > 4 * 1024 * 1024)
       ctx.addIssue({
