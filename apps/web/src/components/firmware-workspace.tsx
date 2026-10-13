@@ -23,6 +23,11 @@ type Artifact = {
   projectRevision: number;
   sha256: string;
   byteLength: number;
+  bundleDigest?: string | null;
+  totalByteLength?: number | null;
+  buildSystem?: 'arduino-cli' | 'esp-idf' | null;
+  target?: { kind: string; target?: string; fqbn?: string } | null;
+  files?: { path: string; sha256: string; byteLength: number; isEntrypoint: boolean }[];
   language: FirmwareLanguage;
   entrypoint: string;
   boardPartId: string;
@@ -75,9 +80,25 @@ const languageDefaults: Record<FirmwareLanguage, { entrypoint: string; label: st
   'esp-idf-c': { entrypoint: 'src/main.c', label: 'ESP-IDF C' },
 };
 const maxFirmwareBytes = 2_000_000;
+const maxBundleBytes = 8_000_000;
+const maxBundleFiles = 128;
+const safeBundlePath = (path: string) =>
+  Boolean(
+    path &&
+    new TextEncoder().encode(path).byteLength <= 240 &&
+    path.normalize('NFC') === path &&
+    !path.startsWith('/') &&
+    !path.includes('\\') &&
+    !/^[A-Za-z]:/.test(path) &&
+    !/[\u0000-\u001f\u007f]/.test(path) &&
+    !path.split('/').some((part) => !part || part === '.' || part === '..'),
+  );
 
 function encodeBase64(value: string) {
-  const bytes = new TextEncoder().encode(value);
+  return encodeBase64Bytes(new TextEncoder().encode(value));
+}
+
+function encodeBase64Bytes(bytes: Uint8Array) {
   let binary = '';
   for (let start = 0; start < bytes.length; start += 8192)
     binary += String.fromCharCode(...bytes.subarray(start, start + 8192));
@@ -115,6 +136,10 @@ export function FirmwareWorkspace({
   const [language, setLanguage] = useState<FirmwareLanguage>('arduino-cpp');
   const [entrypoint, setEntrypoint] = useState(languageDefaults['arduino-cpp'].entrypoint);
   const [source, setSource] = useState('');
+  const [authoringMode, setAuthoringMode] = useState<'single' | 'esp-idf'>('single');
+  const [bundleFiles, setBundleFiles] = useState<{ path: string; source: string }[]>([]);
+  const [activeBundlePath, setActiveBundlePath] = useState('');
+  const [newFilePath, setNewFilePath] = useState('main/extra.c');
   const [reason, setReason] = useState('');
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [run, setRun] = useState<StoredRun | null>(null);
@@ -140,6 +165,7 @@ export function FirmwareWorkspace({
     [currentArtifact, association, graphDigest, graphRevision, graphDirty],
   );
   const entrypointError = firmwareEntrypointError(language, entrypoint);
+  const bundleExecutionUnavailable = currentArtifact?.buildSystem === 'esp-idf';
   const refreshArtifacts = useCallback(async () => {
     const result = await api<ArtifactList>(`/projects/${projectId}/firmware-artifacts`);
     setArtifacts(result.items);
@@ -194,17 +220,66 @@ export function FirmwareWorkspace({
     let active = true;
     setLanguage(currentArtifact.language);
     setEntrypoint(currentArtifact.entrypoint);
+    setActiveBundlePath(currentArtifact.entrypoint);
     setReason(currentArtifact.reviewReason ?? '');
     setContentBusy(true);
-    void fetch(
-      `/api/backend/v1/projects/${encodeURIComponent(projectId)}/firmware-artifacts/${encodeURIComponent(currentArtifact.id)}/content`,
-      { cache: 'no-store', credentials: 'same-origin' },
-    )
-      .then(async (response) => {
+    void (async () => {
+      const prefix = `/api/backend/v1/projects/${encodeURIComponent(projectId)}/firmware-artifacts/${encodeURIComponent(currentArtifact.id)}`;
+      if (currentArtifact.buildSystem === 'esp-idf') {
+        const fileList = await api<{
+          items: { path: string; isEntrypoint: boolean; sha256: string; byteLength: number }[];
+        }>(
+          `/projects/${encodeURIComponent(projectId)}/firmware-artifacts/${encodeURIComponent(currentArtifact.id)}/files`,
+        );
+        const loaded = await Promise.all(
+          fileList.items.map(async (file) => {
+            const query = new URLSearchParams({ path: file.path });
+            const response = await fetch(`${prefix}/files/content?${query}`, {
+              cache: 'no-store',
+              credentials: 'same-origin',
+            });
+            if (!response.ok) throw new Error(`Saved file ${file.path} could not be loaded.`);
+            const bytes = new Uint8Array(await response.arrayBuffer());
+            if (
+              !bytes.length ||
+              bytes.length !== file.byteLength ||
+              bytes.length > maxFirmwareBytes
+            )
+              throw new Error(`Saved file ${file.path} exceeds the supported editor size.`);
+            const digestBytes = new Uint8Array(
+              await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer),
+            );
+            const digest = Array.from(digestBytes, (byte) =>
+              byte.toString(16).padStart(2, '0'),
+            ).join('');
+            if (digest !== file.sha256)
+              throw new Error(`Saved file ${file.path} failed its integrity check.`);
+            const value = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+            return { path: file.path, source: value };
+          }),
+        );
+        if (active) {
+          setAuthoringMode('esp-idf');
+          setBundleFiles(loaded);
+          setActiveBundlePath(currentArtifact.entrypoint);
+          setSource(loaded.find((file) => file.path === currentArtifact.entrypoint)?.source ?? '');
+        }
+      } else {
+        const response = await fetch(`${prefix}/content`, {
+          cache: 'no-store',
+          credentials: 'same-origin',
+        });
         if (!response.ok) throw new Error('Saved source could not be loaded.');
-        const value = await response.text();
-        if (active) setSource(value);
-      })
+        const value = new TextDecoder('utf-8', { fatal: true }).decode(
+          await response.arrayBuffer(),
+        );
+        if (active) {
+          setAuthoringMode('single');
+          setBundleFiles([]);
+          setSource(value);
+        }
+      }
+    })()
       .catch((cause: unknown) => {
         if (active) setError(friendlyError(cause));
       })
@@ -290,6 +365,95 @@ export function FirmwareWorkspace({
     }
   }
 
+  async function saveBundleVersion() {
+    if (busy || contentBusy || graphDirty || !graphDigest || !boardPartId) return;
+    const normalized = bundleFiles.map((file) => ({ path: file.path.trim(), source: file.source }));
+    if (normalized.length < 3 || normalized.length > maxBundleFiles) {
+      setError('An ESP-IDF project needs at least three files and may contain at most 128 files.');
+      return;
+    }
+    const paths = normalized.map((file) => file.path);
+    if (
+      normalized.some((file) => !safeBundlePath(file.path)) ||
+      new Set(paths.map((p) => p.toLocaleLowerCase('en-US'))).size !== paths.length
+    ) {
+      setError('Use unique, safe relative file paths with forward slashes.');
+      return;
+    }
+    if (
+      !paths.includes('CMakeLists.txt') ||
+      !paths.includes('main/CMakeLists.txt') ||
+      !/^main\/.+\.(c|cc|cpp|cxx)$/i.test(entrypoint) ||
+      !paths.includes(entrypoint)
+    ) {
+      setError(
+        'ESP-IDF requires root and main/CMakeLists.txt files and a C/C++ entrypoint under main/.',
+      );
+      return;
+    }
+    const byteFiles = normalized.map((file) => ({
+      ...file,
+      bytes: new TextEncoder().encode(file.source),
+    }));
+    if (
+      byteFiles.some((file) => !file.bytes.length || file.bytes.length > maxFirmwareBytes) ||
+      byteFiles.reduce((sum, file) => sum + file.bytes.length, 0) > maxBundleBytes
+    ) {
+      setError('Files must be non-empty, at most 2,000,000 bytes each, and 8,000,000 bytes total.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const result = await api<{ project: Project; artifact: Artifact }>(
+        '/projects/' + encodeURIComponent(projectId) + '/firmware-artifacts/bundles',
+        {
+          method: 'POST',
+          body: {
+            expectedRevision: project.revision,
+            buildSystem: 'esp-idf',
+            target: { kind: 'esp-idf-target', target: 'esp32' },
+            entrypoint,
+            files: byteFiles.map(({ path, bytes }) => ({
+              path,
+              contentBase64: encodeBase64Bytes(bytes),
+            })),
+          },
+        },
+      );
+      onProjectChange(result.project);
+      setArtifacts((previous) => [
+        result.artifact,
+        ...previous.filter((item) => item.id !== result.artifact.id),
+      ]);
+      setSelectedId(result.artifact.id);
+      setNotice('New immutable ESP-IDF bundle saved for ESP32. No compilation was performed.');
+    } catch (cause) {
+      setError(friendlyError(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function addBundleFile() {
+    const path = newFilePath.trim();
+    if (
+      !safeBundlePath(path) ||
+      bundleFiles.some(
+        (file) => file.path.toLocaleLowerCase('en-US') === path.toLocaleLowerCase('en-US'),
+      )
+    ) {
+      setError('Enter a unique safe relative path for the new file.');
+      return;
+    }
+    const next = [...bundleFiles, { path, source: '' }];
+    setBundleFiles(next);
+    setActiveBundlePath(path);
+    setSource('');
+    setError('');
+  }
+
   async function review(decision: 'accepted' | 'rejected') {
     if (!currentArtifact || busy) return;
     setBusy(true);
@@ -322,7 +486,14 @@ export function FirmwareWorkspace({
   }
 
   async function startRun() {
-    if (!currentArtifact || !artifactState?.canRun || !validationReady || !graphDigest || busy)
+    if (
+      !currentArtifact ||
+      !artifactState?.canRun ||
+      bundleExecutionUnavailable ||
+      !validationReady ||
+      !graphDigest ||
+      busy
+    )
       return;
     setBusy(true);
     setError('');
@@ -447,34 +618,149 @@ export function FirmwareWorkspace({
       )}
       <div className={styles.firmwareGrid}>
         <div className={styles.firmwareEditor}>
-          <div className={styles.firmwareFields}>
-            <label className="field-label">
-              Language
-              <select
-                value={language}
-                onChange={(event) => {
-                  const next = event.target.value as FirmwareLanguage;
-                  setLanguage(next);
-                  const extension = next === 'c' || next === 'esp-idf-c' ? 'c' : 'cpp';
-                  setEntrypoint((current) => current.replace(/\.(c|cc|cpp)$/, `.${extension}`));
-                }}
-              >
-                {Object.entries(languageDefaults).map(([value, item]) => (
-                  <option key={value} value={value}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field-label">
-              Entrypoint path
-              <input
-                value={entrypoint}
-                maxLength={200}
-                onChange={(event) => setEntrypoint(event.target.value)}
-              />
-            </label>
-          </div>
+          <label className="field-label">
+            Authoring format
+            <select
+              value={authoringMode}
+              onChange={(event) => {
+                const mode = event.target.value as 'single' | 'esp-idf';
+                setAuthoringMode(mode);
+                if (mode === 'esp-idf' && bundleFiles.length === 0) {
+                  const files = [
+                    {
+                      path: 'CMakeLists.txt',
+                      source:
+                        'cmake_minimum_required(VERSION 3.16)\ninclude($ENV{IDF_PATH}/tools/cmake/project.cmake)\nproject(schemora_firmware)\n',
+                    },
+                    {
+                      path: 'main/CMakeLists.txt',
+                      source: 'idf_component_register(SRCS "main.c" INCLUDE_DIRS ".")\n',
+                    },
+                    {
+                      path: 'main/main.c',
+                      source:
+                        '#include <stdio.h>\n\nvoid app_main(void) {\n    printf("Schemora firmware\\n");\n}\n',
+                    },
+                  ];
+                  setBundleFiles(files);
+                  setEntrypoint('main/main.c');
+                  setActiveBundlePath('main/main.c');
+                  setSource(files[2].source);
+                  setLanguage('esp-idf-c');
+                }
+              }}
+            >
+              <option value="single">Single source file</option>
+              <option value="esp-idf">ESP-IDF project bundle (ESP32)</option>
+            </select>
+          </label>
+          {authoringMode === 'single' ? (
+            <div className={styles.firmwareFields}>
+              <label className="field-label">
+                Language
+                <select
+                  value={language}
+                  onChange={(event) => {
+                    const next = event.target.value as FirmwareLanguage;
+                    setLanguage(next);
+                    const extension = next === 'c' || next === 'esp-idf-c' ? 'c' : 'cpp';
+                    setEntrypoint((current) => current.replace(/\.(c|cc|cpp)$/, `.${extension}`));
+                  }}
+                >
+                  {Object.entries(languageDefaults).map(([value, item]) => (
+                    <option key={value} value={value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field-label">
+                Entrypoint path
+                <input
+                  value={entrypoint}
+                  maxLength={200}
+                  onChange={(event) => setEntrypoint(event.target.value)}
+                />
+              </label>
+            </div>
+          ) : (
+            <>
+              <div className={styles.firmwareFields}>
+                <label className="field-label">
+                  ESP-IDF target
+                  <select value="esp32" disabled>
+                    <option value="esp32">ESP32 · ESP32-DevKitC V4</option>
+                  </select>
+                </label>
+                <label className="field-label">
+                  Entrypoint
+                  <select
+                    value={entrypoint}
+                    onChange={(event) => setEntrypoint(event.target.value)}
+                  >
+                    {bundleFiles
+                      .filter((file) => /^main\/.+\.(c|cc|cpp|cxx)$/i.test(file.path))
+                      .map((file) => (
+                        <option key={file.path}>{file.path}</option>
+                      ))}
+                  </select>
+                </label>
+              </div>
+              <div className={styles.firmwareActions}>
+                <label className="field-label">
+                  New file path
+                  <input
+                    value={newFilePath}
+                    maxLength={240}
+                    onChange={(event) => setNewFilePath(event.target.value)}
+                  />
+                </label>
+                <button
+                  className="button secondary"
+                  type="button"
+                  onClick={addBundleFile}
+                  disabled={busy}
+                >
+                  Add file
+                </button>
+                <label className="field-label">
+                  Project file
+                  <select
+                    value={activeBundlePath}
+                    onChange={(event) => {
+                      const path = event.target.value;
+                      setActiveBundlePath(path);
+                      setSource(bundleFiles.find((file) => file.path === path)?.source ?? '');
+                    }}
+                  >
+                    {bundleFiles.map((file) => (
+                      <option key={file.path} value={file.path}>
+                        {file.path}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  className="button secondary"
+                  type="button"
+                  disabled={busy || bundleFiles.length <= 3}
+                  onClick={() => {
+                    const next = bundleFiles.filter((file) => file.path !== activeBundlePath);
+                    setBundleFiles(next);
+                    setActiveBundlePath(next[0]?.path ?? '');
+                    setSource(next[0]?.source ?? '');
+                    if (entrypoint === activeBundlePath)
+                      setEntrypoint(
+                        next.find((file) => /^main\/.+\.(c|cc|cpp|cxx)$/i.test(file.path))?.path ??
+                          '',
+                      );
+                  }}
+                >
+                  Remove selected file
+                </button>
+              </div>
+            </>
+          )}
           <span className="field-label" id="firmware-source-label">
             Source code
           </span>
@@ -482,9 +768,18 @@ export function FirmwareWorkspace({
             <MonacoEditor
               height="390px"
               language={language === 'c' || language === 'esp-idf-c' ? 'c' : 'cpp'}
-              path={entrypoint || 'src/main.cpp'}
+              path={(authoringMode === 'esp-idf' ? activeBundlePath : entrypoint) || 'src/main.cpp'}
               value={source}
-              onChange={(value) => setSource(value ?? '')}
+              onChange={(value) => {
+                const nextSource = value ?? '';
+                setSource(nextSource);
+                if (authoringMode === 'esp-idf')
+                  setBundleFiles((files) =>
+                    files.map((file) =>
+                      file.path === activeBundlePath ? { ...file, source: nextSource } : file,
+                    ),
+                  );
+              }}
               loading={<div className={styles.editorLoading}>Loading code editor…</div>}
               options={{
                 ariaLabel: 'Firmware source editor',
@@ -500,8 +795,16 @@ export function FirmwareWorkspace({
           </div>
           <div className={styles.firmwareActions}>
             <span className="fine-text">
-              {new TextEncoder().encode(source).byteLength.toLocaleString()} /{' '}
-              {maxFirmwareBytes.toLocaleString()} bytes · editor only; no compiler is configured
+              {authoringMode === 'esp-idf'
+                ? bundleFiles
+                    .reduce(
+                      (sum, file) => sum + new TextEncoder().encode(file.source).byteLength,
+                      0,
+                    )
+                    .toLocaleString()
+                : new TextEncoder().encode(source).byteLength.toLocaleString()}{' '}
+              / {(authoringMode === 'esp-idf' ? maxBundleBytes : maxFirmwareBytes).toLocaleString()}{' '}
+              bytes · editor only; no compiler is configured
             </span>
             <button
               className="button primary"
@@ -512,12 +815,14 @@ export function FirmwareWorkspace({
                 graphDirty ||
                 !graphDigest ||
                 !boardPartId ||
-                !source.trim() ||
-                Boolean(entrypointError)
+                (authoringMode === 'single' && !source.trim()) ||
+                (authoringMode === 'single' && Boolean(entrypointError))
               }
-              onClick={() => void saveVersion()}
+              onClick={() =>
+                void (authoringMode === 'esp-idf' ? saveBundleVersion() : saveVersion())
+              }
             >
-              Save new version
+              Save new {authoringMode === 'esp-idf' ? 'bundle' : 'version'}
             </button>
           </div>
           {entrypointError && (
@@ -632,12 +937,24 @@ export function FirmwareWorkspace({
           </div>
           <button
             className="button primary"
-            disabled={busy || !artifactState?.canRun || !validationReady || !isCurrentGraph()}
+            disabled={
+              busy ||
+              !artifactState?.canRun ||
+              bundleExecutionUnavailable ||
+              !validationReady ||
+              !isCurrentGraph()
+            }
             onClick={() => void startRun()}
           >
             Create simulation run
           </button>
         </div>
+      )}
+      {bundleExecutionUnavailable && currentArtifact && (
+        <p className="warning-notice">
+          ESP-IDF bundles are stored and reviewable, but the runner protocol cannot yet execute
+          multi-file bundles. This artifact cannot be submitted as a simulation run.
+        </p>
       )}
       {currentArtifact && !validationReady && (
         <p className="warning-notice">
