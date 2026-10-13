@@ -478,6 +478,8 @@ Firmware artifacts are immutable versions stored in private object storage and a
 
 A simulator adapter is provider-neutral and maps our normalized circuit representation to a supported engine. It reports exact engine and model versions, normalized output, unsupported component coverage, limits, and errors. Simulation is enabled only after commercial rights, API access, supported board/peripheral coverage, isolation, and repeatable reference results are demonstrated. Simulated behavior is not represented as proof of real-world safety.
 
+**Phase 6 implementation note:** `packages/simulation` now provides versioned firmware/run/event contracts, digest binding, fail-closed provider coverage checks, and an explicit unavailable run. It does not compile or execute firmware. Wokwi’s current terms and exact-target fit, and the target coverage of other candidates, leave provider approval and the required technical POC open. See [Phase-6-Implementation.md](Phase-6-Implementation.md).
+
 ## 10. API and event contracts
 
 ### 10.1 API conventions

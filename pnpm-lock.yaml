@@ -257,6 +257,31 @@ importers:
         specifier: 4.20.6
         version: 4.20.6
 
+  packages/simulation:
+    dependencies:
+      '@schemora/assembly-plan':
+        specifier: workspace:*
+        version: link:../assembly-plan
+      '@schemora/catalog':
+        specifier: workspace:*
+        version: link:../hardware-catalog
+      '@schemora/circuit-model':
+        specifier: workspace:*
+        version: link:../circuit-model
+      '@schemora/validation':
+        specifier: workspace:*
+        version: link:../validation
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
+    devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/node@24.10.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)
+
   packages/storage:
     dependencies:
       '@aws-sdk/client-s3':

@@ -36,6 +36,10 @@ The assembly guide includes a deterministic, source-linked “Why this step?” 
 
 See [Phase 5 implementation status and remaining work](docs/Phase-5-Implementation.md).
 
+## Phase 6 — Firmware and simulation (in progress)
+
+Phase 6 now has provider-neutral firmware/run contracts and fail-closed coverage checks. No provider is approved, so the app does not claim to compile or execute firmware. See [Phase 6 implementation status, provider research, and remaining gates](docs/Phase-6-Implementation.md).
+
 ## Run locally
 
 Requirements: Node.js 24, pnpm 11.5.2, and Docker with Compose.
