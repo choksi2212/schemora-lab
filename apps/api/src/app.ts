@@ -621,6 +621,8 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
         byte_length: number;
         bundle_digest: string | null;
         total_byte_length: number;
+        build_system: 'arduino-cli' | 'esp-idf' | null;
+        target: unknown | null;
         language: 'c' | 'cpp' | 'arduino-cpp' | 'esp-idf-c';
         entrypoint: string;
         board_part_id: string;
@@ -629,7 +631,7 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
         review_status: string | null;
       }>(
         `SELECT a.id,a.project_revision,a.sha256,a.byte_length,a.bundle_digest,a.total_byte_length,
-                a.language,a.entrypoint,
+                a.build_system,a.target,a.language,a.entrypoint,
                 a.board_part_id,a.catalog_release_id,latest.project_revision AS review_revision,
                 latest.decision AS review_status
          FROM firmware_artifacts a
@@ -655,6 +657,8 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
           ? {
               bundleDigest: artifact.bundle_digest,
               totalByteLength: artifact.total_byte_length,
+              buildSystem: artifact.build_system,
+              target: artifact.target,
             }
           : {}),
         language: artifact.language,

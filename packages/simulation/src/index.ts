@@ -11,6 +11,12 @@ import {
   type ValidationReport,
 } from '@schemora/validation';
 import { z } from 'zod';
+import {
+  firmwareProjectBuildSystemSchema,
+  firmwareProjectBundleSchema,
+  firmwareProjectTargetSchema,
+  verifyFirmwareProjectBundleSources,
+} from './firmware-project-bundle.js';
 
 export { mapEsp32Gpio19ToLedState } from './adapters/esp32-gpio19-led.js';
 export type { Esp32Gpio19Signal, LedStateMapping } from './adapters/esp32-gpio19-led.js';
@@ -56,6 +62,8 @@ export const firmwareArtifactRefSchema = z
       .regex(/^[a-f0-9]{64}$/)
       .optional(),
     totalByteLength: z.number().int().positive().max(8_000_000).optional(),
+    buildSystem: firmwareProjectBuildSystemSchema.optional(),
+    target: firmwareProjectTargetSchema.optional(),
     language: z.enum(['c', 'cpp', 'arduino-cpp', 'esp-idf-c']),
     entrypoint: z.string().min(1).max(240),
     boardPartId: z.string().min(1).max(200),
@@ -69,6 +77,25 @@ export const firmwareArtifactRefSchema = z
         code: 'custom',
         path: ['bundleDigest'],
         message: 'Bundle digest and aggregate byte length must be supplied together.',
+      });
+    if (
+      artifact.bundleDigest !== undefined &&
+      (artifact.buildSystem === undefined || artifact.target === undefined)
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['buildSystem'],
+        message: 'Bundle references must identify their build system and target.',
+      });
+    if (
+      (artifact.buildSystem === undefined) !== (artifact.target === undefined) ||
+      (artifact.buildSystem === 'arduino-cli' && artifact.target?.kind !== 'arduino-fqbn') ||
+      (artifact.buildSystem === 'esp-idf' && artifact.target?.kind !== 'esp-idf-target')
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['target'],
+        message: 'Build system and target identity must be supplied as a compatible pair.',
       });
   });
 
@@ -298,7 +325,9 @@ export type SimulationFailureCode = z.infer<typeof simulationFailureCodeSchema>;
 export type SimulationRun = z.infer<typeof simulationRunSchema>;
 
 export const RUNNER_PROTOCOL_VERSION = '1.0.0';
-export const MAX_RUNNER_REQUEST_BYTES = 8_000_000;
+// An 8 MB source bundle expands to at most 10,666,668 base64 characters.
+// The request also contains graph, catalog, validation, and signed bindings.
+export const MAX_RUNNER_REQUEST_BYTES = 16_000_000;
 export const MAX_RUNNER_CAPABILITY_TTL_MS = 120_000;
 export const MAX_RUNNER_FIRMWARE_BASE64_CHARS = Math.ceil(MAX_FIRMWARE_ARTIFACT_BYTES / 3) * 4;
 export const runnerExecutionProfileSchema = z
@@ -309,6 +338,19 @@ export const runnerExecutionProfileSchema = z
     engineId: z.string().min(1).max(100),
     engineVersion: z.string().min(1).max(100),
     imageDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    // Optional for compatibility with existing single-file profiles. A bundle
+    // is eligible only when this administrator-owned list includes its exact target.
+    firmwareProjectTargets: z
+      .array(
+        z
+          .object({
+            buildSystem: firmwareProjectBuildSystemSchema,
+            target: firmwareProjectTargetSchema,
+          })
+          .strict(),
+      )
+      .max(100)
+      .optional(),
     limits: z
       .object({
         wallTimeoutMs: z.number().int().min(1_000).max(120_000),
@@ -349,12 +391,21 @@ export const runnerExecutionPayloadSchema = z
     validationReportDigest: z.string().regex(/^[a-f0-9]{64}$/),
     firmware: firmwareArtifactRefSchema,
     firmwareReviewRevision: z.number().int().positive(),
-    firmwareBase64: runnerFirmwareSourceSchema,
+    firmwareBase64: runnerFirmwareSourceSchema.optional(),
+    firmwareProjectBundle: firmwareProjectBundleSchema.optional(),
     executionProfileId: z.string().min(1).max(100),
     deadlineAt: z.iso.datetime(),
   })
   .strict()
   .superRefine((payload, ctx) => {
+    const hasSingleFile = payload.firmwareBase64 !== undefined;
+    const hasBundle = payload.firmwareProjectBundle !== undefined;
+    if (hasSingleFile === hasBundle)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['firmwareBase64'],
+        message: 'Supply exactly one of firmwareBase64 or firmwareProjectBundle.',
+      });
     const binding = payload.binding;
     if (
       payload.graph.id !== binding.graphId ||
@@ -413,19 +464,42 @@ export const runnerExecutionPayloadSchema = z
         path: ['firmware'],
         message: 'Firmware does not match run binding.',
       });
-    const encodedLength = payload.firmwareBase64.length;
-    const padding = payload.firmwareBase64.endsWith('==')
-      ? 2
-      : payload.firmwareBase64.endsWith('=')
-        ? 1
-        : 0;
-    const decodedLength = (encodedLength / 4) * 3 - padding;
-    if (decodedLength !== payload.firmware.byteLength)
-      ctx.addIssue({
-        code: 'custom',
-        path: ['firmwareBase64'],
-        message: 'Firmware length does not match its immutable reference.',
-      });
+    if (hasSingleFile && payload.firmwareBase64 !== undefined) {
+      const encodedLength = payload.firmwareBase64.length;
+      const padding = payload.firmwareBase64.endsWith('==')
+        ? 2
+        : payload.firmwareBase64.endsWith('=')
+          ? 1
+          : 0;
+      const decodedLength = (encodedLength / 4) * 3 - padding;
+      if (
+        decodedLength !== payload.firmware.byteLength ||
+        payload.firmware.bundleDigest !== undefined
+      )
+        ctx.addIssue({
+          code: 'custom',
+          path: ['firmwareBase64'],
+          message: 'Single-file firmware length or immutable reference is inconsistent.',
+        });
+    }
+    if (hasBundle && payload.firmwareProjectBundle !== undefined) {
+      const bundle = payload.firmwareProjectBundle;
+      if (
+        payload.firmware.bundleDigest !== bundle.manifestDigest ||
+        payload.firmware.totalByteLength !== bundle.totalByteLength ||
+        payload.firmware.buildSystem !== bundle.buildSystem ||
+        payload.firmware.target === undefined ||
+        canonicalDigest(payload.firmware.target) !== canonicalDigest(bundle.target) ||
+        payload.firmware.entrypoint !== bundle.entrypoint ||
+        payload.firmware.byteLength !==
+          (bundle.files.find((file) => file.path === bundle.entrypoint)?.byteLength ?? -1)
+      )
+        ctx.addIssue({
+          code: 'custom',
+          path: ['firmwareProjectBundle'],
+          message: 'Bundle manifest does not match its immutable firmware reference.',
+        });
+    }
   });
 
 export const runnerCapabilitySchema = z
@@ -789,6 +863,12 @@ export function runnerPayloadMatchesProfile(
     value.binding.engineId === allowed.engineId &&
     value.binding.engineVersion === allowed.engineVersion &&
     allowed.firmwareLanguages.includes(value.firmware.language) &&
+    (value.firmwareProjectBundle === undefined ||
+      allowed.firmwareProjectTargets?.some(
+        (approved) =>
+          approved.buildSystem === value.firmwareProjectBundle!.buildSystem &&
+          canonicalDigest(approved.target) === canonicalDigest(value.firmwareProjectBundle!.target),
+      ) === true) &&
     boards.has(value.firmware.boardPartId) &&
     boardComponents.length === 1 &&
     boardComponents[0]?.catalogPartId === value.firmware.boardPartId &&
@@ -825,6 +905,21 @@ export async function verifyRunnerFirmwareDigest(input: unknown): Promise<boolea
   const parsed = runnerExecutionPayloadSchema.safeParse(input);
   if (!parsed.success) return false;
   try {
+    if (parsed.data.firmwareProjectBundle !== undefined) {
+      const bundle = parsed.data.firmwareProjectBundle;
+      return (
+        (await verifyFirmwareProjectBundleSources(bundle)) &&
+        bundle.manifestDigest === parsed.data.firmware.bundleDigest &&
+        bundle.totalByteLength === parsed.data.firmware.totalByteLength &&
+        bundle.buildSystem === parsed.data.firmware.buildSystem &&
+        parsed.data.firmware.target !== undefined &&
+        canonicalDigest(bundle.target) === canonicalDigest(parsed.data.firmware.target) &&
+        bundle.entrypoint === parsed.data.firmware.entrypoint &&
+        parsed.data.binding.firmwareDigest === bundle.manifestDigest &&
+        parsed.data.binding.firmwareByteLength === bundle.totalByteLength
+      );
+    }
+    if (parsed.data.firmwareBase64 === undefined) return false;
     const encoded = parsed.data.firmwareBase64;
     const binary = atob(encoded);
     if (btoa(binary) !== encoded) return false;
