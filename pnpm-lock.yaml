@@ -167,6 +167,9 @@ importers:
       '@schemora/persistence':
         specifier: workspace:*
         version: link:../../packages/persistence
+      '@schemora/sandbox-runner':
+        specifier: workspace:*
+        version: link:../sandbox-runner
       '@schemora/simulation':
         specifier: workspace:*
         version: link:../../packages/simulation

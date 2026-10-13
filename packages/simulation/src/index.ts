@@ -15,6 +15,23 @@ import { z } from 'zod';
 export { mapEsp32Gpio19ToLedState } from './adapters/esp32-gpio19-led.js';
 export type { Esp32Gpio19Signal, LedStateMapping } from './adapters/esp32-gpio19-led.js';
 export {
+  createFirmwareProjectBundle,
+  firmwareProjectBuildSystemSchema,
+  firmwareProjectBundleSchema,
+  firmwareProjectPathSchema,
+  firmwareProjectTargetSchema,
+  verifyFirmwareProjectBundleSources,
+  FIRMWARE_BUNDLE_MAX_FILES,
+  FIRMWARE_BUNDLE_MAX_FILE_BYTES,
+  FIRMWARE_BUNDLE_MAX_PATH_BYTES,
+  FIRMWARE_BUNDLE_MAX_TOTAL_BYTES,
+  type FirmwareProjectBuildSystem,
+  type FirmwareProjectBundle,
+  type FirmwareProjectBundleFile,
+  type FirmwareProjectBundleInput,
+  type FirmwareProjectTarget,
+} from './firmware-project-bundle.js';
+export {
   normalizeQemuReferenceCallbacks,
   type QemuCallbackNormalization,
 } from './adapters/qemu-callback-normalizer.js';
