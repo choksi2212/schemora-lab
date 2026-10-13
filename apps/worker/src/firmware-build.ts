@@ -1,11 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { Repository } from '@schemora/persistence';
 import type { PrivateBuildStorage, PrivateStorage } from '@schemora/storage';
-import {
-  compileFirmwareProject,
-  type FirmwareCompilerProfile,
-  type FirmwareCompilerSandbox,
-} from '@schemora/simulation';
+import { compileFirmwareProject, type FirmwareCompilerSandbox } from '@schemora/simulation';
+import type { FirmwareCompilerProfileRegistry } from './firmware-compiler-profiles.js';
 import { resolveFirmwareCompilerBundle } from './firmware-source.js';
 
 export interface PersistFirmwareBuildRequest {
@@ -13,7 +10,7 @@ export interface PersistFirmwareBuildRequest {
   projectId: string;
   sourceArtifactId: string;
   idempotencyKey: string;
-  profile: FirmwareCompilerProfile;
+  profileId: string;
 }
 
 /**
@@ -26,14 +23,16 @@ export async function compileAndPersistFirmwareBuild(
   repository: Repository,
   storage: PrivateStorage & PrivateBuildStorage,
   sandbox: FirmwareCompilerSandbox,
+  profiles: FirmwareCompilerProfileRegistry,
   request: PersistFirmwareBuildRequest,
 ) {
+  const profile = profiles.resolve(request.profileId);
   const prior = await repository.existingFirmwareBuild(
     request.ownerId,
     request.projectId,
     request.sourceArtifactId,
     request.idempotencyKey,
-    request.profile,
+    profile,
   );
   if (prior) return prior;
 
@@ -42,7 +41,7 @@ export async function compileAndPersistFirmwareBuild(
     projectId: request.projectId,
     artifactId: request.sourceArtifactId,
   });
-  const compiled = await compileFirmwareProject(bundle, request.profile, sandbox);
+  const compiled = await compileFirmwareProject(bundle, profile, sandbox);
   const buildId = randomUUID();
   const objects = compiled.result.artifacts.map((artifact) => ({
     role: artifact.role,
@@ -72,7 +71,7 @@ export async function compileAndPersistFirmwareBuild(
       id: buildId,
       sourceArtifactId: request.sourceArtifactId,
       idempotencyKey: request.idempotencyKey,
-      profile: request.profile,
+      profile,
       result: compiled.result,
       artifacts: objects.map(({ role, path, objectKey, sha256, byteLength }) => ({
         role,

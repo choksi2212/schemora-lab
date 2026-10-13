@@ -42,8 +42,12 @@ export function firmwareBundleMatchesDependencyPolicy(
   bundle: FirmwareProjectBundle,
   profile: FirmwareCompilerProfile,
 ): boolean {
-  if (profile.dependencyPolicy !== 'builtin-components-only') return false;
-  if (bundle.buildSystem !== 'esp-idf') return true;
+  if (
+    profile.dependencyPolicy !== 'builtin-components-only' ||
+    profile.buildSystem !== 'esp-idf' ||
+    bundle.buildSystem !== 'esp-idf'
+  )
+    return false;
   return bundle.files.every(({ path }) => {
     const normalized = path.toLowerCase();
     const basename = normalized.slice(normalized.lastIndexOf('/') + 1);
