@@ -3,6 +3,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { Repository } from '@schemora/persistence';
 import { FileStorage, S3Storage } from '@schemora/storage';
 import { Worker } from './runner.js';
+import { parseFirmwareCompilerProfileRegistryJson } from './firmware-compiler-profiles.js';
 
 const parsed = z
   .object({
@@ -22,6 +23,7 @@ const parsed = z
     WORKER_PROCESS_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(1),
     WORKER_DELETE_CONCURRENCY: z.coerce.number().int().min(1).max(4).default(1),
     WORKER_SIMULATION_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(1),
+    WORKER_FIRMWARE_COMPILER_PROFILES_JSON: z.string().max(65_536).default('[]'),
     DATABASE_POOL_SIZE: z.coerce.number().int().min(1).max(50).default(10),
     JOB_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
   })
@@ -32,6 +34,14 @@ if (!parsed.success)
       parsed.error.issues.map((issue) => issue.path.join('.')).join(', '),
   );
 const config = parsed.data;
+let firmwareCompilerProfiles;
+try {
+  firmwareCompilerProfiles = parseFirmwareCompilerProfileRegistryJson(
+    config.WORKER_FIRMWARE_COMPILER_PROFILES_JSON,
+  );
+} catch {
+  throw new Error('Invalid worker compiler profile configuration');
+}
 if (
   config.NODE_ENV === 'production' &&
   new URL(config.DATABASE_URL).searchParams.get('sslmode') !== 'verify-full'
@@ -68,6 +78,7 @@ const worker = new Worker(
     model: config.EXTRACTION_MODEL,
   },
   config.WORKER_LEASE_SECONDS,
+  firmwareCompilerProfiles,
 );
 let stopping = false;
 for (const signal of ['SIGINT', 'SIGTERM'])

@@ -1,5 +1,8 @@
 import { firmwareCompilerProfileSchema, type FirmwareCompilerProfile } from '@schemora/simulation';
 
+export const MAX_FIRMWARE_COMPILER_PROFILES = 16;
+export const MAX_FIRMWARE_COMPILER_PROFILES_JSON_BYTES = 65_536;
+
 export interface FirmwareCompilerProfileRegistry {
   resolve(profileId: string): FirmwareCompilerProfile;
 }
@@ -18,6 +21,8 @@ function freezeProfile(profile: FirmwareCompilerProfile): FirmwareCompilerProfil
 export function createFirmwareCompilerProfileRegistry(
   profileInputs: readonly unknown[],
 ): FirmwareCompilerProfileRegistry {
+  if (profileInputs.length > MAX_FIRMWARE_COMPILER_PROFILES)
+    throw new Error('FIRMWARE_COMPILER_PROFILE_LIMIT');
   const profiles = new Map<string, FirmwareCompilerProfile>();
   for (const input of profileInputs) {
     const parsed = firmwareCompilerProfileSchema.safeParse(input);
@@ -32,4 +37,20 @@ export function createFirmwareCompilerProfileRegistry(
       return profile;
     },
   });
+}
+
+/** Parse deployment-owned worker configuration; never parse profiles from jobs or API input. */
+export function parseFirmwareCompilerProfileRegistryJson(
+  serialized: string,
+): FirmwareCompilerProfileRegistry {
+  if (Buffer.byteLength(serialized, 'utf8') > MAX_FIRMWARE_COMPILER_PROFILES_JSON_BYTES)
+    throw new Error('FIRMWARE_COMPILER_PROFILE_CONFIG_TOO_LARGE');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(serialized);
+  } catch {
+    throw new Error('FIRMWARE_COMPILER_PROFILE_CONFIG_INVALID');
+  }
+  if (!Array.isArray(parsed)) throw new Error('FIRMWARE_COMPILER_PROFILE_CONFIG_INVALID');
+  return createFirmwareCompilerProfileRegistry(parsed);
 }

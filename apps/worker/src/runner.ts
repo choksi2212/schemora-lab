@@ -15,6 +15,10 @@ import {
   unavailableSimulationRun,
 } from '@schemora/simulation';
 import type { PrivateStorage } from '@schemora/storage';
+import {
+  createFirmwareCompilerProfileRegistry,
+  type FirmwareCompilerProfileRegistry,
+} from './firmware-compiler-profiles.js';
 
 export function isolatedParse(filename: string, bytes: Uint8Array) {
   return new Promise<{ bundle: ConversationBundle; extraction: ExtractionResult | null }>(
@@ -70,12 +74,16 @@ export interface ExtractorConfig {
   extract?: (conversation: NormalizedConversation) => Promise<ExtractionResult>;
 }
 export class Worker {
+  readonly firmwareCompilerProfiles: FirmwareCompilerProfileRegistry;
   constructor(
     private readonly repository: Repository,
     private readonly storage: PrivateStorage,
     private readonly extraction: ExtractorConfig = { mode: 'rules' },
     private readonly leaseSeconds = 120,
-  ) {}
+    firmwareCompilerProfiles = createFirmwareCompilerProfileRegistry([]),
+  ) {
+    this.firmwareCompilerProfiles = firmwareCompilerProfiles;
+  }
   async tick(kind: Job['kind']) {
     await this.repository.cleanupUploadIntents((key) => this.storage.delete(key));
     await this.repository.dispatch();
