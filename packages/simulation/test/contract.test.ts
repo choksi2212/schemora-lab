@@ -16,6 +16,7 @@ import {
   runnerExecutionProfileSchema,
   runnerPayloadMatchesProfile,
   runnerRequestMatchesProfile,
+  runnerResponseTransitionAllowed,
   verifyRunnerFirmwareDigest,
   validateRunnerExecutionResponseForRequest,
   simulationRunSchema,
@@ -200,6 +201,18 @@ function makeRunnerProfile() {
 }
 
 describe('simulation contracts', () => {
+  it('allows only forward runner response transitions from the locked run state', () => {
+    expect(runnerResponseTransitionAllowed('queued', 'accepted')).toBe(true);
+    expect(runnerResponseTransitionAllowed('preparing', 'running')).toBe(true);
+    expect(runnerResponseTransitionAllowed('running', 'running')).toBe(true);
+    expect(runnerResponseTransitionAllowed('stopping', 'cancelled')).toBe(true);
+    expect(runnerResponseTransitionAllowed('stopping', 'completed')).toBe(true);
+    expect(runnerResponseTransitionAllowed('running', 'accepted')).toBe(false);
+    expect(runnerResponseTransitionAllowed('stopping', 'running')).toBe(false);
+    expect(runnerResponseTransitionAllowed('completed', 'failed')).toBe(false);
+    expect(runnerResponseTransitionAllowed('cancelled', 'cancelled')).toBe(false);
+  });
+
   it('accepts only a versioned runner request bound to immutable design and firmware inputs', () => {
     const request = makeRunnerRequest();
     expect(request.payload.binding.graphDigest).toBe(canonicalDigest(graph));

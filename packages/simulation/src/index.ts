@@ -610,6 +610,17 @@ export type RunnerExecutionResponse = z.infer<typeof runnerExecutionResponseSche
 export type RunnerExecutionProfile = z.infer<typeof runnerExecutionProfileSchema>;
 export type RunnerCapability = RunnerExecutionRequest['capability'];
 
+/** Fence a signed runner response against the locked run status before persisting it. */
+export function runnerResponseTransitionAllowed(
+  currentStatus: SimulationRun['status'],
+  responseStatus: RunnerExecutionResponse['status'],
+): boolean {
+  if (!['queued', 'preparing', 'running', 'stopping'].includes(currentStatus)) return false;
+  if (responseStatus === 'accepted') return ['queued', 'preparing'].includes(currentStatus);
+  if (responseStatus === 'running') return ['queued', 'preparing', 'running'].includes(currentStatus);
+  return ['completed', 'failed', 'cancelled'].includes(responseStatus);
+}
+
 export const RUNNER_RESPONSE_AUTH_VERSION = '1.0.0' as const;
 export const runnerAuthenticatedResponseSchema = z
   .object({
