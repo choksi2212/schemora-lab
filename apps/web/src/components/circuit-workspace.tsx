@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Cable, CircleHelp, RefreshCw, Save, ShieldAlert, Zap } from 'lucide-react';
 import { api, friendlyError, type Project } from '@/lib/api';
+import { CircuitScene } from './circuit-scene';
 import styles from './circuit-workspace.module.css';
 
 type Terminal = { id: string; label: string; electricalRole: string };
@@ -288,8 +289,8 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
       </Link>
       <div className="workspace-heading">
         <div>
-          <span className="eyebrow">PHASE 2 · CIRCUIT WORKSPACE · REVISION {project.revision}</span>
-          <h1>Build and check a circuit</h1>
+          <span className="eyebrow">PHASE 3 · 3D WORKBENCH · REVISION {project.revision}</span>
+          <h1>See and edit a circuit</h1>
           <p className="fine-text">
             Circuit facts are tied to the exact catalog release and project revision.
           </p>
@@ -337,6 +338,7 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
           {catalog.parts.find((p) => p.id === starterParts.board)?.limitations[0]}
         </p>
       </section>
+      <CircuitScene graph={graph} onGraphChange={edit} />
       <div className={styles.grid}>
         <section className="panel">
           <div className="panel-heading">

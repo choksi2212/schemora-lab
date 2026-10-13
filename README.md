@@ -14,9 +14,15 @@ Supported inputs: UTF-8 TXT/Markdown, static HTML, recognized JSON exports, text
 
 ## Phase 2 — Hardware knowledge and circuit validation
 
-The catalog exposes an exact ESP32-DevKitC V4 / WROOM-32E / male-header configuration, a Kingbright WP7113ID LED, a YAGEO 220 Ω resistor, and a source-backed BusBoard BB400/BB400T connectivity topology. Circuits are represented by versioned terminal/hole graphs, persisted as immutable project revisions, and checked with deterministic structural and limited electrical rules. Reports preserve unknown electrical limits; a pass is not a safety certification. Photo recognition, 3D workbench, firmware execution, and general circuit simulation are not included.
+The catalog exposes an exact ESP32-DevKitC V4 / WROOM-32E / male-header configuration, a Kingbright WP7113ID LED, a YAGEO 220 Ω resistor, and a source-backed BusBoard BB400/BB400T connectivity topology. Circuits are represented by versioned terminal/hole graphs, persisted as immutable project revisions, and checked with deterministic structural and limited electrical rules. Reports preserve unknown electrical limits; a pass is not a safety certification.
 
 See [Phase 2 implementation details and limits](docs/Phase-2-Implementation.md) for catalog sources, graph contracts, rules, APIs, persistence, and verification.
+
+## Phase 3 — Interactive 3D workbench (in progress)
+
+The circuit workspace now renders the saved graph in a browser 3D scene with camera orbit, zoom, and reset controls. Users can add a wire by choosing two exact terminals in the scene or its accessible terminal list, and remove wires in the scene or semantic list. The existing editor remains available for optional breadboard-hole assignments. Geometry is illustrative and is not dimension-accurate CAD, a physical-fit guarantee, or electrical validation. Firmware simulation and photo recognition remain later, separately gated work.
+
+See [Phase 3 implementation status and remaining work](docs/Phase-3-Implementation.md).
 
 ## Run locally
 
@@ -66,7 +72,7 @@ Parser child processes have time and memory limits. Public production deployment
 
 | Path                        | Responsibility                                                                |
 | --------------------------- | ----------------------------------------------------------------------------- |
-| `apps/web`                  | Desktop UI, GitHub session, server-only API proxy                             |
+| `apps/web`                  | Desktop UI, GitHub session, server-only API proxy, graph-derived 3D workbench |
 | `apps/api`                  | Authenticated project/import/review/catalog/circuit HTTP API                  |
 | `apps/worker`               | Durable import/extraction and deletion processing                             |
 | `packages/contracts`        | Strict versioned conversation and candidate schemas                           |
@@ -78,4 +84,4 @@ Parser child processes have time and memory limits. Public production deployment
 | `packages/validation`       | Versioned deterministic Phase 2 findings and report contracts                 |
 | `docs`                      | PRD, TRD, delivery plans, system design, phase implementation evidence        |
 
-See [Phase 1 scope and research](docs/Phase-1-Implementation.md), [Phase 2 implementation](docs/Phase-2-Implementation.md), [parser research](packages/intelligence/RESEARCH.md), and [synthetic benchmark results](packages/intelligence/BENCHMARK.md).
+See [Phase 1 scope and research](docs/Phase-1-Implementation.md), [Phase 2 implementation](docs/Phase-2-Implementation.md), [Phase 3 workbench](docs/Phase-3-Implementation.md), [parser research](packages/intelligence/RESEARCH.md), and [synthetic benchmark results](packages/intelligence/BENCHMARK.md).

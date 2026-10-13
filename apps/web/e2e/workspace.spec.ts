@@ -129,6 +129,44 @@ test('selects one account-export conversation before extraction', async ({ page 
   await expect(page.locator('.message-content').filter({ hasText: 'BME280' })).toHaveCount(0);
 });
 
+test('connects exact terminals in the 3D workbench and persists graph edits', async ({ page }) => {
+  const title = `3D wiring ${Date.now()}`;
+  await createImport(
+    page,
+    '3d-wiring.txt',
+    'User: Build an ESP32 LED with a 220 ohm resistor.\nAssistant: Use GPIO19, the resistor, the LED, and ground.',
+    title,
+  );
+  await page.getByRole('link', { name: /Open circuit workspace/ }).click();
+  await expect(page.getByRole('heading', { name: 'Circuit workbench 3D view' })).toBeVisible();
+  await expect(page.getByRole('region', { name: /Illustrative circuit workbench/ })).toBeVisible();
+
+  await page.getByRole('button', { name: /ESP32-DevKitC V4.*GPIO19/ }).click();
+  await page.getByRole('button', { name: /YAGEO 220 Ω resistor: Lead B/ }).click();
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Wire added between the selected terminals.' }),
+  ).toBeVisible();
+  await expect(page.getByText('4 graph wires')).toBeVisible();
+  const saveResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'PUT' &&
+      new URL(response.url()).pathname.endsWith('/circuit'),
+  );
+  await page.getByRole('button', { name: 'Save circuit' }).click();
+  const saved = await saveResponse;
+  expect(saved.status(), await saved.text()).toBe(200);
+  await expect(page.getByRole('status').filter({ hasText: 'Circuit saved.' })).toBeVisible();
+  await page.reload();
+  await expect(page.getByText('4 graph wires')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Remove wire 4' }).click();
+  await expect(page.getByText('3 graph wires')).toBeVisible();
+  await page.getByRole('button', { name: 'Save circuit' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Circuit saved.' })).toBeVisible();
+  await page.reload();
+  await expect(page.getByText('3 graph wires')).toBeVisible();
+});
+
 test('keeps file validation local and exposes keyboard-operable import', async ({ page }) => {
   await page.goto('/');
   await page.keyboard.press('Tab');

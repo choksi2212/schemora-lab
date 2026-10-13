@@ -1,0 +1,159 @@
+.root {
+  overflow: hidden;
+  color: #17252e;
+  background: #fff;
+  border: 1px solid #dce3e8;
+  border-radius: 16px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px 8px;
+}
+
+.header h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.3;
+}
+.header p {
+  margin: 5px 0 0;
+  color: #62737d;
+  font-size: 12px;
+}
+.header button {
+  padding: 8px 12px;
+  color: #263740;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  background: #f5f8fa;
+  border: 1px solid #cbd6dc;
+  border-radius: 8px;
+}
+.header button:focus-visible {
+  outline: 3px solid #3883a5;
+  outline-offset: 2px;
+}
+.note {
+  margin: 0;
+  padding: 0 20px 10px;
+  color: #5d6f78;
+  font-size: 12px;
+}
+.editTools {
+  padding: 8px 20px 12px;
+  background: #f7fafb;
+  border-top: 1px solid #e3e9ec;
+}
+.editTools p {
+  margin: 0 0 7px;
+  color: #53646d;
+  font-size: 12px;
+}
+.editTools .editStatus {
+  color: #245b71;
+  font-weight: 600;
+}
+.editTools ul,
+.wireList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.editTools button,
+.wireList button {
+  padding: 6px 9px;
+  color: #28434f;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid #cbd8de;
+  border-radius: 7px;
+}
+.editTools button[aria-pressed='true'] {
+  color: #392900;
+  background: #ffedbd;
+  border-color: #d09a22;
+}
+.editTools button:focus-visible,
+.wireList button:focus-visible {
+  outline: 3px solid #3883a5;
+  outline-offset: 2px;
+}
+.viewport {
+  position: relative;
+  width: 100%;
+  height: 420px;
+}
+.viewport :global(canvas) {
+  display: block;
+  touch-action: none;
+}
+.fallback {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 8px;
+  height: 100%;
+  padding: 24px;
+  color: #566872;
+  text-align: center;
+  background: linear-gradient(145deg, #f3f6f8, #e9eff2);
+}
+.fallback strong {
+  color: #293a43;
+}
+.details {
+  padding: 12px 20px 16px;
+  border-top: 1px solid #e3e9ec;
+}
+.details h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+.details ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 18px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.details li,
+.details p {
+  margin: 0;
+  color: #53646d;
+  font-size: 12px;
+}
+.details li span {
+  color: #829098;
+}
+.details p {
+  margin-top: 8px;
+}
+.wireList {
+  margin-top: 8px;
+}
+
+@media (max-width: 640px) {
+  .viewport {
+    height: 320px;
+  }
+  .header {
+    padding: 14px 14px 8px;
+  }
+  .note,
+  .details,
+  .editTools {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+}

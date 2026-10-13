@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const projectId = pathname.match(/^\/projects\/([^/]+)/)?.[1];
   const [help, setHelp] = useState(false);
   const [session, setSession] = useState<{
     authenticated: boolean;
@@ -48,9 +49,18 @@ export function Shell({ children }: { children: React.ReactNode }) {
         >
           <BookOpen size={18} /> Hardware catalog <span className="nav-key">02</span>
         </Link>
-        <div className="nav-item muted">
-          <Cpu size={18} /> Workbench <span className="tiny-tag">Soon</span>
-        </div>
+        {projectId ? (
+          <Link
+            className={`nav-item ${pathname.endsWith('/circuit') ? 'active' : ''}`}
+            href={`/projects/${projectId}/circuit`}
+          >
+            <Cpu size={18} /> 3D workbench <span className="nav-key">03</span>
+          </Link>
+        ) : (
+          <div className="nav-item muted" title="Open a project to use its circuit workbench">
+            <Cpu size={18} /> 3D workbench <span className="tiny-tag">Open project</span>
+          </div>
+        )}
         <div className="sidebar-note">
           <span className="eyebrow">DESIGN WITH CONTEXT</span>
           <p>Every connection starts with understanding.</p>
@@ -62,15 +72,16 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </button>
           {help && (
             <div className="help-panel">
-              Import your conversation, choose a thread if needed, and review the proposed design
-              beside its original evidence. Confirming a fact records your decision. Hardware
-              verification and assembly arrive in a later phase.
+              Import your conversation, review each proposal beside its source, then open a
+              project's circuit workspace to edit exact terminals and inspect its illustrative 3D
+              view. Deterministic checks preserve unknown electrical limits; they do not certify fit
+              or physical safety.
             </div>
           )}
           <a className="nav-item" href="/api/auth/signin">
             <FileText size={18} /> Account <ArrowUpRight size={15} />
           </a>
-          <span className="sidebar-version">SCHEMORA · PHASE 02</span>
+          <span className="sidebar-version">SCHEMORA · PHASE 03</span>
         </div>
       </aside>
       <div className="content-shell">
