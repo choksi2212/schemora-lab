@@ -569,6 +569,42 @@ export class Repository {
       return publicFirmwareBuild(build.rows[0]);
     });
   }
+  async existingFirmwareBuild(
+    owner: string,
+    projectId: string,
+    sourceArtifactId: string,
+    idempotencyKey: string,
+    profileInput: FirmwareCompilerProfile,
+  ) {
+    const profile = firmwareCompilerProfileSchema.safeParse(profileInput);
+    if (!profile.success) throw new RepositoryError('INVALID_FIRMWARE_BUILD', 400);
+    return this.transaction(async (client) => {
+      await this.project(client, owner, projectId, true);
+      const source = await client.query<{
+        bundle_digest: string | null;
+        sha256: string;
+      }>('SELECT bundle_digest,sha256 FROM firmware_artifacts WHERE project_id=$1 AND id=$2', [
+        projectId,
+        sourceArtifactId,
+      ]);
+      const sourceArtifact = source.rows[0];
+      if (!sourceArtifact) throw new RepositoryError('NOT_FOUND', 404);
+      const sourceDigest = sourceArtifact.bundle_digest ?? sourceArtifact.sha256;
+      const prior = await client.query<FirmwareBuildRow>(
+        'SELECT * FROM firmware_builds WHERE project_id=$1 AND idempotency_key=$2',
+        [projectId, idempotencyKey],
+      );
+      if (!prior.rows[0]) return null;
+      const expectedRequestDigest = canonicalDigest({
+        sourceArtifactId,
+        sourceManifestDigest: sourceDigest,
+        compilerProfileDigest: canonicalDigest(profile.data),
+      });
+      if (prior.rows[0].request_digest !== expectedRequestDigest)
+        throw new RepositoryError('IDEMPOTENCY_CONFLICT', 409);
+      return publicFirmwareBuild(prior.rows[0]);
+    });
+  }
   async withFirmwareBuildArtifact<T>(
     owner: string,
     projectId: string,
@@ -635,7 +671,6 @@ export class Repository {
         sourceArtifactId: input.sourceArtifactId,
         sourceManifestDigest: sourceDigest,
         compilerProfileDigest,
-        resultDigest,
       });
       const prior = await client.query<FirmwareBuildRow>(
         'SELECT * FROM firmware_builds WHERE project_id=$1 AND idempotency_key=$2 FOR UPDATE',
