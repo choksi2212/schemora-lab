@@ -94,3 +94,31 @@ export const validationReports = pgTable(
   },
   (table) => [primaryKey({ columns: [table.projectId, table.id] })],
 );
+export const firmwareArtifacts = pgTable(
+  'firmware_artifacts',
+  {
+    id: uuid('id').notNull(),
+    projectId: uuid('project_id').notNull(),
+    projectRevision: integer('project_revision').notNull(),
+    actorId: text('actor_id').notNull(),
+    objectKey: uuid('object_key').notNull(),
+    sha256: text('sha256').notNull(),
+    byteLength: integer('byte_length').notNull(),
+    language: text('language').notNull(),
+    entrypoint: text('entrypoint').notNull(),
+    boardPartId: text('board_part_id').notNull(),
+    catalogReleaseId: text('catalog_release_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.projectId, table.id] })],
+);
+export const firmwareReviews = pgTable('firmware_reviews', {
+  id: uuid('id').primaryKey(),
+  projectId: uuid('project_id').notNull(),
+  artifactId: uuid('artifact_id').notNull(),
+  projectRevision: integer('project_revision').notNull(),
+  actorId: text('actor_id').notNull(),
+  decision: text('decision').notNull(),
+  reason: text('reason'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+});

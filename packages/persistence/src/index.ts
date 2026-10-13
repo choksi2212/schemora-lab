@@ -71,6 +71,22 @@ export interface ValidationReportRow extends QueryResultRow {
   report_digest: string;
   created_at: Date;
 }
+export interface FirmwareArtifactRow extends QueryResultRow {
+  id: string;
+  project_id: string;
+  project_revision: number;
+  actor_id: string;
+  object_key: string;
+  sha256: string;
+  byte_length: number;
+  language: 'c' | 'cpp' | 'arduino-cpp' | 'esp-idf-c';
+  entrypoint: string;
+  board_part_id: string;
+  catalog_release_id: string;
+  created_at: Date;
+  review_status: 'accepted' | 'rejected' | null;
+  review_reason: string | null;
+}
 export class RepositoryError extends Error {
   constructor(
     public code: string,
@@ -150,6 +166,23 @@ export function publicReview(review: ReviewRow) {
     reason: review.reason,
     revision: review.revision,
     createdAt: review.created_at.toISOString(),
+  };
+}
+
+export function publicFirmwareArtifact(artifact: FirmwareArtifactRow) {
+  return {
+    id: artifact.id,
+    projectId: artifact.project_id,
+    projectRevision: artifact.project_revision,
+    sha256: artifact.sha256,
+    byteLength: artifact.byte_length,
+    language: artifact.language,
+    entrypoint: artifact.entrypoint,
+    boardPartId: artifact.board_part_id,
+    catalogReleaseId: artifact.catalog_release_id,
+    reviewStatus: artifact.review_status ?? 'pending',
+    reviewReason: artifact.review_reason,
+    createdAt: artifact.created_at.toISOString(),
   };
 }
 
@@ -285,6 +318,82 @@ export class Repository {
       };
     });
   }
+  private firmwareArtifactQuery() {
+    return `SELECT a.*, latest.decision AS review_status, latest.reason AS review_reason
+      FROM firmware_artifacts a
+      LEFT JOIN LATERAL (
+        SELECT decision, reason FROM firmware_reviews
+        WHERE project_id=a.project_id AND artifact_id=a.id
+        ORDER BY project_revision DESC LIMIT 1
+      ) latest ON true`;
+  }
+  async firmwareArtifacts(owner: string, projectId: string) {
+    return this.transaction(async (client) => {
+      await this.project(client, owner, projectId, 'share');
+      const result = await client.query<FirmwareArtifactRow>(
+        this.firmwareArtifactQuery() +
+          ' WHERE a.project_id=$1 ORDER BY a.created_at DESC,a.id DESC LIMIT 100',
+        [projectId],
+      );
+      return result.rows.map(publicFirmwareArtifact);
+    });
+  }
+  async firmwareArtifactRecord(owner: string, projectId: string, artifactId: string) {
+    return this.transaction(async (client) => {
+      await this.project(client, owner, projectId, 'share');
+      const result = await client.query<FirmwareArtifactRow>(
+        this.firmwareArtifactQuery() + ' WHERE a.project_id=$1 AND a.id=$2',
+        [projectId, artifactId],
+      );
+      if (!result.rows[0]) throw new RepositoryError('NOT_FOUND', 404);
+      return result.rows[0];
+    });
+  }
+  async withFirmwareArtifact<T>(
+    owner: string,
+    projectId: string,
+    artifactId: string,
+    action: (record: FirmwareArtifactRow) => Promise<T>,
+  ) {
+    return this.transaction(async (client) => {
+      // Keep deletion from starting between authorization and the bounded object read.
+      await this.project(client, owner, projectId, 'share');
+      const result = await client.query<FirmwareArtifactRow>(
+        this.firmwareArtifactQuery() + ' WHERE a.project_id=$1 AND a.id=$2',
+        [projectId, artifactId],
+      );
+      const record = result.rows[0];
+      if (!record) throw new RepositoryError('NOT_FOUND', 404);
+      return action(record);
+    });
+  }
+  async firmwareArtifactReviews(owner: string, projectId: string, artifactId: string) {
+    return this.transaction(async (client) => {
+      await this.project(client, owner, projectId, 'share');
+      const artifact = await client.query(
+        'SELECT id FROM firmware_artifacts WHERE project_id=$1 AND id=$2',
+        [projectId, artifactId],
+      );
+      if (!artifact.rows[0]) throw new RepositoryError('NOT_FOUND', 404);
+      const reviews = await client.query<{
+        id: string;
+        project_revision: number;
+        decision: 'accepted' | 'rejected';
+        reason: string | null;
+        created_at: Date;
+      }>(
+        'SELECT id,project_revision,decision,reason,created_at FROM firmware_reviews WHERE project_id=$1 AND artifact_id=$2 ORDER BY project_revision DESC LIMIT 100',
+        [projectId, artifactId],
+      );
+      return reviews.rows.map((review) => ({
+        id: review.id,
+        projectRevision: review.project_revision,
+        decision: review.decision,
+        reason: review.reason,
+        createdAt: review.created_at.toISOString(),
+      }));
+    });
+  }
   async import(client: PoolClient, projectId: string, id: string) {
     const result = await client.query<ImportRow>(
       'SELECT * FROM imports WHERE project_id=$1 AND id=$2',
@@ -343,6 +452,20 @@ export class Repository {
       'SELECT id,filename,status,source_digest,selected_conversation_id,bundle_digest,extraction_digest,extraction_mode,parser_version,normalizer_schema,extractor_version,provider_model,prompt_version FROM imports WHERE project_id=$1 ORDER BY id',
       [project.id],
     );
+    const firmwareArtifacts = await client.query(
+      `SELECT a.id,a.sha256,a.byte_length,a.language,a.entrypoint,a.board_part_id,
+        a.catalog_release_id,a.project_revision,a.created_at,
+        coalesce(latest.decision,'pending') AS review_status,
+        latest.project_revision AS review_revision
+      FROM firmware_artifacts a
+      LEFT JOIN LATERAL (
+        SELECT decision,project_revision FROM firmware_reviews
+        WHERE project_id=a.project_id AND artifact_id=a.id
+        ORDER BY project_revision DESC LIMIT 1
+      ) latest ON true
+      WHERE a.project_id=$1 ORDER BY a.created_at,a.id`,
+      [project.id],
+    );
     let associatedGraph = graphRef;
     if (associatedGraph === undefined) {
       const graph = await client.query<{
@@ -362,6 +485,7 @@ export class Repository {
       schemaVersion: 1,
       project: publicProject(project),
       imports: imports.rows,
+      firmwareArtifacts: firmwareArtifacts.rows,
       reviewThroughRevision: project.revision,
       circuitGraph: associatedGraph,
     };
@@ -715,9 +839,10 @@ export class Repository {
           [item.object_key],
         );
         if (!intent.rows[0]) return;
-        const accepted = await client.query('SELECT id FROM imports WHERE object_key=$1', [
-          item.object_key,
-        ]);
+        const accepted = await client.query(
+          'SELECT id FROM imports WHERE object_key=$1 UNION ALL SELECT id FROM firmware_artifacts WHERE object_key=$1 LIMIT 1',
+          [item.object_key],
+        );
         if (!accepted.rows[0]) await removeObject(item.object_key);
         await client.query('DELETE FROM upload_intents WHERE object_key=$1', [item.object_key]);
         removed++;

@@ -18,18 +18,22 @@ export type { Esp32Gpio19Signal, LedStateMapping } from './adapters/esp32-gpio19
 export const SIMULATION_CONTRACT_VERSION = '1.0.0';
 export const MAX_SIMULATION_RESULT_BYTES = 2_000_000;
 export const MAX_SIMULATION_EVENTS = 5_000;
+export const MAX_FIRMWARE_ARTIFACT_BYTES = 2_000_000;
 
 export const firmwareArtifactRefSchema = z
   .object({
     schemaVersion: z.literal(1),
     artifactId: z.string().min(1).max(200),
     projectId: z.string().min(1).max(200),
+    // Revision when this immutable source artifact was created or attached.
+    // A run separately binds the exact current graph revision and digest.
     projectRevision: z.number().int().positive(),
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
-    byteLength: z.number().int().positive().max(2_000_000),
+    byteLength: z.number().int().positive().max(MAX_FIRMWARE_ARTIFACT_BYTES),
     language: z.enum(['c', 'cpp', 'arduino-cpp', 'esp-idf-c']),
     entrypoint: z.string().min(1).max(200),
     boardPartId: z.string().min(1).max(200),
+    catalogReleaseId: z.string().min(1).max(100),
     reviewStatus: z.literal('accepted'),
   })
   .strict();
@@ -379,11 +383,11 @@ export function assessSimulationEligibility(input: {
   const firmwareBoard = catalog.parts.find((part) => part.id === firmware.boardPartId);
   if (
     firmware.projectId !== graph.projectId ||
-    firmware.projectRevision !== graph.projectRevision ||
+    firmware.catalogReleaseId !== catalog.releaseId ||
     firmwareBoard?.category !== 'development-board' ||
     !graph.components.some((component) => component.catalogPartId === firmware.boardPartId)
   )
-    reasons.push('The accepted firmware artifact is not bound to this project revision and board.');
+    reasons.push('The accepted firmware artifact is not bound to this project and board.');
   const projectBoards = graph.components.filter((component) =>
     catalog.parts.some(
       (part) => part.id === component.catalogPartId && part.category === 'development-board',
@@ -531,7 +535,7 @@ export function validateSimulationRunAgainstDesign(input: {
     run.binding.firmwareArtifactId !== firmware.artifactId ||
     run.binding.firmwareDigest !== firmware.sha256 ||
     firmware.projectId !== graph.projectId ||
-    firmware.projectRevision !== graph.projectRevision ||
+    firmware.catalogReleaseId !== catalog.releaseId ||
     !graph.components.some((component) => component.catalogPartId === firmware.boardPartId)
   )
     issues.push('Run firmware reference does not match the accepted artifact for this design.');

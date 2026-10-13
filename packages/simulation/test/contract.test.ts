@@ -82,6 +82,7 @@ const firmware = firmwareArtifactRefSchema.parse({
   language: 'arduino-cpp',
   entrypoint: 'src/main.cpp',
   boardPartId: graph.components[0]!.catalogPartId,
+  catalogReleaseId: catalog.releaseId,
   reviewStatus: 'accepted',
 });
 const capability = {
@@ -226,6 +227,44 @@ describe('simulation contracts', () => {
         engineVersion: capability.engineVersion,
       },
     });
+  });
+
+  it('keeps artifact provenance revision separate from the graph revision used by a run', () => {
+    const firmwareCreatedAfterGraph = {
+      ...firmware,
+      projectRevision: graph.projectRevision + 3,
+    };
+    expect(
+      assessSimulationEligibility({
+        graph,
+        catalog,
+        report,
+        firmware: firmwareCreatedAfterGraph,
+        reportIsCurrent: true,
+        capability,
+      }),
+    ).toMatchObject({ eligible: true, binding: { projectRevision: graph.projectRevision } });
+    const completedRun = {
+      schemaVersion: 1 as const,
+      contractVersion: '1.0.0' as const,
+      runId: 'run_artifact_revision_independence',
+      status: 'completed' as const,
+      binding,
+      events: [],
+      unsupportedFeatures: [],
+      limitations: [],
+      failure: null,
+      simulatedDurationMs: 0,
+    };
+    expect(
+      validateSimulationRunAgainstDesign({
+        run: completedRun,
+        graph,
+        catalog,
+        firmware: firmwareCreatedAfterGraph,
+        expectedBinding: binding,
+      }),
+    ).toMatchObject({ valid: true });
   });
 
   it('fails closed for unavailable providers, stale reports, unreviewed firmware and unsupported components', () => {

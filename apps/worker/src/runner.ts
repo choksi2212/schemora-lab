@@ -268,7 +268,7 @@ export class Worker {
       if (!project || project.status !== 'deleting') return null;
       return (
         await client.query<{ object_key: string }>(
-          'SELECT object_key FROM imports WHERE project_id=$1 UNION SELECT object_key FROM upload_intents WHERE project_id=$1',
+          'SELECT object_key FROM imports WHERE project_id=$1 UNION SELECT object_key FROM firmware_artifacts WHERE project_id=$1 UNION SELECT object_key FROM upload_intents WHERE project_id=$1',
           [job.project_id],
         )
       ).rows;
@@ -280,6 +280,8 @@ export class Worker {
       const project = await this.repository.jobScope(client, job);
       if (!project || project.status !== 'deleting') return;
       await client.query('DELETE FROM reviews WHERE project_id=$1', [job.project_id]);
+      await client.query('DELETE FROM firmware_reviews WHERE project_id=$1', [job.project_id]);
+      await client.query('DELETE FROM firmware_artifacts WHERE project_id=$1', [job.project_id]);
       await client.query('DELETE FROM revisions WHERE project_id=$1', [job.project_id]);
       await client.query('DELETE FROM imports WHERE project_id=$1', [job.project_id]);
       await client.query('DELETE FROM import_artifacts WHERE project_id=$1', [job.project_id]);

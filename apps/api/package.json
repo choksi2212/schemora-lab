@@ -14,6 +14,7 @@
     "@schemora/circuit-model": "workspace:*",
     "@schemora/assembly-plan": "workspace:*",
     "@schemora/contracts": "workspace:*",
+    "@schemora/simulation": "workspace:*",
     "@schemora/persistence": "workspace:*",
     "@schemora/storage": "workspace:*",
     "@schemora/validation": "workspace:*",

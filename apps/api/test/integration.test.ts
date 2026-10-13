@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { Repository, type Job } from '@schemora/persistence';
 import { FileStorage } from '@schemora/storage';
 import { Worker } from '../../worker/src/runner.js';
+import { getCatalogRelease } from '@schemora/catalog';
 import { readConfig } from '../src/config.js';
 import { buildApp } from '../src/app.js';
 
@@ -25,6 +26,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
     let directory: string;
     let app: ReturnType<typeof buildApp>;
     let worker: Worker;
+    let storage: FileStorage;
     let tokenA: string;
     let tokenB: string;
     async function token(subject: string) {
@@ -38,7 +40,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
         .sign(new TextEncoder().encode(secret));
     }
     async function request(
-      method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+      method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
       url: string,
       payload?: unknown,
       identity = tokenA,
@@ -68,7 +70,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
     }
     beforeAll(async () => {
       directory = await mkdtemp(join(tmpdir(), 'schemora-test-'));
-      const storage = new FileStorage(directory, 'test');
+      storage = new FileStorage(directory, 'test');
       app = buildApp(config, repository, storage);
       worker = new Worker(repository, storage);
       tokenA = await token(userA);
@@ -79,6 +81,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       await repository.transaction(async (client) => {
         for (const table of [
           'upload_intents',
+          'firmware_reviews',
+          'firmware_artifacts',
           'reviews',
           'revisions',
           'imports',
@@ -156,6 +160,154 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
         expect(cancelled.data.import.status).toBe('cancelled');
       }
     });
+    it('stores immutable private firmware source and requires an explicit project-scoped review', async () => {
+      const project = await create();
+      const catalog = getCatalogRelease();
+      const graph = {
+        schemaVersion: 1,
+        id: randomUUID(),
+        projectId: project.id,
+        projectRevision: 2,
+        catalogReleaseId: catalog.releaseId,
+        components: [
+          {
+            id: 'board_1',
+            catalogPartId: 'board.espressif.esp32-devkitc-v4.wroom-32e.male',
+          },
+        ],
+        breadboards: [],
+        terminalPlacements: [],
+        wires: [],
+      };
+      const saved = await request('PUT', '/v1/projects/' + project.id + '/circuit', {
+        expectedRevision: 1,
+        graph,
+      });
+      expect(saved.status).toBe(200);
+      const source = 'void app_main(void) {\n  for (;;) {}\n}\n';
+      const idempotencyKey = randomUUID();
+      const uploaded = await request(
+        'POST',
+        '/v1/projects/' + project.id + '/firmware-artifacts',
+        {
+          expectedRevision: saved.data.project.revision,
+          language: 'esp-idf-c',
+          entrypoint: 'main/main.c',
+          contentBase64: Buffer.from(source).toString('base64'),
+        },
+        tokenA,
+        idempotencyKey,
+      );
+      expect(uploaded.status).toBe(201);
+      expect(uploaded.data.artifact).toMatchObject({
+        projectRevision: uploaded.data.project.revision,
+        language: 'esp-idf-c',
+        entrypoint: 'main/main.c',
+        boardPartId: 'board.espressif.esp32-devkitc-v4.wroom-32e.male',
+        catalogReleaseId: catalog.releaseId,
+        byteLength: Buffer.byteLength(source),
+        reviewStatus: 'pending',
+      });
+      expect(uploaded.data.artifact.sha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(JSON.stringify(uploaded.data)).not.toContain('object_key');
+      const replay = await request(
+        'POST',
+        '/v1/projects/' + project.id + '/firmware-artifacts',
+        {
+          expectedRevision: saved.data.project.revision,
+          language: 'esp-idf-c',
+          entrypoint: 'main/main.c',
+          contentBase64: Buffer.from(source).toString('base64'),
+        },
+        tokenA,
+        idempotencyKey,
+      );
+      expect(replay.status).toBe(200);
+      expect(replay.data.artifact.id).toBe(uploaded.data.artifact.id);
+      const content = await app.inject({
+        method: 'GET',
+        url:
+          '/v1/projects/' +
+          project.id +
+          '/firmware-artifacts/' +
+          uploaded.data.artifact.id +
+          '/content',
+        headers: { authorization: 'Bearer ' + tokenA },
+      });
+      expect(content.statusCode).toBe(200);
+      expect(content.body).toBe(source);
+      const crossOwner = await request(
+        'GET',
+        '/v1/projects/' + project.id + '/firmware-artifacts/' + uploaded.data.artifact.id,
+        undefined,
+        tokenB,
+      );
+      expect(crossOwner.status).toBe(404);
+      const accepted = await request(
+        'POST',
+        '/v1/projects/' +
+          project.id +
+          '/firmware-artifacts/' +
+          uploaded.data.artifact.id +
+          '/reviews',
+        {
+          expectedRevision: uploaded.data.project.revision,
+          decision: 'accepted',
+          reason: 'Reviewed against the project firmware requirements.',
+        },
+      );
+      expect(accepted.status).toBe(200);
+      expect(accepted.data.artifact.reviewStatus).toBe('accepted');
+      const listed = await request('GET', '/v1/projects/' + project.id + '/firmware-artifacts');
+      expect(listed.data.items[0].reviewStatus).toBe('accepted');
+      const history = await request(
+        'GET',
+        '/v1/projects/' +
+          project.id +
+          '/firmware-artifacts/' +
+          uploaded.data.artifact.id +
+          '/reviews',
+      );
+      expect(history.data.items).toHaveLength(1);
+      expect(history.data.items[0].decision).toBe('accepted');
+      const unauthorizedReview = await request(
+        'POST',
+        '/v1/projects/' +
+          project.id +
+          '/firmware-artifacts/' +
+          uploaded.data.artifact.id +
+          '/reviews',
+        { expectedRevision: accepted.data.project.revision, decision: 'rejected' },
+        tokenB,
+      );
+      expect(unauthorizedReview.status).toBe(404);
+      const storedRecord = await repository.firmwareArtifactRecord(
+        userA,
+        project.id,
+        uploaded.data.artifact.id,
+      );
+      const deleting = await request('DELETE', '/v1/projects/' + project.id, {
+        expectedRevision: accepted.data.project.revision,
+      });
+      expect(deleting.data.project.status).toBe('deleting');
+      let purged = false;
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await worker.tick('delete_project');
+        const state = await repository.pool.query<{ status: string }>(
+          'SELECT status FROM projects WHERE id=$1',
+          [project.id],
+        );
+        if (state.rows[0]?.status === 'deleted') {
+          purged = true;
+          break;
+        }
+      }
+      expect(purged).toBe(true);
+      await expect(storage.read(storedRecord.object_key, storedRecord.sha256)).rejects.toThrow();
+      expect(
+        (await request('GET', '/v1/projects/' + project.id + '/firmware-artifacts')).status,
+      ).toBe(404);
+    }, 60_000);
     it('normalizes a selected thread, preserves evidence and records reviewed corrections', async () => {
       const project = await create();
       const source = await upload(project);

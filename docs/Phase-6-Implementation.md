@@ -12,7 +12,7 @@
 
 Phase 6 should eventually let a user run a versioned firmware artifact against a supported representation of the saved circuit, inspect serial output and selected simulated component states, and understand where the model stops. The expected state must come from a simulator run. A renderer animation, a successful compile, or a passing structural check is not simulation evidence.
 
-This initial slice provides strict, versioned data contracts, checks whether the exact graph/catalog/report/firmware tuple could be sent to a declared provider, and represents missing provider capability as an explicit unsupported result. It does not add firmware upload or storage, a compiler, a provider integration, a run queue/API, Monaco, or simulator-driven scene updates. The application must not expose a “Run simulation” action until those parts exist and a supported reference run has been verified.
+This slice now also stores bounded UTF-8 firmware source as immutable private artifacts, records server-computed SHA-256 and board/catalog binding, requires an explicit append-only accept/reject review, and removes artifact bytes through project deletion. The current firmware interface is authenticated API-level source upload/retrieval; there is no editor, compiler, provider execution, run queue/API, or live simulator-driven scene update. The application must not expose a “Run simulation” action until those parts exist and a supported reference run has been verified.
 
 The distinction matters for the currently modeled circuit: its LED polarity, resistor path, and graph integrity findings can pass, while the report’s overall status remains `unknown` because the electrical-scope rule explicitly does not establish GPIO current budget, thermal margin, transient conditions, or other omitted behavior. Firmware simulation may be useful for program behavior, but it cannot turn this report into an electrical safety approval.
 
@@ -81,7 +81,7 @@ Provider capabilities explicitly list exact board IDs, component IDs, topology I
 
 The contract assessor parses provider declarations at runtime, limits serialized output to 2 MB, recomputes graph integrity and the validation report, and carries the selected provider/engine versions directly into the successful run binding. A second result validator binds output events to the exact graph/catalog snapshot and rejects unknown component IDs, LED events targeting non-LED parts, and sensor readings for components that do not have a modeled sensor schema.
 
-The `reviewStatus: accepted` and `reportIsCurrent` values in the pure package are assertions supplied by its caller. They are not proof that the current user accepted the stored firmware artifact or that the report is the repository’s current report. Any future route/worker must load those records under project ownership, verify the stored firmware bytes against the SHA-256, resolve the accepted review state from persistence, and establish currentness against the canonical current revision before calling the assessor. Never accept these authority fields from an untrusted browser request.
+The `reviewStatus: accepted` and `reportIsCurrent` values in the pure package are assertions supplied by its caller. They are not proof that the current user accepted the stored firmware artifact or that the report is the repository’s current report. Any run route/worker must load these records under project ownership, verify the stored firmware bytes against the SHA-256 and byte length, resolve the latest accepted review state from persistence, and establish report currentness against the selected graph snapshot before calling the assessor. Never accept these authority fields from an untrusted browser request. Firmware `projectRevision` records the project revision at which source was attached; the run binding independently identifies the exact graph revision/digest and firmware artifact digest. Non-graph project events therefore do not silently invalidate an otherwise eligible firmware artifact.
 
 ### Fail-closed eligibility
 
@@ -108,6 +108,33 @@ flowchart LR
 
 The package is contract and eligibility logic only. It has no database, object storage, worker, HTTP endpoint, compiler, subprocess, provider SDK, or ability to mutate the circuit. The existing import worker’s child-process boundary is not an acceptable firmware sandbox; firmware execution must use a separately isolated runtime or an approved vendor-hosted service.
 
+### Firmware source artifact lifecycle
+
+The first authoring contract accepts UTF-8 source files only (`c`, `cpp`, `arduino-cpp`, or `esp-idf-c`) with a language-matched `.c`, `.cc`, or `.cpp` entrypoint. It does not accept compiled images, archives, project bundles, arbitrary binary data, or executable output. The maximum source size is 2,000,000 bytes. This is intentionally distinct from the larger conversation-import quota. The API requires an active owned project, the caller's expected project revision, and an idempotency key; it resolves the unique development board from the saved graph and pinned catalog. The client cannot authoritatively set project ownership, target board, catalog release, digest, byte length, storage key, or review status.
+
+Bytes are written to private storage under a server-generated opaque UUID only after a durable upload intent is recorded. PostgreSQL stores immutable metadata: project and source-creation revision, actor, object key, server-computed SHA-256, exact byte length, language, entrypoint, board part, catalog release, and creation time. The artifact row and review decisions reject updates. Review is a separate append-only history; latest decision determines `pending`, `accepted`, or `rejected`. Acceptance means the owner explicitly selected this source version for future work. It is not a security audit, compilation result, provider compatibility claim, or safety approval. A later decision can supersede the prior decision without changing the source bytes.
+
+Authorized endpoints list and retrieve artifact metadata, download source after digest and length verification, upload a new immutable version, append an accept/reject decision, and read bounded review history. Public responses never include private object keys. Project archive retains artifacts read-only. Project deletion purges each private object, including firmware objects and expired/in-flight upload intents, before removing artifact and review metadata. There is no per-artifact delete or automatic source TTL in this increment; source remains with the project until its deletion workflow runs. A failed object purge leaves the project deletion retryable and retains the metadata needed to retry.
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant API as Authenticated API
+  participant Graph as Project graph and catalog
+  participant DB as PostgreSQL
+  participant Store as Private object storage
+  User->>API: Upload UTF-8 source, language, entrypoint, expected revision
+  API->>Graph: Resolve active project, current graph, exact board, catalog release
+  API->>DB: Register expiring upload intent
+  API->>Store: Put bytes at server-generated opaque key
+  Store-->>API: SHA-256 digest
+  API->>DB: Commit immutable artifact metadata and project revision
+  API-->>User: Artifact metadata with pending review; no object key
+  User->>API: Accept or reject artifact with expected revision
+  API->>DB: Append review decision; preserve source and prior review history
+  API-->>User: Current derived review status
+```
+
 ## 5. Coverage matrix for the current catalog
 
 | Current item                             | Exact catalog identity                            | Contract behavior now                                                                 | Required proof before support                                                                                                                                               |
@@ -122,6 +149,7 @@ The catalog currently has no simulator aliases, execution profiles, or supported
 ## 6. Files and package surface
 
 - `packages/simulation/src/index.ts` — schemas, provider interface, fail-closed eligibility, graph-bound output validation, and explicit unavailable result.
+- `apps/api/src/app.ts`, `packages/persistence/migrations/0006_firmware_artifacts.sql`, and `packages/storage/src/index.ts` — authenticated, bounded source artifact upload/list/read/review API; immutable metadata and review history; private-byte integrity checks; and durable project-deletion cleanup.
 - `packages/simulation/src/adapters/esp32-gpio19-led.ts` — strict graph-derived GPIO19-to-LED digital-state mapper for one exact catalog profile.
 - `packages/simulation/test/contract.test.ts` — identity, coverage, output ordering, unsupported topologies, mapper polarity, malformed signal, and unavailable-result checks.
 - `examples/phase6-qemu-uart/` — minimal ESP-IDF reference app that requests GPIO19 toggles and emits bounded UART markers for the official QEMU UART POC and the fork callback harness.
@@ -175,7 +203,7 @@ Phase 6 remains open. Required work, in dependency order:
 2. **Complete at the adapter/renderer boundary:** The narrow graph-derived adapter accepts only the exact DevKitC GPIO19 → 220-ohm resistor → WP7113ID anode/cathode → board-ground path. The captured GPIO trace replays to expected instance-bound LED on/off states, and reversed, open, branched, unrelated, and unsupported cases are rejected by focused tests. The scene consumer applies only allowlisted LED states from a completed, digest-bound run and clears them when graph or firmware identity is missing or stale. The workspace has no run API or current firmware digest yet, so this seam currently displays no simulated state. Preserve the statement that the ideal digital LED model does not calculate current or certify electrical safety.
 3. **Complete as screening; production gate remains open:** Review the pinned engine/source/dependency license signals and fork maintenance/build risks. Disposition: the PICSimLab fork is permitted only as an isolated internal reference POC; it is not approved as a production provider or for commercial distribution. Before any production decision, complete a source/binary SBOM and notices audit, obtain counsel's review of distribution/hosting obligations, establish commercial rights where applicable, assign a maintenance owner, and document an update/CVE/ABI compatibility policy. Reassess alternatives only against the exact catalog board and circuit requirements.
 4. **Partial: contract-level trace-to-scene proof complete.** One immutable graph/catalog/firmware binding now carries the captured GPIO trace through mapping, run validation, and scene-state resolution. Still build and repeat a full reference POC in a clean environment that drives the actual browser scene from a real run source; record engine/adapter versions, expected serial transcript, observed GPIO trace, rendered external LED state, runtime limits, and tolerances. Do not call it complete if only the MCU ran or the scene resolver was tested without a live browser update.
-5. Define approved firmware upload/authoring, immutable artifact storage, content hash, accepted/rejected review state, project revision association, size limits, retention, and deletion behavior.
+5. **Complete for source-artifact lifecycle:** Authenticated owner-scoped upload/list/read and accept/reject endpoints; immutable UTF-8 source versions; server-computed digest and byte length; exact board/catalog capture; 2,000,000-byte limit; project revision provenance distinct from graph snapshot identity; append-only review history; retention until project deletion; and deletion-purge integration. A browser editor, compiler, compiled-image format, and per-artifact deletion remain future work.
 6. Implement a provider adapter conforming to the contract; map the normalized graph to the provider’s circuit model and report unsupported parts/edges rather than omitting them.
 7. Add simulation run persistence, project-scoped create/read/cancel endpoints, idempotency, input snapshots, stale-run handling, bounded queue capacity, and output retention. Never execute provider calls inside a database transaction or web request process.
 8. Implement the dedicated sandbox or approved hosted runtime. Isolate tenant data; use non-root execution, no general network egress, read-only base files, ephemeral bounded workspaces, hard CPU/memory/process/disk/output/time limits, cancellation and cleanup, and no database credentials in the runtime.
@@ -183,7 +211,7 @@ Phase 6 remains open. Required work, in dependency order:
 10. The scene now clears LED state for missing or stale graph/firmware identities and accepts only allowlisted LED events from completed runs. When the run API and worker are added, connect their validated outputs to this prop and prove the live end-to-end scene update; never use fixed/timer-driven animation as a simulation result.
 11. Publish a coverage and limitations view distinguishing simulated, visual-only, unsupported, and unmodeled behavior. Keep simulation output separate from validation and safety conclusions.
 
-The Phase 6 completion criteria remain those in the roadmap: a reference firmware project executes repeatably in a selected simulator and drives the corresponding visual outputs; unsupported designs fail clearly instead of being reported as simulated. The contract slice, UART POC, reproducible host-callback harness, captured-trace graph replay, trace-to-contract-to-scene-state integration proof, fail-closed renderer consumer, and initial license/maintenance screening are implemented. A live browser scene update from a real run source, production licensing decision and dependency audit, upload/storage, production worker isolation, run persistence, and simulation controls remain unmet. Do not advance to Phase 7 while these Phase 6 exit criteria are open.
+The Phase 6 completion criteria remain those in the roadmap: a reference firmware project executes repeatably in a selected simulator and drives the corresponding visual outputs; unsupported designs fail clearly instead of being reported as simulated. The contract slice, UART POC, reproducible host-callback harness, captured-trace graph replay, trace-to-contract-to-scene-state integration proof, fail-closed renderer consumer, initial license/maintenance screening, and private source-artifact lifecycle are implemented. A live browser scene update from a real run source, production licensing decision and dependency audit, source compilation, production worker isolation, run persistence, simulation controls, and provider adapter remain unmet. Do not advance to Phase 7 while these Phase 6 exit criteria are open.
 
 ## 9. Risks and controls
 

@@ -121,6 +121,7 @@ describe('simulation scene state', () => {
       language: 'esp-idf-c' as const,
       entrypoint: 'main/main.c',
       boardPartId: graph.components[0]!.catalogPartId,
+      catalogReleaseId: catalog.releaseId,
       reviewStatus: 'accepted' as const,
     };
     const binding = {

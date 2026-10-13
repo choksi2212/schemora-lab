@@ -3,8 +3,15 @@ import { jwtVerify } from 'jose';
 import { z, ZodError } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { currentCatalogRelease } from './catalog.js';
-import { Repository, RepositoryError, publicImport, publicReview } from '@schemora/persistence';
+import {
+  Repository,
+  RepositoryError,
+  publicFirmwareArtifact,
+  publicImport,
+  publicReview,
+} from '@schemora/persistence';
 import { MAX_SOURCE_BYTES, type PrivateStorage } from '@schemora/storage';
+import { MAX_FIRMWARE_ARTIFACT_BYTES } from '@schemora/simulation';
 import { circuitGraphSchema, validateCircuitGraph } from '@schemora/circuit-model';
 import { getCatalogRelease } from '@schemora/catalog';
 import { validateCircuit } from '@schemora/validation';
@@ -15,6 +22,7 @@ const uuid = z.string().uuid();
 const expectedRevision = z.number().int().positive();
 const scope = z.object({ projectId: uuid });
 const importScope = scope.extend({ importId: uuid });
+const firmwareArtifactScope = scope.extend({ artifactId: uuid });
 const mutation = z.object({ expectedRevision }).strict();
 const circuitGraphWrite = z.object({ expectedRevision, graph: circuitGraphSchema }).strict();
 const titleSchema = z.string().trim().min(1).max(120);
@@ -52,6 +60,47 @@ const reviewSchema = z
         message: 'Only corrections may set a value',
       });
   });
+const firmwareUploadSchema = z
+  .object({
+    expectedRevision,
+    language: z.enum(['c', 'cpp', 'arduino-cpp', 'esp-idf-c']),
+    entrypoint: z
+      .string()
+      .min(1)
+      .max(200)
+      .regex(/^(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*\.(c|cc|cpp)$/),
+    contentBase64: z
+      .string()
+      .min(4)
+      .max(Math.ceil(MAX_FIRMWARE_ARTIFACT_BYTES / 3) * 4)
+      .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+  })
+  .strict()
+  .superRefine((body, ctx) => {
+    const isC = body.entrypoint.endsWith('.c');
+    if ((body.language === 'c' || body.language === 'esp-idf-c') !== isC)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['entrypoint'],
+        message: 'The entrypoint extension must match the selected source language.',
+      });
+    if (
+      (body.language === 'cpp' || body.language === 'arduino-cpp') &&
+      !/\.(cc|cpp)$/.test(body.entrypoint)
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['entrypoint'],
+        message: 'C++ firmware entrypoints must use a .cc or .cpp extension.',
+      });
+  });
+const firmwareReviewSchema = z
+  .object({
+    expectedRevision,
+    decision: z.enum(['accepted', 'rejected']),
+    reason: z.string().trim().max(2000).optional(),
+  })
+  .strict();
 function key(request: FastifyRequest) {
   return uuid.parse(request.headers['idempotency-key']);
 }
@@ -121,6 +170,27 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
     return principal;
   };
   const envelope = (request: FastifyRequest, data: unknown) => ({ data, requestId: request.id });
+  const firmwareTarget = async (principal: string, projectId: string) => {
+    const current = await repository.latestCircuitGraph(principal, projectId);
+    if (!current.graphSnapshot)
+      throw new RepositoryError('FIRMWARE_GRAPH_REQUIRED', 409, current.project.revision);
+    const graphResult = circuitGraphSchema.safeParse(current.graphSnapshot.graph);
+    const catalog = getCatalogRelease();
+    if (
+      !graphResult.success ||
+      graphResult.data.catalogReleaseId !== catalog.releaseId ||
+      !validateCircuitGraph(graphResult.data, { release: catalog }).valid
+    )
+      throw new RepositoryError('FIRMWARE_TARGET_UNSUPPORTED', 409, current.project.revision);
+    const boards = graphResult.data.components.filter((component) =>
+      catalog.parts.some(
+        (part) => part.id === component.catalogPartId && part.category === 'development-board',
+      ),
+    );
+    if (boards.length !== 1)
+      throw new RepositoryError('FIRMWARE_TARGET_UNSUPPORTED', 409, current.project.revision);
+    return { boardPartId: boards[0]!.catalogPartId, catalogReleaseId: catalog.releaseId };
+  };
   app.setErrorHandler((error, request, reply) => {
     const domain = error instanceof RepositoryError;
     const frameworkStatus =
@@ -146,6 +216,13 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
               VALIDATION_REQUIRED:
                 'Save and validate this exact circuit before creating an assembly guide.',
               CHECKS_FAILED: 'Resolve failing circuit checks before creating an assembly guide.',
+              FIRMWARE_GRAPH_REQUIRED:
+                'Save a circuit containing one supported development board before adding firmware.',
+              FIRMWARE_TARGET_UNSUPPORTED:
+                'The saved circuit must resolve to exactly one development board in the current catalog.',
+              INVALID_FIRMWARE_SOURCE:
+                'Upload valid UTF-8 C or C++ source no larger than 2,000,000 bytes.',
+              FIRMWARE_ARTIFACT_LIMIT: 'This project has reached its firmware version limit.',
             }[code] ?? 'This action is unavailable in the current state.')
           : invalid
             ? 'Check the submitted fields.'
@@ -447,6 +524,180 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
           .catch(() => {});
       throw error;
     }
+  });
+  app.get('/v1/projects/:projectId/firmware-artifacts', async (request) => {
+    const { projectId } = scope.parse(request.params);
+    return envelope(request, {
+      items: await repository.firmwareArtifacts(owner(request), projectId),
+    });
+  });
+  app.post('/v1/projects/:projectId/firmware-artifacts', async (request, reply) => {
+    const { projectId } = scope.parse(request.params);
+    const body = firmwareUploadSchema.parse(request.body);
+    const bytes = Buffer.from(body.contentBase64, 'base64');
+    const source = bytes.toString('utf8');
+    if (
+      !bytes.length ||
+      bytes.length > MAX_FIRMWARE_ARTIFACT_BYTES ||
+      bytes.toString('base64') !== body.contentBase64 ||
+      source.includes('\u0000') ||
+      !Buffer.from(source, 'utf8').equals(bytes)
+    )
+      throw new RepositoryError('INVALID_FIRMWARE_SOURCE', 400);
+    const principal = owner(request);
+    const target = await firmwareTarget(principal, projectId);
+    const objectKey = randomUUID();
+    const artifactId = randomUUID();
+    await repository.registerUploadIntent(principal, projectId, objectKey);
+    let putSucceeded = false;
+    let artifactCommitted = false;
+    try {
+      const digest = await storage.put(objectKey, bytes);
+      putSucceeded = true;
+      const result = await repository.mutate(
+        principal,
+        projectId,
+        body.expectedRevision,
+        key(request),
+        'firmware_artifact_created',
+        {
+          expectedRevision: body.expectedRevision,
+          sha256: digest,
+          byteLength: bytes.length,
+          language: body.language,
+          entrypoint: body.entrypoint,
+          boardPartId: target.boardPartId,
+          catalogReleaseId: target.catalogReleaseId,
+        },
+        async (client, project) => {
+          const count = await client.query(
+            'SELECT count(*)::int AS count FROM firmware_artifacts WHERE project_id=$1',
+            [projectId],
+          );
+          if (count.rows[0].count >= 50) throw new RepositoryError('FIRMWARE_ARTIFACT_LIMIT', 429);
+          await repository.consumeUploadIntent(client, projectId, objectKey);
+          await client.query(
+            'INSERT INTO firmware_artifacts(id,project_id,project_revision,actor_id,object_key,sha256,byte_length,language,entrypoint,board_part_id,catalog_release_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+            [
+              artifactId,
+              projectId,
+              project.revision,
+              principal,
+              objectKey,
+              digest,
+              bytes.length,
+              body.language,
+              body.entrypoint,
+              target.boardPartId,
+              target.catalogReleaseId,
+            ],
+          );
+          return { firmwareArtifactId: artifactId };
+        },
+      );
+      artifactCommitted = result.firmwareArtifactId === artifactId;
+      if (!artifactCommitted) {
+        await storage.delete(objectKey);
+        await repository.discardUploadIntent(objectKey);
+      }
+      const record = await repository.firmwareArtifactRecord(
+        principal,
+        projectId,
+        result.firmwareArtifactId,
+      );
+      return reply.code(artifactCommitted ? 201 : 200).send(
+        envelope(request, {
+          project: result.project,
+          artifact: publicFirmwareArtifact(record),
+        }),
+      );
+    } catch (error) {
+      if (!artifactCommitted)
+        await storage
+          .delete(objectKey)
+          .then(() => (putSucceeded ? repository.discardUploadIntent(objectKey) : undefined))
+          .catch(() => {});
+      throw error;
+    }
+  });
+  app.get('/v1/projects/:projectId/firmware-artifacts/:artifactId', async (request) => {
+    const { projectId, artifactId } = firmwareArtifactScope.parse(request.params);
+    const record = await repository.firmwareArtifactRecord(owner(request), projectId, artifactId);
+    return envelope(request, { artifact: publicFirmwareArtifact(record) });
+  });
+  app.get('/v1/projects/:projectId/firmware-artifacts/:artifactId/reviews', async (request) => {
+    const { projectId, artifactId } = firmwareArtifactScope.parse(request.params);
+    const principal = owner(request);
+    const artifact = await repository.firmwareArtifactRecord(principal, projectId, artifactId);
+    const reviews = await repository.firmwareArtifactReviews(principal, projectId, artifactId);
+    return envelope(request, { artifactId: artifact.id, items: reviews });
+  });
+  app.get(
+    '/v1/projects/:projectId/firmware-artifacts/:artifactId/content',
+    async (request, reply) => {
+      const { projectId, artifactId } = firmwareArtifactScope.parse(request.params);
+      const { record, bytes } = await repository.withFirmwareArtifact(
+        owner(request),
+        projectId,
+        artifactId,
+        async (record) => {
+          const bytes = await storage.read(record.object_key, record.sha256);
+          if (bytes.length !== record.byte_length)
+            throw new RepositoryError('FIRMWARE_ARTIFACT_CORRUPT', 500);
+          return { record, bytes };
+        },
+      );
+      return reply
+        .header('Cache-Control', 'no-store')
+        .header(
+          'Content-Disposition',
+          'attachment; filename="' + record.entrypoint.split('/').at(-1) + '"',
+        )
+        .type('text/plain; charset=utf-8')
+        .send(bytes);
+    },
+  );
+  app.post('/v1/projects/:projectId/firmware-artifacts/:artifactId/reviews', async (request) => {
+    const { projectId, artifactId } = firmwareArtifactScope.parse(request.params);
+    const body = firmwareReviewSchema.parse(request.body);
+    const principal = owner(request);
+    const result = await repository.mutate(
+      principal,
+      projectId,
+      body.expectedRevision,
+      key(request),
+      'firmware_review:' + artifactId,
+      { artifactId, ...body },
+      async (client, project) => {
+        const artifact = await client.query(
+          'SELECT id FROM firmware_artifacts WHERE project_id=$1 AND id=$2',
+          [projectId, artifactId],
+        );
+        if (!artifact.rows[0]) throw new RepositoryError('NOT_FOUND', 404);
+        await client.query(
+          'INSERT INTO firmware_reviews(id,project_id,artifact_id,project_revision,actor_id,decision,reason) VALUES($1,$2,$3,$4,$5,$6,$7)',
+          [
+            randomUUID(),
+            projectId,
+            artifactId,
+            project.revision,
+            principal,
+            body.decision,
+            body.reason ?? null,
+          ],
+        );
+        return { firmwareArtifactId: artifactId };
+      },
+    );
+    const record = await repository.firmwareArtifactRecord(
+      principal,
+      projectId,
+      result.firmwareArtifactId,
+    );
+    return envelope(request, {
+      project: result.project,
+      artifact: publicFirmwareArtifact(record),
+    });
   });
   app.get('/v1/projects/:projectId/imports/:importId', async (request) => {
     const { projectId, importId } = importScope.parse(request.params);
