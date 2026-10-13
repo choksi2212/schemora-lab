@@ -336,7 +336,7 @@ export class Worker {
       if (!project || project.status !== 'deleting') return null;
       return (
         await client.query<{ object_key: string }>(
-          'SELECT object_key FROM imports WHERE project_id=$1 UNION SELECT object_key FROM firmware_artifacts WHERE project_id=$1 UNION SELECT object_key FROM upload_intents WHERE project_id=$1',
+          'SELECT object_key FROM imports WHERE project_id=$1 UNION SELECT object_key FROM firmware_artifacts WHERE project_id=$1 UNION SELECT object_key FROM firmware_artifact_files WHERE project_id=$1 UNION SELECT object_key FROM upload_intents WHERE project_id=$1',
           [job.project_id],
         )
       ).rows;

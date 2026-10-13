@@ -101,9 +101,28 @@ export interface FirmwareArtifactRow extends QueryResultRow {
   entrypoint: string;
   board_part_id: string;
   catalog_release_id: string;
+  bundle_digest: string | null;
+  total_byte_length: number;
+  build_system: 'arduino-cli' | 'esp-idf' | null;
+  target: unknown | null;
   created_at: Date;
   review_status: 'accepted' | 'rejected' | null;
   review_reason: string | null;
+  files?: Array<{
+    path: string;
+    sha256: string;
+    byteLength: number;
+    isEntrypoint: boolean;
+  }>;
+}
+export interface FirmwareArtifactFileRow extends QueryResultRow {
+  project_id: string;
+  artifact_id: string;
+  path: string;
+  object_key: string;
+  sha256: string;
+  byte_length: number;
+  is_entrypoint: boolean;
 }
 export class RepositoryError extends Error {
   constructor(
@@ -194,6 +213,11 @@ export function publicFirmwareArtifact(artifact: FirmwareArtifactRow) {
     projectRevision: artifact.project_revision,
     sha256: artifact.sha256,
     byteLength: artifact.byte_length,
+    bundleDigest: artifact.bundle_digest,
+    totalByteLength: artifact.total_byte_length,
+    buildSystem: artifact.build_system,
+    target: artifact.target,
+    files: artifact.files ?? [],
     language: artifact.language,
     entrypoint: artifact.entrypoint,
     boardPartId: artifact.board_part_id,
@@ -338,6 +362,9 @@ export class Repository {
   }
   private firmwareArtifactQuery() {
     return `SELECT a.*, latest.decision AS review_status, latest.reason AS review_reason
+      ,coalesce((SELECT jsonb_agg(jsonb_build_object('path',f.path,'sha256',f.sha256,
+        'byteLength',f.byte_length,'isEntrypoint',f.is_entrypoint) ORDER BY f.path)
+        FROM firmware_artifact_files f WHERE f.project_id=a.project_id AND f.artifact_id=a.id),'[]'::jsonb) AS files
       FROM firmware_artifacts a
       LEFT JOIN LATERAL (
         SELECT decision, reason FROM firmware_reviews
@@ -383,6 +410,39 @@ export class Repository {
       const record = result.rows[0];
       if (!record) throw new RepositoryError('NOT_FOUND', 404);
       return action(record);
+    });
+  }
+  async firmwareArtifactFiles(owner: string, projectId: string, artifactId: string) {
+    return this.transaction(async (client) => {
+      await this.project(client, owner, projectId, 'share');
+      const artifact = await client.query(
+        'SELECT id FROM firmware_artifacts WHERE project_id=$1 AND id=$2',
+        [projectId, artifactId],
+      );
+      if (!artifact.rows[0]) throw new RepositoryError('NOT_FOUND', 404);
+      const files = await client.query<FirmwareArtifactFileRow>(
+        'SELECT project_id,artifact_id,path,object_key,sha256,byte_length,is_entrypoint FROM firmware_artifact_files WHERE project_id=$1 AND artifact_id=$2 ORDER BY path',
+        [projectId, artifactId],
+      );
+      return files.rows;
+    });
+  }
+  async withFirmwareArtifactFile<T>(
+    owner: string,
+    projectId: string,
+    artifactId: string,
+    filePath: string,
+    action: (record: FirmwareArtifactFileRow) => Promise<T>,
+  ) {
+    return this.transaction(async (client) => {
+      await this.project(client, owner, projectId, 'share');
+      const result = await client.query<FirmwareArtifactFileRow>(
+        'SELECT f.project_id,f.artifact_id,f.path,f.object_key,f.sha256,f.byte_length,f.is_entrypoint FROM firmware_artifact_files f JOIN firmware_artifacts a ON a.project_id=f.project_id AND a.id=f.artifact_id WHERE f.project_id=$1 AND f.artifact_id=$2 AND f.path=$3',
+        [projectId, artifactId, filePath],
+      );
+      const file = result.rows[0];
+      if (!file) throw new RepositoryError('NOT_FOUND', 404);
+      return action(file);
     });
   }
   async firmwareArtifactReviews(owner: string, projectId: string, artifactId: string) {
@@ -472,9 +532,13 @@ export class Repository {
     );
     const firmwareArtifacts = await client.query(
       `SELECT a.id,a.sha256,a.byte_length,a.language,a.entrypoint,a.board_part_id,
-        a.catalog_release_id,a.project_revision,a.created_at,
+        a.catalog_release_id,a.project_revision,a.created_at,a.bundle_digest,a.total_byte_length,
+        a.build_system,a.target,
         coalesce(latest.decision,'pending') AS review_status,
-        latest.project_revision AS review_revision
+        latest.project_revision AS review_revision,
+        coalesce((SELECT jsonb_agg(jsonb_build_object('path',f.path,'sha256',f.sha256,
+          'byteLength',f.byte_length,'isEntrypoint',f.is_entrypoint) ORDER BY f.path)
+          FROM firmware_artifact_files f WHERE f.project_id=a.project_id AND f.artifact_id=a.id),'[]'::jsonb) AS files
       FROM firmware_artifacts a
       LEFT JOIN LATERAL (
         SELECT decision,project_revision FROM firmware_reviews
@@ -820,6 +884,24 @@ export class Repository {
       JSON.stringify(payload),
     ]);
   }
+  async registerUploadIntents(owner: string, projectId: string, objectKeys: readonly string[]) {
+    if (objectKeys.length < 1 || objectKeys.length > 128)
+      throw new RepositoryError('UPLOAD_LIMIT', 429);
+    await this.transaction(async (client) => {
+      const project = await this.project(client, owner, projectId, true);
+      if (project.status !== 'active') throw new RepositoryError('PROJECT_ARCHIVED', 409);
+      const pending = await client.query(
+        'SELECT count(*)::int AS count FROM upload_intents WHERE project_id=$1',
+        [projectId],
+      );
+      if (pending.rows[0].count + objectKeys.length > 256)
+        throw new RepositoryError('UPLOAD_LIMIT', 429);
+      await client.query(
+        'INSERT INTO upload_intents(object_key,project_id) SELECT value::uuid,$2 FROM unnest($1::text[]) AS value',
+        [objectKeys, projectId],
+      );
+    });
+  }
   async registerUploadIntent(owner: string, projectId: string, objectKey: string) {
     await this.transaction(async (client) => {
       const project = await this.project(client, owner, projectId, true);
@@ -858,7 +940,7 @@ export class Repository {
         );
         if (!intent.rows[0]) return;
         const accepted = await client.query(
-          'SELECT id FROM imports WHERE object_key=$1 UNION ALL SELECT id FROM firmware_artifacts WHERE object_key=$1 LIMIT 1',
+          'SELECT id FROM imports WHERE object_key=$1 UNION ALL SELECT id FROM firmware_artifacts WHERE object_key=$1 UNION ALL SELECT artifact_id AS id FROM firmware_artifact_files WHERE object_key=$1 LIMIT 1',
           [item.object_key],
         );
         if (!accepted.rows[0]) await removeObject(item.object_key);

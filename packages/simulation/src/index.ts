@@ -51,13 +51,30 @@ export const firmwareArtifactRefSchema = z
     projectRevision: z.number().int().positive(),
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
     byteLength: z.number().int().positive().max(MAX_FIRMWARE_ARTIFACT_BYTES),
+    bundleDigest: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+    totalByteLength: z.number().int().positive().max(8_000_000).optional(),
     language: z.enum(['c', 'cpp', 'arduino-cpp', 'esp-idf-c']),
-    entrypoint: z.string().min(1).max(200),
+    entrypoint: z.string().min(1).max(240),
     boardPartId: z.string().min(1).max(200),
     catalogReleaseId: z.string().min(1).max(100),
     reviewStatus: z.literal('accepted'),
   })
-  .strict();
+  .strict()
+  .superRefine((artifact, ctx) => {
+    if ((artifact.bundleDigest === undefined) !== (artifact.totalByteLength === undefined))
+      ctx.addIssue({
+        code: 'custom',
+        path: ['bundleDigest'],
+        message: 'Bundle digest and aggregate byte length must be supplied together.',
+      });
+  });
+
+function firmwareBindingDigest(firmware: FirmwareArtifactRef) {
+  return firmware.bundleDigest ?? firmware.sha256;
+}
 
 export const simulationBindingSchema = z
   .object({
@@ -69,6 +86,7 @@ export const simulationBindingSchema = z
     catalogDigest: z.string().regex(/^[a-f0-9]{64}$/),
     firmwareArtifactId: z.string().min(1),
     firmwareDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    firmwareByteLength: z.number().int().positive().max(8_000_000).optional(),
     adapterId: z.string().min(1),
     adapterVersion: z.string().min(1),
     engineId: z.string().min(1),
@@ -384,7 +402,10 @@ export const runnerExecutionPayloadSchema = z
     if (
       payload.firmware.projectId !== binding.projectId ||
       payload.firmware.artifactId !== binding.firmwareArtifactId ||
-      payload.firmware.sha256 !== binding.firmwareDigest ||
+      firmwareBindingDigest(payload.firmware) !== binding.firmwareDigest ||
+      (binding.firmwareByteLength !== undefined &&
+        binding.firmwareByteLength !==
+          (payload.firmware.totalByteLength ?? payload.firmware.byteLength)) ||
       payload.firmware.catalogReleaseId !== binding.catalogReleaseId
     )
       ctx.addIssue({
@@ -812,7 +833,11 @@ export async function verifyRunnerFirmwareDigest(input: unknown): Promise<boolea
     const actual = Array.from(new Uint8Array(digest), (byte) =>
       byte.toString(16).padStart(2, '0'),
     ).join('');
-    return actual === parsed.data.firmware.sha256 && actual === parsed.data.binding.firmwareDigest;
+    return (
+      actual === parsed.data.firmware.sha256 &&
+      parsed.data.firmware.bundleDigest === undefined &&
+      actual === parsed.data.binding.firmwareDigest
+    );
   } catch {
     return false;
   }
@@ -1038,7 +1063,8 @@ export function assessSimulationEligibility(input: {
       catalogReleaseId: catalog.releaseId,
       catalogDigest,
       firmwareArtifactId: firmware.artifactId,
-      firmwareDigest: firmware.sha256,
+      firmwareDigest: firmwareBindingDigest(firmware),
+      firmwareByteLength: firmware.totalByteLength ?? firmware.byteLength,
       adapterId: capability!.providerId,
       adapterVersion: capability!.providerVersion,
       engineId: capability!.engineId,
@@ -1093,7 +1119,9 @@ export function validateSimulationRunAgainstDesign(input: {
     );
   if (
     run.binding.firmwareArtifactId !== firmware.artifactId ||
-    run.binding.firmwareDigest !== firmware.sha256 ||
+    run.binding.firmwareDigest !== firmwareBindingDigest(firmware) ||
+    (firmware.totalByteLength !== undefined &&
+      run.binding.firmwareByteLength !== firmware.totalByteLength) ||
     firmware.projectId !== graph.projectId ||
     firmware.catalogReleaseId !== catalog.releaseId ||
     !graph.components.some((component) => component.catalogPartId === firmware.boardPartId)

@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   pgTable,
+  boolean,
   text,
   uuid,
   integer,
@@ -119,9 +120,27 @@ export const firmwareArtifacts = pgTable(
     entrypoint: text('entrypoint').notNull(),
     boardPartId: text('board_part_id').notNull(),
     catalogReleaseId: text('catalog_release_id').notNull(),
+    bundleDigest: text('bundle_digest'),
+    totalByteLength: integer('total_byte_length').notNull(),
+    buildSystem: text('build_system'),
+    target: jsonb('target'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
   },
   (table) => [primaryKey({ columns: [table.projectId, table.id] })],
+);
+export const firmwareArtifactFiles = pgTable(
+  'firmware_artifact_files',
+  {
+    projectId: uuid('project_id').notNull(),
+    artifactId: uuid('artifact_id').notNull(),
+    path: text('path').notNull(),
+    objectKey: uuid('object_key').notNull(),
+    sha256: text('sha256').notNull(),
+    byteLength: integer('byte_length').notNull(),
+    isEntrypoint: boolean('is_entrypoint').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.projectId, table.artifactId, table.path] })],
 );
 export const firmwareReviews = pgTable('firmware_reviews', {
   id: uuid('id').primaryKey(),

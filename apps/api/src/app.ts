@@ -15,6 +15,12 @@ import {
 import { MAX_SOURCE_BYTES, type PrivateStorage } from '@schemora/storage';
 import {
   MAX_FIRMWARE_ARTIFACT_BYTES,
+  createFirmwareProjectBundle,
+  firmwareProjectBuildSystemSchema,
+  firmwareProjectTargetSchema,
+  verifyFirmwareProjectBundleSources,
+  FIRMWARE_BUNDLE_MAX_FILE_BYTES,
+  FIRMWARE_BUNDLE_MAX_FILES,
   firmwareArtifactRefSchema,
   simulationBindingSchema,
   simulationRunSchema,
@@ -30,12 +36,18 @@ const expectedRevision = z.number().int().positive();
 const scope = z.object({ projectId: uuid });
 const importScope = scope.extend({ importId: uuid });
 const firmwareArtifactScope = scope.extend({ artifactId: uuid });
+const firmwareFileQuery = z.object({ path: z.string().min(1).max(240) }).strict();
 const simulationRunScope = scope.extend({ runId: uuid });
 const mutation = z.object({ expectedRevision }).strict();
 const simulationRunCreateSchema = z.object({ expectedRevision, firmwareArtifactId: uuid }).strict();
 const emptyBodySchema = z.object({}).strict();
 const circuitGraphWrite = z.object({ expectedRevision, graph: circuitGraphSchema }).strict();
 const titleSchema = z.string().trim().min(1).max(120);
+const encodeDownloadFilename = (value: string) =>
+  encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    (character) => '%' + character.charCodeAt(0).toString(16).toUpperCase(),
+  );
 const uploadSchema = z
   .object({
     expectedRevision,
@@ -104,6 +116,29 @@ const firmwareUploadSchema = z
         message: 'C++ firmware entrypoints must use a .cc or .cpp extension.',
       });
   });
+const firmwareBundleUploadSchema = z
+  .object({
+    expectedRevision,
+    buildSystem: firmwareProjectBuildSystemSchema,
+    target: firmwareProjectTargetSchema,
+    entrypoint: z.string().min(1).max(240),
+    files: z
+      .array(
+        z
+          .object({
+            path: z.string().min(1).max(240),
+            contentBase64: z
+              .string()
+              .min(4)
+              .max(Math.ceil(FIRMWARE_BUNDLE_MAX_FILE_BYTES / 3) * 4)
+              .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(FIRMWARE_BUNDLE_MAX_FILES),
+  })
+  .strict();
 const firmwareReviewSchema = z
   .object({
     expectedRevision,
@@ -245,6 +280,27 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
     return principal;
   };
   const envelope = (request: FastifyRequest, data: unknown) => ({ data, requestId: request.id });
+  const removeUploadedBundleObjects = async (
+    keys: readonly string[],
+    attempted: ReadonlySet<string>,
+    succeeded: ReadonlySet<string>,
+  ) => {
+    await Promise.all(
+      keys.map(async (objectKey) => {
+        if (succeeded.has(objectKey)) {
+          try {
+            await storage.delete(objectKey);
+            await repository.discardUploadIntent(objectKey);
+          } catch {
+            // Keep the intent when storage cleanup fails so the janitor can retry.
+          }
+        } else if (!attempted.has(objectKey)) {
+          // No put was started for this key, so there can be no late object.
+          await repository.discardUploadIntent(objectKey).catch(() => {});
+        }
+      }),
+    );
+  };
   const firmwareTarget = async (principal: string, projectId: string) => {
     const current = await repository.latestCircuitGraph(principal, projectId);
     if (!current.graphSnapshot)
@@ -563,6 +619,8 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
         project_revision: number;
         sha256: string;
         byte_length: number;
+        bundle_digest: string | null;
+        total_byte_length: number;
         language: 'c' | 'cpp' | 'arduino-cpp' | 'esp-idf-c';
         entrypoint: string;
         board_part_id: string;
@@ -570,7 +628,8 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
         review_revision: number | null;
         review_status: string | null;
       }>(
-        `SELECT a.id,a.project_revision,a.sha256,a.byte_length,a.language,a.entrypoint,
+        `SELECT a.id,a.project_revision,a.sha256,a.byte_length,a.bundle_digest,a.total_byte_length,
+                a.language,a.entrypoint,
                 a.board_part_id,a.catalog_release_id,latest.project_revision AS review_revision,
                 latest.decision AS review_status
          FROM firmware_artifacts a
@@ -592,6 +651,12 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
         projectRevision: artifact.project_revision,
         sha256: artifact.sha256,
         byteLength: artifact.byte_length,
+        ...(artifact.bundle_digest
+          ? {
+              bundleDigest: artifact.bundle_digest,
+              totalByteLength: artifact.total_byte_length,
+            }
+          : {}),
         language: artifact.language,
         entrypoint: artifact.entrypoint,
         boardPartId: artifact.board_part_id,
@@ -628,7 +693,8 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
         catalogReleaseId: catalog.releaseId,
         catalogDigest,
         firmwareArtifactId: firmware.artifactId,
-        firmwareDigest: firmware.sha256,
+        firmwareDigest: firmware.bundleDigest ?? firmware.sha256,
+        firmwareByteLength: firmware.totalByteLength ?? firmware.byteLength,
         adapterId: 'schemora.unconfigured',
         adapterVersion: '0',
         engineId: 'none',
@@ -996,7 +1062,7 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
           if (count.rows[0].count >= 50) throw new RepositoryError('FIRMWARE_ARTIFACT_LIMIT', 429);
           await repository.consumeUploadIntent(client, projectId, objectKey);
           await client.query(
-            'INSERT INTO firmware_artifacts(id,project_id,project_revision,actor_id,object_key,sha256,byte_length,language,entrypoint,board_part_id,catalog_release_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+            'INSERT INTO firmware_artifacts(id,project_id,project_revision,actor_id,object_key,sha256,byte_length,language,entrypoint,board_part_id,catalog_release_id,total_byte_length) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
             [
               artifactId,
               projectId,
@@ -1009,7 +1075,12 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
               body.entrypoint,
               target.boardPartId,
               target.catalogReleaseId,
+              bytes.length,
             ],
+          );
+          await client.query(
+            'INSERT INTO firmware_artifact_files(project_id,artifact_id,path,object_key,sha256,byte_length,is_entrypoint) VALUES($1,$2,$3,$4,$5,$6,true)',
+            [projectId, artifactId, body.entrypoint, objectKey, digest, bytes.length],
           );
           return { firmwareArtifactId: artifactId };
         },
@@ -1039,11 +1110,221 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
       throw error;
     }
   });
+  app.post('/v1/projects/:projectId/firmware-artifacts/bundles', async (request, reply) => {
+    const { projectId } = scope.parse(request.params);
+    const body = firmwareBundleUploadSchema.parse(request.body);
+    const principal = owner(request);
+    const targetIdentity = await firmwareTarget(principal, projectId);
+    const catalog = getCatalogRelease();
+    const board = catalog.parts.find((part) => part.id === targetIdentity.boardPartId);
+    if (
+      body.buildSystem !== 'esp-idf' ||
+      body.target.kind !== 'esp-idf-target' ||
+      body.target.target !== 'esp32' ||
+      board?.category !== 'development-board' ||
+      board.model !== 'ESP32-DevKitC V4' ||
+      board.configuration.module !== 'ESP32-WROOM-32E' ||
+      targetIdentity.catalogReleaseId !== catalog.releaseId
+    )
+      throw new RepositoryError('FIRMWARE_TARGET_UNSUPPORTED', 409);
+
+    const sourceFiles: { path: string; source: Uint8Array }[] = [];
+    for (const file of body.files) {
+      const bytes = Buffer.from(file.contentBase64, 'base64');
+      const source = bytes.toString('utf8');
+      if (
+        !bytes.length ||
+        bytes.length > FIRMWARE_BUNDLE_MAX_FILE_BYTES ||
+        bytes.toString('base64') !== file.contentBase64 ||
+        source.includes('\u0000') ||
+        !Buffer.from(source, 'utf8').equals(bytes)
+      )
+        throw new RepositoryError('INVALID_FIRMWARE_SOURCE', 400);
+      sourceFiles.push({ path: file.path, source: bytes });
+    }
+    let bundle;
+    try {
+      bundle = await createFirmwareProjectBundle({
+        buildSystem: body.buildSystem,
+        target: body.target,
+        entrypoint: body.entrypoint,
+        files: sourceFiles,
+      });
+    } catch {
+      throw new RepositoryError('INVALID_FIRMWARE_BUNDLE', 400);
+    }
+    if (!(await verifyFirmwareProjectBundleSources(bundle)))
+      throw new RepositoryError('INVALID_FIRMWARE_BUNDLE', 400);
+
+    const principalKey = principal;
+    const artifactId = randomUUID();
+    const objectKeys = new Map(bundle.files.map((file) => [file.path, randomUUID()] as const));
+    const uploadKeys = [...objectKeys.values()];
+    const sourceBytes = new Map(
+      sourceFiles.map((file) => [file.path, Buffer.from(file.source)] as const),
+    );
+    const successfulKeys = new Set<string>();
+    const attemptedKeys = new Set<string>();
+    let artifactCommitted = false;
+    let mutationStarted = false;
+    await repository.registerUploadIntents(principalKey, projectId, uploadKeys);
+    try {
+      for (const file of bundle.files) {
+        const objectKey = objectKeys.get(file.path)!;
+        attemptedKeys.add(objectKey);
+        const storedDigest = await storage.put(objectKey, sourceBytes.get(file.path)!);
+        if (storedDigest !== file.sha256)
+          throw new RepositoryError('FIRMWARE_ARTIFACT_CORRUPT', 500);
+        successfulKeys.add(objectKey);
+      }
+      const entrypoint = bundle.files.find((file) => file.path === bundle.entrypoint)!;
+      const entrypointKey = objectKeys.get(bundle.entrypoint)!;
+      mutationStarted = true;
+      const result = await repository.mutate(
+        principalKey,
+        projectId,
+        body.expectedRevision,
+        key(request),
+        'firmware_bundle_created',
+        {
+          expectedRevision: body.expectedRevision,
+          bundleDigest: bundle.manifestDigest,
+          totalByteLength: bundle.totalByteLength,
+          buildSystem: bundle.buildSystem,
+          target: bundle.target,
+          entrypoint: bundle.entrypoint,
+          files: bundle.files.map(({ path, sha256, byteLength }) => ({ path, sha256, byteLength })),
+          boardPartId: targetIdentity.boardPartId,
+          catalogReleaseId: targetIdentity.catalogReleaseId,
+        },
+        async (client, project) => {
+          const count = await client.query(
+            'SELECT count(*)::int AS count FROM firmware_artifacts WHERE project_id=$1',
+            [projectId],
+          );
+          if (count.rows[0].count >= 50) throw new RepositoryError('FIRMWARE_ARTIFACT_LIMIT', 429);
+          for (const objectKey of uploadKeys)
+            await repository.consumeUploadIntent(client, projectId, objectKey);
+          const language =
+            bundle.buildSystem === 'arduino-cli'
+              ? 'arduino-cpp'
+              : /\.c$/i.test(bundle.entrypoint)
+                ? 'esp-idf-c'
+                : 'cpp';
+          await client.query(
+            'INSERT INTO firmware_artifacts(id,project_id,project_revision,actor_id,object_key,sha256,byte_length,language,entrypoint,board_part_id,catalog_release_id,bundle_digest,total_byte_length,build_system,target) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)',
+            [
+              artifactId,
+              projectId,
+              project.revision,
+              principalKey,
+              entrypointKey,
+              entrypoint.sha256,
+              entrypoint.byteLength,
+              language,
+              bundle.entrypoint,
+              targetIdentity.boardPartId,
+              targetIdentity.catalogReleaseId,
+              bundle.manifestDigest,
+              bundle.totalByteLength,
+              bundle.buildSystem,
+              JSON.stringify(bundle.target),
+            ],
+          );
+          for (const file of bundle.files) {
+            await client.query(
+              'INSERT INTO firmware_artifact_files(project_id,artifact_id,path,object_key,sha256,byte_length,is_entrypoint) VALUES($1,$2,$3,$4,$5,$6,$7)',
+              [
+                projectId,
+                artifactId,
+                file.path,
+                objectKeys.get(file.path),
+                file.sha256,
+                file.byteLength,
+                file.path === bundle.entrypoint,
+              ],
+            );
+          }
+          return { firmwareArtifactId: artifactId };
+        },
+      );
+      artifactCommitted = result.firmwareArtifactId === artifactId;
+      if (!artifactCommitted)
+        await removeUploadedBundleObjects(uploadKeys, attemptedKeys, successfulKeys);
+      const record = await repository.firmwareArtifactRecord(
+        principalKey,
+        projectId,
+        result.firmwareArtifactId,
+      );
+      return reply.code(artifactCommitted ? 201 : 200).send(
+        envelope(request, {
+          project: result.project,
+          artifact: publicFirmwareArtifact(record),
+        }),
+      );
+    } catch (error) {
+      let commitKnownAbsent = !mutationStarted;
+      if (!artifactCommitted && mutationStarted) {
+        try {
+          await repository.firmwareArtifactRecord(principalKey, projectId, artifactId);
+          // A committed artifact must keep its objects even if the API lost the commit reply.
+        } catch (lookupError) {
+          commitKnownAbsent =
+            lookupError instanceof RepositoryError && lookupError.code === 'NOT_FOUND';
+          // A failed or unauthorized lookup leaves commit state uncertain; durable intents
+          // remain the recovery record until the project purge or expiry janitor handles them.
+        }
+      }
+      if (!artifactCommitted && commitKnownAbsent)
+        await removeUploadedBundleObjects(uploadKeys, attemptedKeys, successfulKeys);
+      throw error;
+    }
+  });
   app.get('/v1/projects/:projectId/firmware-artifacts/:artifactId', async (request) => {
     const { projectId, artifactId } = firmwareArtifactScope.parse(request.params);
     const record = await repository.firmwareArtifactRecord(owner(request), projectId, artifactId);
     return envelope(request, { artifact: publicFirmwareArtifact(record) });
   });
+  app.get('/v1/projects/:projectId/firmware-artifacts/:artifactId/files', async (request) => {
+    const { projectId, artifactId } = firmwareArtifactScope.parse(request.params);
+    const rows = await repository.firmwareArtifactFiles(owner(request), projectId, artifactId);
+    return envelope(request, {
+      items: rows.map((file) => ({
+        path: file.path,
+        sha256: file.sha256,
+        byteLength: file.byte_length,
+        isEntrypoint: file.is_entrypoint,
+      })),
+    });
+  });
+  app.get(
+    '/v1/projects/:projectId/firmware-artifacts/:artifactId/files/content',
+    async (request, reply) => {
+      const { projectId, artifactId } = firmwareArtifactScope.parse(request.params);
+      const { path } = firmwareFileQuery.parse(request.query);
+      const { file, bytes } = await repository.withFirmwareArtifactFile(
+        owner(request),
+        projectId,
+        artifactId,
+        path,
+        async (file) => {
+          const bytes = await storage.read(file.object_key, file.sha256);
+          if (bytes.length !== file.byte_length)
+            throw new RepositoryError('FIRMWARE_ARTIFACT_CORRUPT', 500);
+          return { file, bytes };
+        },
+      );
+      const filename = file.path.split('/').at(-1)!;
+      return reply
+        .header('Cache-Control', 'no-store')
+        .header(
+          'Content-Disposition',
+          "attachment; filename*=UTF-8''" + encodeDownloadFilename(filename),
+        )
+        .type('application/octet-stream')
+        .send(bytes);
+    },
+  );
   app.get('/v1/projects/:projectId/firmware-artifacts/:artifactId/reviews', async (request) => {
     const { projectId, artifactId } = firmwareArtifactScope.parse(request.params);
     const principal = owner(request);
