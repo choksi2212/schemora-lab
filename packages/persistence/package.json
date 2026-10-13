@@ -1,0 +1,22 @@
+{
+  "name": "@schemora/persistence",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "migrate": "tsx src/migrate.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.45.4",
+    "pg": "8.23.1",
+    "@schemora/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/pg": "8.15.6",
+    "tsx": "4.20.6"
+  }
+}

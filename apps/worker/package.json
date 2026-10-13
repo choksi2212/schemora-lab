@@ -1,0 +1,20 @@
+{
+  "name": "@schemora/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@schemora/contracts": "workspace:*",
+    "@schemora/intelligence": "workspace:*",
+    "@schemora/persistence": "workspace:*",
+    "@schemora/storage": "workspace:*",
+    "zod": "4.3.6",
+    "tsx": "4.20.6"
+  }
+}

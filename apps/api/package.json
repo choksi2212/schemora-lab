@@ -1,0 +1,23 @@
+{
+  "name": "@schemora/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@schemora/contracts": "workspace:*",
+    "@schemora/persistence": "workspace:*",
+    "@schemora/storage": "workspace:*",
+    "fastify": "5.12.7",
+    "jose": "6.2.12",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "tsx": "4.20.6"
+  }
+}
