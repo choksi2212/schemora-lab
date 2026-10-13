@@ -1,6 +1,6 @@
 # Schemora Phase 6 — Firmware and Simulation
 
-**Status:** Initial contract and provider-eligibility slice implemented. No firmware is compiled or executed; the simulator selection and reference execution gates remain open.
+**Status:** Contract slice implemented; the original-ESP32 UART proof of concept builds and boots under Espressif QEMU. It confirms firmware execution and serial output only. GPIO output and connected-circuit behavior are not modeled; the Phase 6 exit gate remains open.
 
 **Product phase:** Phase 6 — Firmware execution and circuit simulation.
 
@@ -18,17 +18,18 @@ The distinction matters for the currently modeled circuit: its LED polarity, res
 
 ## 2. Provider research and decision
 
-The provider review was based on current official documentation and terms reviewed on 2026-10-13. These findings are screening results, not legal advice or evidence of an executed commercial agreement.
+The provider review was based on current official documentation and terms reviewed on 2026-10-14. These findings are screening results, not legal advice or evidence of an executed commercial agreement.
 
 | Candidate                | Technical evidence                                                                                                                                                                                                              | Fit and gate                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Wokwi CI / CLI           | Official documentation describes firmware execution through its CLI, serial output, timeouts, automated scenarios, and a cloud CI service. The cloud service receives the firmware binary and says it deletes it after the run. | **Do not integrate by default.** Wokwi’s terms limit ordinary service use to personal/non-commercial purposes, define open-source use as not commercialized directly or indirectly, require commercial licensing for commercial use, and prohibit using the service to develop a similar or competitive service. Schemora is building circuit simulation. Proceed only after explicit written terms that cover Schemora’s product use, hosting, customer content, and data handling. The current board match and normalized output mapping also need a technical proof. |
-| Espressif `esp-emulator` | Official project documentation lists ESP32-C3/C5/C6/H2/P4/S3 chips, GPIO and UART peripherals, CLI and WebAssembly usage, and a browser build that keeps firmware in the local tab.                                             | **Promising for a later different board profile; not a match for this catalog release.** The current Schemora board is ESP32-DevKitC V4 with ESP32-WROOM-32E / original ESP32, which is not in the project’s documented chip list. The emulator reports SoC peripheral activity, but Schemora would still need a tested adapter that maps its GPIO signals and exact circuit nets to LED state. Review the pinned release’s software license and packaging before any hosted use.                                                                                       |
+| Espressif QEMU fork      | Official ESP-IDF docs describe running original ESP32 apps under `idf.py qemu`; UART and some peripherals are modeled. The official feature matrix marks GPIO matrix/IOMUX unsupported.                                         | **Best current POC candidate for firmware execution and serial output, not full circuit simulation.** A QEMU run can test a firmware binary for the catalog’s original ESP32, but the documented implementation does not expose general GPIO pin routing to the external LED. Any LED behavior inferred from firmware text or a hardcoded timer would be invalid. The fork is GPL-2.0-only in the IDF tool manifest; review executable distribution and service obligations before adoption.                                                                            |
+| Espressif `esp-emulator` | Official project documentation lists ESP32-C3/C5/C6/H2/P4/S3 chips, GPIO and UART peripherals, CLI and WebAssembly usage, and a browser build that keeps firmware in the local tab.                                             | **Potential option for a separately cataloged board profile; not a match for this catalog release.** The current Schemora board is ESP32-DevKitC V4 with ESP32-WROOM-32E / original ESP32, which is not in the project’s documented chip list. The emulator reports SoC peripheral activity, but Schemora would still need a tested adapter that maps its GPIO signals and exact circuit nets to LED state. Review the pinned release’s software license and packaging before any hosted use.                                                                           |
 | Renode                   | Official supported-board documentation has a broad, explicitly incomplete board list and supports custom platform descriptions.                                                                                                 | **Not selected for this reference circuit.** The inspected board documentation does not establish a ready-to-run model of the exact ESP32-DevKitC V4 / WROOM-32E configuration or the external LED circuit. A custom model would require a separate POC and additional verification.                                                                                                                                                                                                                                                                                    |
 
 The Wokwi review surfaced a material product-use restriction. Availability of a public web simulator or CLI does not imply permission to offer it as Schemora’s backend. The documented Wokwi CI flow uploads the built firmware to its cloud service. Consequently, no Wokwi service call, account, cloud upload, token, or dependency was introduced.
 
-**Decision:** No provider is approved for this release. The reference implementation remains blocked until one candidate covers the exact MCU/board target and required external GPIO behavior, permits the intended product and deployment model, passes a repeatability POC, and meets the isolation and privacy gates in §8. The current research is an option-screening exercise, not the Phase 6 technical proof of concept required for completion.
+**Decision:** Espressif QEMU is the active reference POC candidate for original-ESP32 firmware execution and UART, but it is not approved as a circuit simulator because the documented GPIO routing is insufficient for external LED output. A successful UART-only run is useful evidence, but it cannot satisfy Phase 6 exit criteria. Completion requires either a verified GPIO-to-circuit model extension or an alternative engine/provider that meets product-use terms and exact coverage. The ongoing POC must report this boundary explicitly.
 
 ### Official sources reviewed
 
@@ -36,6 +37,9 @@ The Wokwi review surfaced a material product-use restriction. Availability of a 
 - [Wokwi CI overview](https://docs.wokwi.com/wokwi-ci/getting-started) — cloud execution, firmware transfer, serial output, and limits.
 - [Wokwi CLI usage](https://docs.wokwi.com/wokwi-ci/cli-usage) — execution controls, serial logs, timeout, scenario, and screenshot options.
 - [Wokwi automation scenarios](https://docs.wokwi.com/wokwi-ci/automation-scenarios) — simulated control inputs and serial assertions; documentation labels scenarios alpha.
+- [Espressif QEMU guide](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-guides/tools/qemu.html) — ESP32 boot/run flow, UART monitor, and installation.
+- [Espressif QEMU supported-feature matrix](https://github.com/espressif/esp-toolchain-docs/blob/main/qemu/README.md) — target/peripheral support, including missing GPIO matrix/IOMUX.
+- [ESP-IDF QEMU tool manifest](https://docs.espressif.com/projects/esp-idf/en/v5.4/esp32/api-guides/tools/idf-tools.html) — recorded QEMU tool package license (`GPL-2.0-only`) for that IDF tool release.
 - [Espressif esp-emulator](https://github.com/espressif/esp-emulator) — documented chips, modeled peripherals, CLI/WASM, and browser execution behavior.
 - [Renode supported boards](https://renode.readthedocs.io/en/latest/introduction/supported-boards.html) — documented board coverage and custom platform capability.
 
@@ -55,7 +59,11 @@ Every `SimulationBinding` records project/revision, graph ID and digest, catalog
 
 The contract defines run lifecycle states and bounded, schema-validated events for ordered serial text, LED on/off state, and numeric sensor readings. Event sequence must strictly increase and simulation time may not move backward. Failed, timed-out, and cancelled terminal results must carry an error; completed results cannot carry a failure. Component updates refer to a graph instance ID, never arbitrary HTML, JavaScript, CSS, or renderer commands. Consumers must still check that the component category is appropriate before applying a state.
 
-Provider capabilities explicitly list exact board IDs, component IDs, topology IDs, firmware language support, and provider/engine versions. An unknown board alias or an apparently similar model does not satisfy an exact catalog ID.
+Provider capabilities explicitly list exact board IDs, component IDs, topology IDs with topology versions, firmware language support, and provider/engine versions. An unknown board alias or an apparently similar model does not satisfy an exact catalog identity. The current assessor also requires exactly one development board and binds it to the accepted firmware target.
+
+The contract assessor parses provider declarations at runtime, limits serialized output to 2 MB, recomputes graph integrity and the validation report, and carries the selected provider/engine versions directly into the successful run binding. A second result validator binds output events to the exact graph/catalog snapshot and rejects unknown component IDs, LED events targeting non-LED parts, and sensor readings for components that do not have a modeled sensor schema.
+
+The `reviewStatus: accepted` and `reportIsCurrent` values in the pure package are assertions supplied by its caller. They are not proof that the current user accepted the stored firmware artifact or that the report is the repository’s current report. Any future route/worker must load those records under project ownership, verify the stored firmware bytes against the SHA-256, resolve the accepted review state from persistence, and establish currentness against the canonical current revision before calling the assessor. Never accept these authority fields from an untrusted browser request.
 
 ### Fail-closed eligibility
 
@@ -95,8 +103,9 @@ The catalog currently has no simulator aliases, execution profiles, or supported
 
 ## 6. Files and package surface
 
-- `packages/simulation/src/index.ts` — schemas, provider interface, fail-closed eligibility, and explicit unavailable result.
+- `packages/simulation/src/index.ts` — schemas, provider interface, fail-closed eligibility, graph-bound output validation, and explicit unavailable result.
 - `packages/simulation/test/contract.test.ts` — identity, coverage, output ordering, and unavailable-result checks.
+- `examples/phase6-qemu-uart/` — minimal ESP-IDF reference app that requests GPIO19 toggles and emits bounded UART markers for the QEMU POC. Its log records firmware intent only; it is not evidence of pin voltage or LED state.
 - `packages/simulation/package.json` — workspace package registration and package dependencies.
 - `docs/Phase-6-Implementation.md` — Phase 6 status, provider research, current boundaries, and completion gates.
 
@@ -104,23 +113,45 @@ No firmware is stored or executed by this change. No UI label implies that compi
 
 ## 7. Verification and evidence limits
 
-The contract package is type-checked and has focused tests for a current graph/catalog/report binding, missing provider, stale report, failed report, unaccepted firmware, uncovered parts, output monotonicity, and explicit unsupported output. These checks prove data-boundary behavior only. They do not prove that an engine executes ESP32 firmware, that an external LED is modeled, or that any physical behavior is safe.
+The contract package is type-checked and has focused tests for a current graph/catalog/report binding, missing provider, stale or forged report, failed report, unaccepted firmware, invalid provider capability, uncovered board/component IDs, output size and lifecycle invariants, graph-bound component events, and explicit unsupported output. These checks prove data-boundary behavior only. They do not prove that an engine executes ESP32 firmware, that an external LED is modeled, or that any physical behavior is safe.
 
-No provider POC is claimed: Wokwi integration is blocked pending product-use rights and its exact board/circuit mapping; Espressif’s currently documented chip list does not include the catalog’s original ESP32 target; a Renode custom platform would itself require a technical build-and-validation project.
+The QEMU POC is limited to the original ESP32 CPU/peripheral and UART behavior. It must not be reported as connected-circuit simulation. Wokwi integration is blocked pending product-use rights and exact board/circuit mapping; Espressif `esp-emulator` currently does not list the catalog’s original ESP32 target; a Renode custom platform would itself require a separate build-and-validation project.
+
+### 7.1 Original-ESP32 UART POC run record (2026-10-14)
+
+The reference application in `examples/phase6-qemu-uart/` was built and run inside the official Espressif ESP-IDF container, with Docker networking disabled for the QEMU run. The container was pinned by immutable image digest `espressif/idf@sha256:05cbfc42ed2e987b8026722c15bf1d8523d3e4fd1b4ac04d2e4056f5e0918b99`; it reports ESP-IDF `v5.5.2` and QEMU `9.2.2 (esp_develop_9.2.2_20250817)`. The resulting application image SHA-256 is `4c5a4454f3b28c75e84b7e4e260c2635d6fe67b313d0fadf891d35cf596ce6d7`.
+
+Build invocation from the mounted example directory:
+
+```sh
+idf.py set-target esp32
+idf.py build
+```
+
+Run invocation after sourcing `/opt/esp/idf/export.sh` in the pinned container:
+
+```sh
+timeout 8s idf.py qemu --qemu-extra-args='-nographic -monitor none'
+```
+
+Observed UART markers included `SCHEMORA_GPIO19_SETUP=OK`, `SCHEMORA_QEMU_REFERENCE_START`, and four alternating `SCHEMORA_GPIO19_REQUESTED` values (`1, 0, 1, 0` at ticks `0` through `3`) before the host timeout terminated the process. The application intentionally loops, so exit status `124` is the expected timeout result and demonstrates host-side stop/cleanup, not a guest-reported graceful stop. The compile and boot were successful. This run did not perform guest reset, repeated-run transcript comparison, pin-level capture, or a connected LED simulation. The API return/log marker records only the firmware’s GPIO request; it is not proof that QEMU changed a pin.
+
+The container image and binary hashes make this individual run identifiable. A checked-in harness and repeated clean-run comparison are still required for reproducibility acceptance. The QEMU feature matrix does not list GPIO matrix/IOMUX support, and this POC observed no external pin trace. Therefore no LED state may be derived from these UART messages.
 
 ## 8. Remaining work and phase exit criteria
 
 Phase 6 remains open. Required work, in dependency order:
 
-1. Select a candidate with permitted product use and deployment, data-handling terms, and exact board/peripheral coverage. Pin and review the engine license/version and any model licenses.
-2. Build a real POC for one immutable reference graph and one immutable reference firmware artifact. Repeat it in a clean environment; record engine/adapter versions, expected serial transcript, GPIO trace, external LED state, runtime limits, and tolerances. Do not call a mapping a success if only the MCU ran but the circuit did not.
-3. Define approved firmware upload/authoring, immutable artifact storage, content hash, accepted/rejected review state, project revision association, size limits, retention, and deletion behavior.
-4. Implement a provider adapter conforming to the contract; map the normalized graph to the provider’s circuit model and report unsupported parts/edges rather than omitting them.
-5. Add simulation run persistence, project-scoped create/read/cancel endpoints, idempotency, input snapshots, stale-run handling, bounded queue capacity, and output retention. Never execute provider calls inside a database transaction or web request process.
-6. Implement the dedicated sandbox or approved hosted runtime. Isolate tenant data; use non-root execution, no general network egress, read-only base files, ephemeral bounded workspaces, hard CPU/memory/process/disk/output/time limits, cancellation and cleanup, and no database credentials in the runtime.
-7. Add the Monaco firmware view/editor, compile/simulation diagnostics, serial monitor, start/stop/reset controls, firmware/graph revision binding, and code-to-component links. A firmware edit creates a new immutable version and invalidates results bound to an earlier digest.
-8. Feed only validated, allowlisted simulator events into the scene. On graph or firmware change, mark prior runs stale and clear their visual states. Never use fixed/timer-driven LED animation as a simulation result.
-9. Publish a coverage and limitations view distinguishing simulated, visual-only, unsupported, and unmodeled behavior. Keep simulation output separate from validation and safety conclusions.
+1. Complete the original-ESP32 QEMU POC for firmware boot, UART transcript, process reset/stop, deterministic repeated runs, and attempted GPIO19 output; record pinned tool versions, hashes, exact invocation, limits, and results. Confirm the GPIO routing limitation from execution evidence and official docs.
+2. Choose whether to extend QEMU with a reviewed GPIO output model plus graph-based LED/resistor behavior or to select another exact-board simulator/provider with permitted product use and deployment. Pin and review engine and model licenses.
+3. Build a full POC for one immutable reference graph and firmware artifact. Repeat it in a clean environment; record engine/adapter versions, expected serial transcript, observed GPIO trace, external LED state, runtime limits, and tolerances. Do not call it a success if only the MCU ran but the circuit did not.
+4. Define approved firmware upload/authoring, immutable artifact storage, content hash, accepted/rejected review state, project revision association, size limits, retention, and deletion behavior.
+5. Implement a provider adapter conforming to the contract; map the normalized graph to the provider’s circuit model and report unsupported parts/edges rather than omitting them.
+6. Add simulation run persistence, project-scoped create/read/cancel endpoints, idempotency, input snapshots, stale-run handling, bounded queue capacity, and output retention. Never execute provider calls inside a database transaction or web request process.
+7. Implement the dedicated sandbox or approved hosted runtime. Isolate tenant data; use non-root execution, no general network egress, read-only base files, ephemeral bounded workspaces, hard CPU/memory/process/disk/output/time limits, cancellation and cleanup, and no database credentials in the runtime.
+8. Add the Monaco firmware view/editor, compile/simulation diagnostics, serial monitor, start/stop/reset controls, firmware/graph revision binding, and code-to-component links. A firmware edit creates a new immutable version and invalidates results bound to an earlier digest.
+9. Feed only validated, allowlisted simulator events into the scene. On graph or firmware change, mark prior runs stale and clear their visual states. Never use fixed/timer-driven LED animation as a simulation result.
+10. Publish a coverage and limitations view distinguishing simulated, visual-only, unsupported, and unmodeled behavior. Keep simulation output separate from validation and safety conclusions.
 
 The Phase 6 completion criteria remain those in the roadmap: a reference firmware project executes repeatably in a selected simulator and drives the corresponding visual outputs; unsupported designs fail clearly instead of being reported as simulated. The provider, POC, upload/storage, worker isolation, run persistence, UI, and scene integration criteria remain unmet.
 

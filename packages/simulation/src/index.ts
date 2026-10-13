@@ -1,10 +1,20 @@
 import { canonicalDigest } from '@schemora/assembly-plan';
 import { catalogReleaseSchema, type CatalogRelease } from '@schemora/catalog';
-import { circuitGraphSchema, type CircuitGraph } from '@schemora/circuit-model';
-import { validationReportSchema, type ValidationReport } from '@schemora/validation';
+import {
+  circuitGraphSchema,
+  validateCircuitGraph,
+  type CircuitGraph,
+} from '@schemora/circuit-model';
+import {
+  validateCircuit,
+  validationReportSchema,
+  type ValidationReport,
+} from '@schemora/validation';
 import { z } from 'zod';
 
 export const SIMULATION_CONTRACT_VERSION = '1.0.0';
+export const MAX_SIMULATION_RESULT_BYTES = 2_000_000;
+export const MAX_SIMULATION_EVENTS = 5_000;
 
 export const firmwareArtifactRefSchema = z
   .object({
@@ -44,7 +54,7 @@ export const simulationEventSchema = z.discriminatedUnion('kind', [
       kind: z.literal('serial'),
       sequence: z.number().int().nonnegative(),
       simulationTimeMs: z.number().finite().nonnegative(),
-      text: z.string().max(4_096),
+      text: z.string().max(1_024),
       stream: z.enum(['stdout', 'stderr']),
     })
     .strict(),
@@ -83,6 +93,7 @@ export const simulationFailureCodeSchema = z.enum([
   'OUTPUT_INVALID',
   'TIME_LIMIT',
   'CANCELLED',
+  'STOPPED',
 ]);
 
 export const simulationRunStatusSchema = z.enum([
@@ -105,7 +116,7 @@ export const simulationRunSchema = z
     runId: z.string().min(1),
     status: simulationRunStatusSchema,
     binding: simulationBindingSchema,
-    events: z.array(simulationEventSchema).max(20_000),
+    events: z.array(simulationEventSchema).max(MAX_SIMULATION_EVENTS),
     unsupportedFeatures: z.array(z.string().min(1).max(300)).max(500),
     limitations: z.array(z.string().min(1).max(500)).max(500),
     failure: z
@@ -116,6 +127,9 @@ export const simulationRunSchema = z
   })
   .strict()
   .superRefine((run, ctx) => {
+    const terminal = ['completed', 'stopped', 'failed', 'timed_out', 'cancelled'].includes(
+      run.status,
+    );
     let previousSequence = -1;
     let previousTime = -1;
     for (const [index, event] of run.events.entries()) {
@@ -140,6 +154,12 @@ export const simulationRunSchema = z
         path: ['failure'],
         message: 'A completed run cannot contain a failure.',
       });
+    if (run.status === 'completed' && run.simulatedDurationMs === null)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['simulatedDurationMs'],
+        message: 'A completed run must include its simulated duration.',
+      });
     if (
       (run.status === 'failed' || run.status === 'timed_out' || run.status === 'cancelled') &&
       run.failure === null
@@ -159,6 +179,70 @@ export const simulationRunSchema = z
         path: ['unsupportedFeatures'],
         message: 'An unsupported run must identify a capability gap.',
       });
+    if (run.status === 'unsupported' && run.failure === null)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['failure'],
+        message: 'An unsupported run must include an actionable failure code.',
+      });
+    if (
+      run.status === 'unsupported' &&
+      run.failure !== null &&
+      ![
+        'SIMULATOR_UNAVAILABLE',
+        'UNSUPPORTED_BOARD',
+        'UNSUPPORTED_COMPONENT',
+        'UNSUPPORTED_TOPOLOGY',
+        'UNSUPPORTED_FIRMWARE',
+      ].includes(run.failure.code)
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['failure', 'code'],
+        message: 'Unsupported runs must use an availability or coverage error code.',
+      });
+    if (['queued', 'preparing', 'unsupported'].includes(run.status) && run.events.length > 0)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['events'],
+        message: 'Queued, preparing, and unsupported runs cannot contain simulator events.',
+      });
+    if (['queued', 'preparing', 'running', 'stopping'].includes(run.status) && run.failure !== null)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['failure'],
+        message: 'A non-terminal run cannot contain a terminal failure.',
+      });
+    if (terminal !== (run.simulatedDurationMs !== null))
+      ctx.addIssue({
+        code: 'custom',
+        path: ['simulatedDurationMs'],
+        message: 'Only terminal runs may include a simulated duration.',
+      });
+    if (run.status === 'stopped' && run.failure?.code !== 'STOPPED')
+      ctx.addIssue({
+        code: 'custom',
+        path: ['failure', 'code'],
+        message: 'A stopped run must use the STOPPED result code.',
+      });
+    if (run.status === 'timed_out' && run.failure?.code !== 'TIME_LIMIT')
+      ctx.addIssue({
+        code: 'custom',
+        path: ['failure', 'code'],
+        message: 'A timed-out run must use the TIME_LIMIT result code.',
+      });
+    if (run.status === 'cancelled' && run.failure?.code !== 'CANCELLED')
+      ctx.addIssue({
+        code: 'custom',
+        path: ['failure', 'code'],
+        message: 'A cancelled run must use the CANCELLED result code.',
+      });
+    if (new TextEncoder().encode(JSON.stringify(run)).byteLength > MAX_SIMULATION_RESULT_BYTES)
+      ctx.addIssue({
+        code: 'custom',
+        path: [],
+        message: `Serialized simulation output exceeds ${MAX_SIMULATION_RESULT_BYTES} bytes.`,
+      });
   });
 
 export type FirmwareArtifactRef = z.infer<typeof firmwareArtifactRefSchema>;
@@ -174,7 +258,7 @@ export type SimulationCapability = {
   engineVersion: string;
   boardPartIds: string[];
   componentPartIds: string[];
-  topologyIds: string[];
+  topologies: { topologyId: string; topologyVersion: number }[];
   firmwareLanguages: FirmwareArtifactRef['language'][];
 };
 
@@ -186,18 +270,40 @@ export const simulationCapabilitySchema = z
     engineVersion: z.string().min(1),
     boardPartIds: z.array(z.string().min(1)).max(100),
     componentPartIds: z.array(z.string().min(1)).max(1_000),
-    topologyIds: z.array(z.string().min(1)).max(100),
+    topologies: z
+      .array(
+        z
+          .object({ topologyId: z.string().min(1), topologyVersion: z.number().int().positive() })
+          .strict(),
+      )
+      .max(100),
     firmwareLanguages: z.array(firmwareArtifactRefSchema.shape.language).max(10),
   })
-  .strict();
+  .strict()
+  .superRefine((capability, ctx) => {
+    for (const key of ['boardPartIds', 'componentPartIds', 'firmwareLanguages'] as const) {
+      if (new Set(capability[key]).size !== capability[key].length)
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: 'Capability entries must be unique.',
+        });
+    }
+    const topologyKeys = capability.topologies.map(
+      (topology) => `${topology.topologyId}\u0000${topology.topologyVersion}`,
+    );
+    if (new Set(topologyKeys).size !== topologyKeys.length)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['topologies'],
+        message: 'Topology identity/version pairs must be unique.',
+      });
+  });
 
 export type SimulationEligibility =
   | {
       eligible: true;
-      binding: Omit<
-        SimulationBinding,
-        'adapterId' | 'adapterVersion' | 'engineId' | 'engineVersion'
-      >;
+      binding: SimulationBinding;
     }
   | { eligible: false; code: SimulationFailureCode; reasons: string[] };
 
@@ -211,12 +317,15 @@ export function assessSimulationEligibility(input: {
   report: unknown;
   firmware: unknown;
   reportIsCurrent: boolean;
-  capability: SimulationCapability | null;
+  capability: unknown | null;
 }): SimulationEligibility {
   const graphResult = circuitGraphSchema.safeParse(input.graph);
   const catalogResult = catalogReleaseSchema.safeParse(input.catalog);
   const reportResult = validationReportSchema.safeParse(input.report);
   const firmwareResult = firmwareArtifactRefSchema.safeParse(input.firmware);
+  const capabilityResult = input.capability
+    ? simulationCapabilitySchema.safeParse(input.capability)
+    : null;
   if (
     !graphResult.success ||
     !catalogResult.success ||
@@ -233,9 +342,13 @@ export function assessSimulationEligibility(input: {
   const catalog: CatalogRelease = catalogResult.data;
   const report: ValidationReport = reportResult.data;
   const firmware: FirmwareArtifactRef = firmwareResult.data;
+  const capability: SimulationCapability | null = capabilityResult?.success
+    ? capabilityResult.data
+    : null;
   const graphDigest = canonicalDigest(graph);
   const catalogDigest = canonicalDigest(catalog);
   const reasons: string[] = [];
+  let failureCode: SimulationFailureCode | null = null;
   if (
     !input.reportIsCurrent ||
     report.projectId !== graph.projectId ||
@@ -249,6 +362,11 @@ export function assessSimulationEligibility(input: {
     reasons.push(
       'The validation report, graph, and catalog do not describe the same current inputs.',
     );
+  if (!validateCircuitGraph(graph, { release: catalog }).valid)
+    reasons.push('The circuit graph does not resolve against the pinned catalog release.');
+  const recomputedReport = validateCircuit({ graph, catalog });
+  if (canonicalDigest(report) !== canonicalDigest(recomputedReport))
+    reasons.push('The validation report does not match a fresh validation of the supplied graph.');
   if (
     report.status === 'fail' ||
     report.status === 'error' ||
@@ -263,41 +381,84 @@ export function assessSimulationEligibility(input: {
     !graph.components.some((component) => component.catalogPartId === firmware.boardPartId)
   )
     reasons.push('The accepted firmware artifact is not bound to this project revision and board.');
-  if (!input.capability)
+  const projectBoards = graph.components.filter((component) =>
+    catalog.parts.some(
+      (part) => part.id === component.catalogPartId && part.category === 'development-board',
+    ),
+  );
+  if (projectBoards.length !== 1 || projectBoards[0]?.catalogPartId !== firmware.boardPartId)
+    reasons.push('The simulation requires exactly one board matching the firmware target.');
+  if (input.capability != null && !capabilityResult?.success)
+    reasons.push('The simulator capability declaration failed schema validation.');
+  if (input.capability == null)
     reasons.push('No approved simulator provider is configured for this deployment.');
-  else {
+  else if (capability) {
     const boards = graph.components.filter((component) =>
       catalog.parts.some(
         (part) => part.id === component.catalogPartId && part.category === 'development-board',
       ),
     );
     const unsupportedBoard = boards.some(
-      (board) => !input.capability!.boardPartIds.includes(board.catalogPartId),
+      (board) => !capability.boardPartIds.includes(board.catalogPartId),
     );
     const unsupportedPart = graph.components.some(
       (component) =>
-        !input.capability!.componentPartIds.includes(component.catalogPartId) &&
+        !capability.componentPartIds.includes(component.catalogPartId) &&
         !boards.some((board) => board.id === component.id),
     );
     const unsupportedTopology = graph.breadboards.some(
-      (board) => !input.capability!.topologyIds.includes(board.topologyId),
+      (board) =>
+        !capability.topologies.some(
+          (topology) =>
+            topology.topologyId === board.topologyId &&
+            topology.topologyVersion === board.topologyVersion,
+        ),
     );
-    if (unsupportedBoard)
+    if (unsupportedBoard) {
+      failureCode ??= 'UNSUPPORTED_BOARD';
       reasons.push('The exact development-board catalog identity is not supported.');
-    if (unsupportedPart)
+    }
+    if (unsupportedPart) {
+      failureCode ??= 'UNSUPPORTED_COMPONENT';
       reasons.push('One or more exact component catalog identities are not supported.');
-    if (unsupportedTopology) reasons.push('One or more breadboard topologies are not supported.');
-    if (!input.capability.firmwareLanguages.includes(firmware.language))
+    }
+    if (unsupportedTopology) {
+      failureCode ??= 'UNSUPPORTED_TOPOLOGY';
+      reasons.push('One or more breadboard topologies are not supported.');
+    }
+    if (!capability.firmwareLanguages.includes(firmware.language)) {
+      failureCode ??= 'UNSUPPORTED_FIRMWARE';
       reasons.push('The firmware language is not supported by this provider.');
+    }
+    const knownBoardIds = new Set(
+      catalog.parts.filter((part) => part.category === 'development-board').map((part) => part.id),
+    );
+    const knownComponentIds = new Set(
+      catalog.parts.filter((part) => part.category !== 'development-board').map((part) => part.id),
+    );
+    const knownTopologies = new Set(
+      catalog.breadboardTopologies.map((topology) => `${topology.id}\u0000${topology.version}`),
+    );
+    if (
+      capability.boardPartIds.some((id) => !knownBoardIds.has(id)) ||
+      capability.componentPartIds.some((id) => !knownComponentIds.has(id)) ||
+      capability.topologies.some(
+        (topology) =>
+          !knownTopologies.has(`${topology.topologyId}\u0000${topology.topologyVersion}`),
+      )
+    )
+      reasons.push('The provider capability claims identities absent from this catalog release.');
   }
   if (reasons.length) {
-    const code: SimulationFailureCode = !input.capability
-      ? 'SIMULATOR_UNAVAILABLE'
+    const code: SimulationFailureCode = reasons.some((reason) =>
+      /current inputs|pinned catalog|fresh validation/.test(reason),
+    )
+      ? 'STALE_INPUT'
       : reasons.some((reason) => reason.includes('failed or errored rule'))
         ? 'VALIDATION_NOT_PASSED'
-        : reasons.some((reason) => reason.includes('not supported'))
-          ? 'UNSUPPORTED_COMPONENT'
-          : 'STALE_INPUT';
+        : !capability || reasons.some((reason) => reason.includes('capability declaration'))
+          ? 'SIMULATOR_UNAVAILABLE'
+          : (failureCode ?? 'SIMULATOR_UNAVAILABLE');
     return { eligible: false, code, reasons };
   }
   return {
@@ -311,8 +472,84 @@ export function assessSimulationEligibility(input: {
       catalogDigest,
       firmwareArtifactId: firmware.artifactId,
       firmwareDigest: firmware.sha256,
+      adapterId: capability!.providerId,
+      adapterVersion: capability!.providerVersion,
+      engineId: capability!.engineId,
+      engineVersion: capability!.engineVersion,
     },
   };
+}
+
+/** Verify provider events against the immutable graph and exact catalog snapshot. */
+export function validateSimulationRunAgainstDesign(input: {
+  run: unknown;
+  graph: unknown;
+  catalog: unknown;
+  firmware: unknown;
+  expectedBinding: unknown;
+}): { valid: true; run: SimulationRun } | { valid: false; issues: string[] } {
+  const runResult = simulationRunSchema.safeParse(input.run);
+  const graphResult = circuitGraphSchema.safeParse(input.graph);
+  const catalogResult = catalogReleaseSchema.safeParse(input.catalog);
+  const firmwareResult = firmwareArtifactRefSchema.safeParse(input.firmware);
+  const expectedBindingResult = simulationBindingSchema.safeParse(input.expectedBinding);
+  if (
+    !runResult.success ||
+    !graphResult.success ||
+    !catalogResult.success ||
+    !firmwareResult.success ||
+    !expectedBindingResult.success
+  )
+    return {
+      valid: false,
+      issues: ['Run, design, firmware, or expected binding failed schema validation.'],
+    };
+  const run = runResult.data;
+  const graph = graphResult.data;
+  const catalog = catalogResult.data;
+  const firmware = firmwareResult.data;
+  const expectedBinding = expectedBindingResult.data;
+  const issues: string[] = [];
+  if (
+    run.binding.projectId !== graph.projectId ||
+    run.binding.projectRevision !== graph.projectRevision ||
+    run.binding.graphId !== graph.id ||
+    run.binding.graphDigest !== canonicalDigest(graph) ||
+    run.binding.catalogReleaseId !== catalog.releaseId ||
+    run.binding.catalogReleaseId !== graph.catalogReleaseId ||
+    run.binding.catalogDigest !== canonicalDigest(catalog)
+  )
+    issues.push('Run binding does not match the supplied immutable design snapshot.');
+  if (canonicalDigest(run.binding) !== canonicalDigest(expectedBinding))
+    issues.push(
+      'Run binding differs from the provider and firmware binding approved for this run.',
+    );
+  if (
+    run.binding.firmwareArtifactId !== firmware.artifactId ||
+    run.binding.firmwareDigest !== firmware.sha256 ||
+    firmware.projectId !== graph.projectId ||
+    firmware.projectRevision !== graph.projectRevision ||
+    !graph.components.some((component) => component.catalogPartId === firmware.boardPartId)
+  )
+    issues.push('Run firmware reference does not match the accepted artifact for this design.');
+  const instances = new Map(graph.components.map((component) => [component.id, component]));
+  const parts = new Map(catalog.parts.map((part) => [part.id, part]));
+  for (const event of run.events) {
+    if (event.kind === 'serial') continue;
+    const component = instances.get(event.componentInstanceId);
+    const part = component ? parts.get(component.catalogPartId) : null;
+    if (!part) {
+      issues.push(`Output references unknown component instance ${event.componentInstanceId}.`);
+      continue;
+    }
+    if (event.kind === 'led_state' && part.category !== 'led')
+      issues.push(`LED state targets non-LED component instance ${event.componentInstanceId}.`);
+    if (event.kind === 'sensor_reading')
+      issues.push(
+        `Sensor output is not supported for catalog component ${event.componentInstanceId}.`,
+      );
+  }
+  return issues.length ? { valid: false, issues } : { valid: true, run };
 }
 
 export type SimulationAdapter = {

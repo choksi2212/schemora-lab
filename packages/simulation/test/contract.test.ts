@@ -7,6 +7,7 @@ import {
   firmwareArtifactRefSchema,
   simulationRunSchema,
   unavailableSimulationRun,
+  validateSimulationRunAgainstDesign,
 } from '../src/index.js';
 
 const catalog = getCatalogRelease();
@@ -79,7 +80,7 @@ const capability = {
   engineVersion: '1.0.0',
   boardPartIds: [graph.components[0]!.catalogPartId],
   componentPartIds: graph.components.slice(1).map((component) => component.catalogPartId),
-  topologyIds: [],
+  topologies: [],
   firmwareLanguages: ['arduino-cpp' as const],
 };
 const binding = {
@@ -120,6 +121,10 @@ describe('simulation contracts', () => {
         catalogDigest: canonicalDigest(catalog),
         firmwareArtifactId: firmware.artifactId,
         firmwareDigest: firmware.sha256,
+        adapterId: capability.providerId,
+        adapterVersion: capability.providerVersion,
+        engineId: capability.engineId,
+        engineVersion: capability.engineVersion,
       },
     });
   });
@@ -145,11 +150,27 @@ describe('simulation contracts', () => {
         capability,
       }),
     ).toMatchObject({ eligible: false, code: 'STALE_INPUT' });
+    const shortGraph = {
+      ...graph,
+      wires: [
+        {
+          id: 'wire_power_ground_short',
+          source: {
+            kind: 'terminal' as const,
+            terminal: { componentInstanceId: 'board_1', catalogTerminalId: '3v3-j2-1' },
+          },
+          target: {
+            kind: 'terminal' as const,
+            terminal: { componentInstanceId: 'board_1', catalogTerminalId: 'gnd-j3-1' },
+          },
+        },
+      ],
+    };
     expect(
       assessSimulationEligibility({
-        graph,
+        graph: shortGraph,
         catalog,
-        report: { ...report, status: 'fail' },
+        report: validateCircuit({ graph: shortGraph, catalog }),
         firmware,
         reportIsCurrent: true,
         capability,
@@ -175,6 +196,36 @@ describe('simulation contracts', () => {
         capability: { ...capability, componentPartIds: [] },
       }),
     ).toMatchObject({ eligible: false, code: 'UNSUPPORTED_COMPONENT' });
+    expect(
+      assessSimulationEligibility({
+        graph,
+        catalog,
+        report,
+        firmware,
+        reportIsCurrent: true,
+        capability: { ...capability, boardPartIds: [] },
+      }),
+    ).toMatchObject({ eligible: false, code: 'UNSUPPORTED_BOARD' });
+    expect(
+      assessSimulationEligibility({
+        graph,
+        catalog,
+        report: { ...report, status: 'pass' },
+        firmware,
+        reportIsCurrent: true,
+        capability,
+      }),
+    ).toMatchObject({ eligible: false, code: 'STALE_INPUT' });
+    expect(
+      assessSimulationEligibility({
+        graph,
+        catalog,
+        report,
+        firmware,
+        reportIsCurrent: true,
+        capability: { ...capability, engineId: '' },
+      }),
+    ).toMatchObject({ eligible: false, code: 'SIMULATOR_UNAVAILABLE' });
   });
 
   it('represents unavailable execution without emitting simulated output', () => {
@@ -210,5 +261,79 @@ describe('simulation contracts', () => {
         failure: { code: 'ENGINE_FAILED', message: 'failed' },
       }).success,
     ).toBe(false);
+  });
+
+  it('rejects aggregate output that exceeds the persisted result quota', () => {
+    const seed = unavailableSimulationRun({ runId: 'run_output_quota', binding });
+    const result = simulationRunSchema.safeParse({
+      ...seed,
+      status: 'completed',
+      failure: null,
+      simulatedDurationMs: 2_000,
+      events: Array.from({ length: 2_000 }, (_, sequence) => ({
+        kind: 'serial' as const,
+        sequence,
+        simulationTimeMs: sequence,
+        text: 'x'.repeat(1_024),
+        stream: 'stdout' as const,
+      })),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('requires component output events to identify an instance of the right catalog category', () => {
+    const runningRun = {
+      schemaVersion: 1 as const,
+      contractVersion: '1.0.0' as const,
+      runId: 'run_valid_led',
+      status: 'completed' as const,
+      binding,
+      events: [
+        {
+          kind: 'led_state' as const,
+          sequence: 0,
+          simulationTimeMs: 1,
+          componentInstanceId: 'led_1',
+          state: 'on' as const,
+        },
+      ],
+      unsupportedFeatures: [],
+      limitations: [],
+      failure: null,
+      simulatedDurationMs: 1,
+    };
+    expect(
+      validateSimulationRunAgainstDesign({
+        run: runningRun,
+        graph,
+        catalog,
+        firmware,
+        expectedBinding: binding,
+      }),
+    ).toMatchObject({ valid: true });
+    expect(
+      validateSimulationRunAgainstDesign({
+        run: {
+          ...runningRun,
+          events: [{ ...runningRun.events[0], componentInstanceId: 'resistor_1' }],
+        },
+        graph,
+        catalog,
+        firmware,
+        expectedBinding: binding,
+      }),
+    ).toMatchObject({ valid: false });
+    expect(
+      validateSimulationRunAgainstDesign({
+        run: {
+          ...runningRun,
+          events: [{ ...runningRun.events[0], componentInstanceId: 'missing_led' }],
+        },
+        graph,
+        catalog,
+        firmware,
+        expectedBinding: binding,
+      }),
+    ).toMatchObject({ valid: false });
   });
 });
