@@ -10,9 +10,12 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@schemora/catalog": "workspace:*",
+    "@schemora/circuit-model": "workspace:*",
     "@schemora/contracts": "workspace:*",
     "@schemora/persistence": "workspace:*",
     "@schemora/storage": "workspace:*",
+    "@schemora/validation": "workspace:*",
     "fastify": "5.12.7",
     "jose": "6.2.12",
     "zod": "4.3.6"

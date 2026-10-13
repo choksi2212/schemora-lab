@@ -2,8 +2,12 @@ import Fastify, { type FastifyRequest } from 'fastify';
 import { jwtVerify } from 'jose';
 import { z, ZodError } from 'zod';
 import { randomUUID } from 'node:crypto';
+import { currentCatalogRelease } from './catalog.js';
 import { Repository, RepositoryError, publicImport, publicReview } from '@schemora/persistence';
 import { MAX_SOURCE_BYTES, type PrivateStorage } from '@schemora/storage';
+import { circuitGraphSchema, validateCircuitGraph } from '@schemora/circuit-model';
+import { getCatalogRelease } from '@schemora/catalog';
+import { validateCircuit } from '@schemora/validation';
 import type { ApiConfig } from './config.js';
 
 const uuid = z.string().uuid();
@@ -11,6 +15,7 @@ const expectedRevision = z.number().int().positive();
 const scope = z.object({ projectId: uuid });
 const importScope = scope.extend({ importId: uuid });
 const mutation = z.object({ expectedRevision }).strict();
+const circuitGraphWrite = z.object({ expectedRevision, graph: circuitGraphSchema }).strict();
 const titleSchema = z.string().trim().min(1).max(120);
 const uploadSchema = z
   .object({
@@ -160,6 +165,42 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
       return reply.code(503).send({ status: 'unavailable' });
     }
   });
+  app.get('/v1/catalog', async (request) => {
+    const { release, sha256 } = currentCatalogRelease();
+    return envelope(request, {
+      releases: [
+        {
+          schemaVersion: release.schemaVersion,
+          releaseId: release.releaseId,
+          publishedOn: release.publishedOn,
+          status: release.status,
+          sha256,
+          parts: release.parts,
+        },
+      ],
+    });
+  });
+  app.get('/v1/catalog/:releaseId', async (request) => {
+    const { releaseId } = z
+      .object({
+        releaseId: z
+          .string()
+          .min(1)
+          .max(100)
+          .regex(/^[a-zA-Z0-9._-]+$/),
+      })
+      .parse(request.params);
+    const { release, sha256 } = currentCatalogRelease();
+    if (release.releaseId !== releaseId) throw new RepositoryError('NOT_FOUND', 404);
+    return envelope(request, {
+      schemaVersion: release.schemaVersion,
+      releaseId: release.releaseId,
+      publishedOn: release.publishedOn,
+      status: release.status,
+      sha256,
+      release,
+    });
+  });
   app.get('/v1/projects', async (request) => {
     const query = z.object({ cursor: z.string().max(300).optional() }).parse(request.query);
     return envelope(request, await repository.list(owner(request), query.cursor));
@@ -186,6 +227,67 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
       .extend({ revision: z.coerce.number().int().positive() })
       .parse(request.params);
     return envelope(request, await repository.revisionDetail(owner(request), projectId, revision));
+  });
+  app.get('/v1/projects/:projectId/circuit', async (request) => {
+    const { projectId } = scope.parse(request.params);
+    return envelope(request, await repository.latestCircuitGraph(owner(request), projectId));
+  });
+  app.put('/v1/projects/:projectId/circuit', async (request) => {
+    const { projectId } = scope.parse(request.params);
+    const body = circuitGraphWrite.parse(request.body);
+    if (
+      body.graph.projectId !== projectId ||
+      body.graph.projectRevision !== body.expectedRevision + 1
+    )
+      throw new RepositoryError('INVALID_GRAPH', 400);
+    const release = getCatalogRelease();
+    if (body.graph.catalogReleaseId !== release.releaseId)
+      throw new RepositoryError('INVALID_GRAPH', 400);
+    const structure = validateCircuitGraph(body.graph, { release });
+    if (!structure.valid) throw new RepositoryError('INVALID_GRAPH', 400);
+    return envelope(
+      request,
+      await repository.saveCircuitGraph(
+        owner(request),
+        projectId,
+        body.expectedRevision,
+        key(request),
+        {
+          graph: body.graph,
+        },
+      ),
+    );
+  });
+  app.post('/v1/projects/:projectId/circuit/validate', async (request) => {
+    const { projectId } = scope.parse(request.params);
+    const body = mutation.parse(request.body);
+    const principal = owner(request);
+    const latest = await repository.latestCircuitGraph(principal, projectId);
+    if (!latest.graphSnapshot) throw new RepositoryError('GRAPH_SNAPSHOT_NOT_FOUND', 404);
+    if (latest.project.revision !== body.expectedRevision)
+      throw new RepositoryError('REVISION_CONFLICT', 409, latest.project.revision);
+    const graph = circuitGraphSchema.parse(latest.graphSnapshot.graph);
+    if (graph.projectId !== projectId || graph.catalogReleaseId !== getCatalogRelease().releaseId)
+      throw new RepositoryError('INVALID_GRAPH', 400);
+    const report = validateCircuit({ graph, catalog: getCatalogRelease() });
+    return envelope(
+      request,
+      await repository.saveValidationReport(principal, projectId, body.expectedRevision, {
+        graphSnapshotId: latest.graphSnapshot.id,
+        inputIdentity: {
+          catalogReleaseId: report.catalogReleaseId,
+          catalogDigest: report.catalogDigest,
+          rulesetId: report.rulesetId,
+          rulesetVersion: report.rulesetVersion,
+          validatorVersion: report.validatorVersion,
+        },
+        report,
+      }),
+    );
+  });
+  app.get('/v1/projects/:projectId/circuit/validation', async (request) => {
+    const { projectId } = scope.parse(request.params);
+    return envelope(request, await repository.latestValidationReport(owner(request), projectId));
   });
   app.patch('/v1/projects/:projectId', async (request) => {
     const { projectId } = scope.parse(request.params);

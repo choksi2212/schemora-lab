@@ -63,3 +63,34 @@ export const uploadIntents = pgTable('upload_intents', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
+export const circuitGraphSnapshots = pgTable(
+  'circuit_graph_snapshots',
+  {
+    id: uuid('id').notNull(),
+    projectId: uuid('project_id').notNull(),
+    projectRevision: integer('project_revision').notNull(),
+    actorId: text('actor_id').notNull(),
+    graph: jsonb('graph').notNull(),
+    graphDigest: text('graph_digest').notNull(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    requestDigest: text('request_digest').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.projectId, table.id] })],
+);
+export const validationReports = pgTable(
+  'validation_reports',
+  {
+    id: uuid('id').notNull(),
+    projectId: uuid('project_id').notNull(),
+    graphSnapshotId: uuid('graph_snapshot_id').notNull(),
+    expectedProjectRevision: integer('expected_project_revision').notNull(),
+    actorId: text('actor_id').notNull(),
+    inputIdentity: jsonb('input_identity').notNull(),
+    inputIdentityDigest: text('input_identity_digest').notNull(),
+    report: jsonb('report').notNull(),
+    reportDigest: text('report_digest').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.projectId, table.id] })],
+);

@@ -1,0 +1,235 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { SignJWT } from 'jose';
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { getCatalogRelease } from '@schemora/catalog';
+import { Repository } from '@schemora/persistence';
+import { FileStorage } from '@schemora/storage';
+import { readConfig } from '../src/config.js';
+import { buildApp } from '../src/app.js';
+
+describe.skipIf(!process.env.TEST_DATABASE_URL)('project circuit API', () => {
+  const secret = 'test-session-secret-only-00000000000000000000';
+  const userA = 'circuit-test:' + randomUUID();
+  const userB = 'circuit-test:' + randomUUID();
+  const config = readConfig({
+    NODE_ENV: 'test',
+    DATABASE_URL: process.env.TEST_DATABASE_URL!,
+    SESSION_SECRET: secret,
+  });
+  const repository = new Repository(config.DATABASE_URL);
+  let directory: string;
+  let app: ReturnType<typeof buildApp>;
+  let tokenA: string;
+  let tokenB: string;
+
+  async function token(subject: string) {
+    return new SignJWT({})
+      .setSubject(subject)
+      .setIssuer('schemora-web')
+      .setAudience('schemora-api')
+      .setIssuedAt()
+      .setExpirationTime('5m')
+      .setProtectedHeader({ alg: 'HS256' })
+      .sign(new TextEncoder().encode(secret));
+  }
+
+  async function request(
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH',
+    url: string,
+    payload: object | undefined,
+    identity: string,
+    idempotencyKey = randomUUID(),
+  ) {
+    const response = await app.inject({
+      method,
+      url,
+      headers: { authorization: `Bearer ${identity}`, 'idempotency-key': idempotencyKey },
+      ...(payload === undefined ? {} : { payload }),
+    });
+    return { status: response.statusCode, body: response.json() };
+  }
+
+  beforeAll(async () => {
+    directory = await mkdtemp(join(tmpdir(), 'schemora-circuit-api-'));
+    app = buildApp(config, repository, new FileStorage(directory, 'test'));
+    tokenA = await token(userA);
+    tokenB = await token(userB);
+  });
+
+  afterAll(async () => {
+    if (app) await app.close();
+    await repository.transaction(async (client) => {
+      await client.query(
+        'DELETE FROM validation_reports WHERE project_id IN (SELECT id FROM projects WHERE owner_id=ANY($1))',
+        [[userA, userB]],
+      );
+      await client.query(
+        'DELETE FROM circuit_graph_snapshots WHERE project_id IN (SELECT id FROM projects WHERE owner_id=ANY($1))',
+        [[userA, userB]],
+      );
+      for (const table of ['reviews', 'revisions', 'imports', 'upload_intents', 'jobs', 'outbox']) {
+        await client.query(
+          'DELETE FROM ' +
+            table +
+            ' WHERE project_id IN (SELECT id FROM projects WHERE owner_id=ANY($1))',
+          [[userA, userB]],
+        );
+      }
+      await client.query('DELETE FROM idempotency WHERE owner_id=ANY($1)', [[userA, userB]]);
+      await client.query('DELETE FROM projects WHERE owner_id=ANY($1)', [[userA, userB]]);
+      await client.query('DELETE FROM principals WHERE id=ANY($1)', [[userA, userB]]);
+    });
+    await repository.pool.end();
+    if (directory) await rm(directory, { recursive: true, force: true });
+  });
+
+  it('scopes, stores, validates, and reports the exact immutable circuit snapshot', async () => {
+    const created = await request('POST', '/v1/projects', { title: 'Circuit API test' }, tokenA);
+    expect(created.status).toBe(201);
+    const project = created.body.data;
+    const empty = await request('GET', `/v1/projects/${project.id}/circuit`, undefined, tokenA);
+    expect(empty.status).toBe(200);
+    expect(empty.body.data.graphSnapshot).toBeNull();
+
+    const denied = await request('GET', `/v1/projects/${project.id}/circuit`, undefined, tokenB);
+    expect(denied.status).toBe(404);
+
+    const release = getCatalogRelease();
+    const graph = {
+      schemaVersion: 1 as const,
+      id: 'graph_short_test',
+      projectId: project.id,
+      projectRevision: project.revision + 1,
+      catalogReleaseId: release.releaseId,
+      components: [
+        {
+          id: 'board_test',
+          catalogPartId: 'board.espressif.esp32-devkitc-v4.wroom-32e.male',
+        },
+      ],
+      breadboards: [],
+      terminalPlacements: [],
+      wires: [
+        {
+          id: 'short_test',
+          source: {
+            kind: 'terminal' as const,
+            terminal: { componentInstanceId: 'board_test', catalogTerminalId: '3v3-j2-1' },
+          },
+          target: {
+            kind: 'terminal' as const,
+            terminal: { componentInstanceId: 'board_test', catalogTerminalId: 'gnd-j3-1' },
+          },
+        },
+      ],
+    };
+    const malformed = await request(
+      'PUT',
+      `/v1/projects/${project.id}/circuit`,
+      { expectedRevision: project.revision, graph: { ...graph, projectId: randomUUID() } },
+      tokenA,
+    );
+    expect(malformed.status).toBe(400);
+
+    const idempotencyKey = randomUUID();
+    const saved = await request(
+      'PUT',
+      `/v1/projects/${project.id}/circuit`,
+      { expectedRevision: project.revision, graph },
+      tokenA,
+      idempotencyKey,
+    );
+    expect(saved.status).toBe(200);
+    expect(saved.body.data.project.revision).toBe(project.revision + 1);
+    expect(saved.body.data.graphSnapshot.graph).toEqual(graph);
+    const replay = await request(
+      'PUT',
+      `/v1/projects/${project.id}/circuit`,
+      { expectedRevision: project.revision, graph },
+      tokenA,
+      idempotencyKey,
+    );
+    expect(replay.status).toBe(200);
+    expect(replay.body.data.graphSnapshot.id).toBe(saved.body.data.graphSnapshot.id);
+
+    const stale = await request(
+      'PUT',
+      `/v1/projects/${project.id}/circuit`,
+      { expectedRevision: project.revision, graph },
+      tokenA,
+    );
+    expect(stale.status).toBe(409);
+
+    const validated = await request(
+      'POST',
+      `/v1/projects/${project.id}/circuit/validate`,
+      { expectedRevision: saved.body.data.project.revision },
+      tokenA,
+    );
+    expect(validated.status).toBe(200);
+    expect(validated.body.data.current).toBe(true);
+    expect(validated.body.data.report.report.status).toBe('fail');
+    expect(validated.body.data.report.report.findings).toContainEqual(
+      expect.objectContaining({ ruleId: 'POWER_GROUND_SHORT', status: 'fail' }),
+    );
+    const validationReplay = await request(
+      'POST',
+      `/v1/projects/${project.id}/circuit/validate`,
+      { expectedRevision: saved.body.data.project.revision },
+      tokenA,
+    );
+    expect(validationReplay.body.data.report.id).toBe(validated.body.data.report.id);
+
+    const report = await request(
+      'GET',
+      `/v1/projects/${project.id}/circuit/validation`,
+      undefined,
+      tokenA,
+    );
+    expect(report.status).toBe(200);
+    expect(report.body.data.current).toBe(true);
+    expect(report.body.data.report.report.graphDigest).toBe(
+      saved.body.data.graphSnapshot.graphDigest,
+    );
+
+    const renamed = await request(
+      'PATCH',
+      `/v1/projects/${project.id}`,
+      { expectedRevision: saved.body.data.project.revision, title: 'Circuit changed' },
+      tokenA,
+    );
+    expect(renamed.status).toBe(200);
+    const nextGraph = {
+      ...graph,
+      id: 'graph_short_test_v2',
+      projectRevision: renamed.body.data.project.revision + 1,
+    };
+    const updatedGraph = await request(
+      'PUT',
+      `/v1/projects/${project.id}/circuit`,
+      { expectedRevision: renamed.body.data.project.revision, graph: nextGraph },
+      tokenA,
+    );
+    expect(updatedGraph.status).toBe(200);
+    const staleReport = await request(
+      'GET',
+      `/v1/projects/${project.id}/circuit/validation`,
+      undefined,
+      tokenA,
+    );
+    expect(staleReport.status).toBe(200);
+    expect(staleReport.body.data.current).toBe(false);
+    expect(staleReport.body.data.report).toBeNull();
+
+    const unauthorizedValidation = await request(
+      'POST',
+      `/v1/projects/${project.id}/circuit/validate`,
+      { expectedRevision: saved.body.data.project.revision },
+      tokenB,
+    );
+    expect(unauthorizedValidation.status).toBe(404);
+  });
+});

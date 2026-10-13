@@ -1,0 +1,286 @@
+import type { CatalogRelease } from './schema.js';
+
+/** Immutable Phase 2 starter release; changes belong in a new release file. */
+export const catalogRelease2026_10 = {
+  schemaVersion: 1,
+  releaseId: 'schemora-hw-2026.10',
+  publishedOn: '2026-10-13',
+  status: 'curated',
+  sources: [
+    {
+      id: 'espressif-devkitc-v4-guide',
+      url: 'https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32/esp32-devkitc/user_guide.html',
+      publisher: 'Espressif Systems',
+      title: 'ESP32-DevKitC V4 User Guide',
+      accessedOn: '2026-10-13',
+      documentRevision: null,
+    },
+    {
+      id: 'espressif-wroom-32e-datasheet',
+      url: 'https://documentation.espressif.com/esp32-wroom-32e_esp32-wroom-32ue_datasheet_en.html',
+      publisher: 'Espressif Systems',
+      title: 'ESP32-WROOM-32E / ESP32-WROOM-32UE Datasheet',
+      accessedOn: '2026-10-13',
+      documentRevision: null,
+    },
+    {
+      id: 'busboard-bb400-datasheet',
+      url: 'https://www.busboard.com/documents/datasheets/BPS-DAT-%28BB400%29-Datasheet.pdf',
+      publisher: 'BusBoard Prototype Systems Ltd.',
+      title: 'BB400 product datasheet',
+      accessedOn: '2026-10-13',
+      documentRevision: 'Rev 7, 2014',
+    },
+    {
+      id: 'busboard-bb400-rev6-internal-connections',
+      url: 'https://www.busboard.com/documents/datasheets/BPS-DAT-%28BB400%29-Datasheet.pdf',
+      publisher: 'BusBoard Prototype Systems Ltd.',
+      title: 'BB400 internal connections specification',
+      accessedOn: '2026-10-13',
+      documentRevision: 'Rev 6, 2015',
+    },
+    {
+      id: 'yageo-cfr-exact-part',
+      url: 'https://www.yageogroup.com/component-documentation/download/specsheet/CFR-25JB-52-220R',
+      publisher: 'YAGEO',
+      title: 'CFR-25JB-52-220R part specification',
+      accessedOn: '2026-10-13',
+      documentRevision: 'Generated product specification; CFR series V.3 dated 2024-04-03',
+    },
+    {
+      id: 'kingbright-wp7113id-datasheet',
+      url: 'https://www.kingbrightusa.com/images/catalog/SPEC/WP7113ID.pdf',
+      publisher: 'Kingbright',
+      title: 'WP7113ID product specification',
+      accessedOn: '2026-10-13',
+      documentRevision: 'V.14A, 2026-01-08',
+    },
+    {
+      id: 'yageo-cfr-datasheet',
+      url: 'https://yageogroup.com/content/datasheet/asset/file/YAGEO-CFR_DATASHEET',
+      publisher: 'YAGEO',
+      title: 'CFR Carbon Film Resistors Product Specification',
+      accessedOn: '2026-10-13',
+      documentRevision: 'V.3, 2024-04-03',
+    },
+  ],
+  parts: [
+    {
+      id: 'board.espressif.esp32-devkitc-v4.wroom-32e.male',
+      manufacturer: 'Espressif Systems',
+      model: 'ESP32-DevKitC V4',
+      category: 'development-board',
+      identityScope: 'exact-configuration',
+      summary:
+        'ESP32-DevKitC V4 fitted with ESP32-WROOM-32E and male pin headers. Pin guidance is limited to documented header aliases in this release.',
+      configuration: { module: 'ESP32-WROOM-32E', header: 'male' },
+      moduleOperatingSupplyVolt: { minimum: 3.0, maximum: 3.6 },
+      terminals: [
+        { id: 'gpio19', label: 'GPIO19 / IO19', electricalRole: 'gpio' },
+        { id: 'gnd-j3-1', label: 'J3 GND (position 1)', electricalRole: 'ground' },
+        { id: 'gnd-j3-7', label: 'J3 GND (position 7)', electricalRole: 'ground' },
+        { id: '3v3-j2-1', label: 'J2 3V3 (position 1)', electricalRole: 'power' },
+      ],
+      pins: [
+        {
+          terminalId: 'gpio19',
+          header: 'J3',
+          position: 8,
+          printedLabel: 'IO19',
+          functions: ['GPIO19'],
+          availableForScenario: true,
+        },
+        {
+          terminalId: 'gnd-j3-1',
+          header: 'J3',
+          position: 1,
+          printedLabel: 'GND',
+          functions: ['ground'],
+          availableForScenario: true,
+        },
+        {
+          terminalId: 'gnd-j3-7',
+          header: 'J3',
+          position: 7,
+          printedLabel: 'GND',
+          functions: ['ground'],
+          availableForScenario: true,
+        },
+        {
+          terminalId: '3v3-j2-1',
+          header: 'J2',
+          position: 1,
+          printedLabel: '3V3',
+          functions: ['3.3 V supply'],
+          availableForScenario: false,
+        },
+      ],
+      supplyOptions: ['micro-usb', '5v-and-ground', '3v3-and-ground'],
+      sourceIds: ['espressif-devkitc-v4-guide', 'espressif-wroom-32e-datasheet'],
+      limitations: [
+        'ESP32-DevKitC V4 is sold with multiple module configurations; this record applies only when the module marking is ESP32-WROOM-32E and male headers are fitted.',
+        'This pin subset does not establish a GPIO current design limit or overall board power budget. Electrical rule checks must use the exact applicable Espressif datasheet limits and an explicit derating policy.',
+        'Do not infer compatibility with WROVER, WROOM-32UE, other DevKit revisions, clones, or boards with different headers from this record.',
+      ],
+    },
+    {
+      id: 'led.kingbright.wp7113id',
+      manufacturer: 'Kingbright',
+      model: 'WP7113ID',
+      category: 'led',
+      identityScope: 'exact-configuration',
+      summary: '5 mm diffused high-efficiency red through-hole LED.',
+      package: 'T-1 3/4 (5 mm) through-hole',
+      color: 'high-efficiency red',
+      forwardVoltage: {
+        testCurrentMilliamp: 10,
+        typicalVolt: 1.9,
+        maximumVolt: 2.3,
+        toleranceVolt: 0.1,
+      },
+      maximumDcForwardCurrentMilliamp: 30,
+      powerDissipationMilliwatt: 75,
+      anodeTerminalId: 'anode',
+      cathodeTerminalId: 'cathode',
+      terminals: [
+        { id: 'anode', label: 'Anode', electricalRole: 'anode' },
+        { id: 'cathode', label: 'Cathode', electricalRole: 'cathode' },
+      ],
+      sourceIds: ['kingbright-wp7113id-datasheet'],
+      limitations: [
+        'Datasheet forward-voltage values are specified at 10 mA; they are not a complete LED current-voltage curve.',
+        'The part drawing and physical part markings must be checked to orient the anode and cathode before placement; this record does not encode a lead-length or flat-side heuristic.',
+      ],
+    },
+    {
+      id: 'resistor.yageo.cfr-25jb-52-220r',
+      manufacturer: 'YAGEO',
+      model: 'CFR-25JB-52-220R',
+      category: 'resistor',
+      identityScope: 'exact-configuration',
+      summary: '220 ohm, ±5%, 0.25 W carbon-film axial through-hole resistor.',
+      resistanceOhm: 220,
+      tolerancePercent: 5,
+      ratedPowerWatt: 0.25,
+      construction: 'carbon film',
+      mounting: 'axial through-hole',
+      terminals: [
+        { id: 'lead-a', label: 'Lead A', electricalRole: 'passive' },
+        { id: 'lead-b', label: 'Lead B', electricalRole: 'passive' },
+      ],
+      sourceIds: ['yageo-cfr-exact-part', 'yageo-cfr-datasheet'],
+      limitations: [
+        'A resistor is non-polarized; lead A and lead B have no directional meaning.',
+        'Power and working-voltage limits must be checked for the selected operating circuit; the nominal resistance alone does not establish suitability.',
+      ],
+    },
+  ],
+  breadboardTopologies: [
+    {
+      id: 'breadboard.busboard.bb400',
+      version: 1,
+      name: 'BusBoard BB400 solderless breadboard topology',
+      tiePointCount: 400,
+      physicalModel: {
+        manufacturer: 'BusBoard Prototype Systems Ltd.',
+        model: 'BB400',
+        orderableVariants: ['BB400 (white)', 'BB400T (transparent)'],
+        holePitchMm: 2.54,
+        dimensionsMm: { length: 84, width: 54.3, height: 8.5 },
+      },
+      coordinateConvention:
+        'Legend rows A–E and F–J, columns 1–30. Each terminal-strip column is a five-hole vertical group. Four edge rails are identified as rail-1 through rail-4 in top-to-bottom order when viewed with the printed legend upright; rail holes are numbered 1–25 from the left edge.',
+      sourceIds: ['busboard-bb400-datasheet', 'busboard-bb400-rev6-internal-connections'],
+      terminalStripGroups: [
+        ...Array.from({ length: 30 }, (_, index) => {
+          const column = index + 1;
+          return [
+            {
+              id: `terminal-upper-${String(column).padStart(2, '0')}`,
+              holes: ['A', 'B', 'C', 'D', 'E'].map((row) => `${row}${column}`),
+            },
+            {
+              id: `terminal-lower-${String(column).padStart(2, '0')}`,
+              holes: ['F', 'G', 'H', 'I', 'J'].map((row) => `${row}${column}`),
+            },
+          ];
+        }).flat(),
+      ],
+      railGroups: ['rail-1', 'rail-2', 'rail-3', 'rail-4'].map((id) => {
+        const holes = Array.from({ length: 25 }, (_, index) => `${id}:${index + 1}`);
+        return {
+          id,
+          holes,
+          splitCapable: false,
+          connectivityVariants: [{ id: 'continuous', connectedHoleSets: [holes] }],
+        };
+      }),
+      limitations: [
+        'This topology applies to the BusBoard BB400 (white) and BB400T (transparent) models identified by the manufacturer; it is not interchangeable with a visually similar generic breadboard.',
+        'The manufacturer describes internal connectivity as 60 vertical terminal-strip columns and four horizontal rails. This mapping encodes 30 five-hole columns on each side of the center gap and four continuous 25-hole rails.',
+        'Rail identifiers encode location only; they do not assign voltage or ground. A user must choose how each rail is wired in the actual circuit.',
+        'The model has no 3D anchor coordinates or part-fit guarantees. Dimensions and hole pitch are manufacturer facts, but assembly placement still requires a separately reviewed geometry asset.',
+        "Before following real-world instructions, confirm the board identity, printed hole labels, and electrical continuity of rails; the app model does not inspect the user's physical board.",
+      ],
+    },
+  ],
+  claims: [
+    {
+      subjectId: 'board.espressif.esp32-devkitc-v4.wroom-32e.male',
+      property: 'model/configuration/pin-functions/supply-options',
+      sourceId: 'espressif-devkitc-v4-guide',
+      locator: 'Overview; Header Block J2 and J3; Power Supply Options',
+      note: 'The guide lists V4 module variants, identifies GPIO19 at J3 position 8 as IO19, GND at J3 positions 1 and 7, and the three mutually exclusive power options.',
+    },
+    {
+      subjectId: 'board.espressif.esp32-devkitc-v4.wroom-32e.male',
+      property: 'configuration.module',
+      sourceId: 'espressif-devkitc-v4-guide',
+      locator: 'Overview',
+      note: 'ESP32-WROOM-32E is one of the explicitly listed V4 module variants; board variant must be physically confirmed.',
+    },
+    {
+      subjectId: 'board.espressif.esp32-devkitc-v4.wroom-32e.male',
+      property: 'moduleOperatingSupplyVolt',
+      sourceId: 'espressif-wroom-32e-datasheet',
+      locator: 'Section 1, Module Overview / Operating Conditions',
+      note: 'ESP32-WROOM-32E operating supply is 3.0–3.6 V. This is the module operating range and is not an assertion of the board header power-source specification.',
+    },
+    {
+      subjectId: 'led.kingbright.wp7113id',
+      property:
+        'model/package/color/forwardVoltage/maximumDcForwardCurrentMilliamp/powerDissipationMilliwatt',
+      sourceId: 'kingbright-wp7113id-datasheet',
+      locator: 'Pages 1–2; Mechanical Dimensions',
+      note: 'Manufacturer specification identifies the 5 mm red part, Vf 1.9 V typical / 2.3 V maximum at 10 mA (±0.1 V note), 30 mA DC forward current and 75 mW power dissipation.',
+    },
+    {
+      subjectId: 'resistor.yageo.cfr-25jb-52-220r',
+      property: 'model/resistanceOhm/tolerancePercent',
+      sourceId: 'yageo-cfr-exact-part',
+      locator: 'Exact YAGEO part specification',
+      note: 'Manufacturer endpoint is for CFR-25JB-52-220R; identifies 220 ohm and ±5% tolerance.',
+    },
+    {
+      subjectId: 'resistor.yageo.cfr-25jb-52-220r',
+      property: 'ratedPowerWatt/construction/mounting',
+      sourceId: 'yageo-cfr-datasheet',
+      locator: 'Ordering Information and Electrical Characteristics, CFR-25',
+      note: 'Manufacturer series specification identifies CFR as carbon film, axial through-hole and CFR-25 at 1/4 W.',
+    },
+    {
+      subjectId: 'breadboard.busboard.bb400',
+      property: 'tiePointCount/variants/dimensions/holePitch/terminalStripGroups/railGroups',
+      sourceId: 'busboard-bb400-datasheet',
+      locator: 'BB400 datasheet Rev 7, specifications and product drawing',
+      note: 'Manufacturer lists BB400/BB400T, 400 holes, 300 circuit area plus four 25-hole rails, 2.54 mm pitch, and 84 × 54.3 × 8.5 mm body dimensions.',
+    },
+    {
+      subjectId: 'breadboard.busboard.bb400',
+      property: 'terminalStripGroups/railGroups/connectivityVariants',
+      sourceId: 'busboard-bb400-rev6-internal-connections',
+      locator: 'BB400 datasheet Rev 6, Internal Connections',
+      note: 'Manufacturer states internal connections are 60 vertical columns in the circuit area and four horizontal distribution rails. The 60 groups each contain five holes; each rail consists of 25 holes per Rev 7 tie-point count. No rail split is defined for this model.',
+    },
+  ],
+} satisfies CatalogRelease;
