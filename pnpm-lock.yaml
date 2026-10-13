@@ -75,12 +75,21 @@ importers:
       '@schemora/assembly-plan':
         specifier: workspace:*
         version: link:../../packages/assembly-plan
+      '@schemora/catalog':
+        specifier: workspace:*
+        version: link:../../packages/hardware-catalog
       '@schemora/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@schemora/simulation':
+        specifier: workspace:*
+        version: link:../../packages/simulation
       '@schemora/teaching':
         specifier: workspace:*
         version: link:../../packages/teaching
+      '@schemora/validation':
+        specifier: workspace:*
+        version: link:../../packages/validation
       jose:
         specifier: 6.2.12
         version: 6.2.12
