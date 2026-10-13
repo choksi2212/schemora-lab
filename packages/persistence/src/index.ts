@@ -465,6 +465,23 @@ export class Repository {
       return result.rows[0];
     });
   }
+  async firmwareCompilerSource(owner: string, projectId: string, artifactId: string) {
+    return this.transaction(async (client) => {
+      const project = await this.project(client, owner, projectId, 'share');
+      if (project.status !== 'active') throw new RepositoryError('PROJECT_NOT_ACTIVE', 409);
+      const result = await client.query<FirmwareArtifactRow>(
+        this.firmwareArtifactQuery() + ' WHERE a.project_id=$1 AND a.id=$2',
+        [projectId, artifactId],
+      );
+      const artifact = result.rows[0];
+      if (!artifact) throw new RepositoryError('NOT_FOUND', 404);
+      const files = await client.query<FirmwareArtifactFileRow>(
+        'SELECT project_id,artifact_id,path,object_key,sha256,byte_length,is_entrypoint FROM firmware_artifact_files WHERE project_id=$1 AND artifact_id=$2 ORDER BY path',
+        [projectId, artifactId],
+      );
+      return { artifact, files: files.rows };
+    });
+  }
   async withFirmwareArtifact<T>(
     owner: string,
     projectId: string,
@@ -658,6 +675,12 @@ export class Repository {
       const sourceArtifact = source.rows[0];
       if (!sourceArtifact) throw new RepositoryError('NOT_FOUND', 404);
       const sourceDigest = sourceArtifact.bundle_digest ?? sourceArtifact.sha256;
+      const review = await client.query<{ decision: string }>(
+        'SELECT decision FROM firmware_reviews WHERE project_id=$1 AND artifact_id=$2 ORDER BY project_revision DESC LIMIT 1',
+        [projectId, input.sourceArtifactId],
+      );
+      if (review.rows[0]?.decision !== 'accepted')
+        throw new RepositoryError('FIRMWARE_REVIEW_REQUIRED', 409);
       if (
         sourceArtifact.build_system !== 'esp-idf' ||
         canonicalDigest(sourceArtifact.target) !== canonicalDigest(profile.data.target) ||

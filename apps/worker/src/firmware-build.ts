@@ -1,19 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import type { Repository } from '@schemora/persistence';
-import type { PrivateBuildStorage } from '@schemora/storage';
+import type { PrivateBuildStorage, PrivateStorage } from '@schemora/storage';
 import {
   compileFirmwareProject,
   type FirmwareCompilerProfile,
   type FirmwareCompilerSandbox,
-  type FirmwareProjectBundle,
 } from '@schemora/simulation';
+import { resolveFirmwareCompilerBundle } from './firmware-source.js';
 
 export interface PersistFirmwareBuildRequest {
   ownerId: string;
   projectId: string;
   sourceArtifactId: string;
   idempotencyKey: string;
-  bundle: FirmwareProjectBundle;
   profile: FirmwareCompilerProfile;
 }
 
@@ -25,7 +24,7 @@ export interface PersistFirmwareBuildRequest {
  */
 export async function compileAndPersistFirmwareBuild(
   repository: Repository,
-  storage: PrivateBuildStorage,
+  storage: PrivateStorage & PrivateBuildStorage,
   sandbox: FirmwareCompilerSandbox,
   request: PersistFirmwareBuildRequest,
 ) {
@@ -38,7 +37,12 @@ export async function compileAndPersistFirmwareBuild(
   );
   if (prior) return prior;
 
-  const compiled = await compileFirmwareProject(request.bundle, request.profile, sandbox);
+  const bundle = await resolveFirmwareCompilerBundle(repository, storage, {
+    ownerId: request.ownerId,
+    projectId: request.projectId,
+    artifactId: request.sourceArtifactId,
+  });
+  const compiled = await compileFirmwareProject(bundle, request.profile, sandbox);
   const buildId = randomUUID();
   const objects = compiled.result.artifacts.map((artifact) => ({
     role: artifact.role,
