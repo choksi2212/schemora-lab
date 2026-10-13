@@ -352,15 +352,20 @@ export function validateExternalExtraction(
     conflictIds.add(conflict.id);
   }
   const byId = new Map(result.candidates.map((c) => [c.id, c]));
-  for (const candidate of result.candidates) {
-    const path = new Set<string>();
-    const visit = (id: string): void => {
-      if (path.has(id)) throw new Error('Cyclic supersession.');
-      path.add(id);
-      for (const parent of byId.get(id)!.supersedes) visit(parent);
-      path.delete(id);
-    };
-    visit(candidate.id);
-  }
+  const path = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (id: string): void => {
+    if (path.has(id)) throw new Error('Cyclic supersession.');
+    if (visited.has(id)) return;
+    path.add(id);
+    for (const parent of byId.get(id)!.supersedes) {
+      if (byId.get(parent)!.status !== 'superseded')
+        throw new Error('Supersession target must have superseded status.');
+      visit(parent);
+    }
+    path.delete(id);
+    visited.add(id);
+  };
+  for (const candidate of result.candidates) visit(candidate.id);
   return result;
 }

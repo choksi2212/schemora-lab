@@ -266,6 +266,25 @@ describe('normalization and source safety', () => {
       parseConversation({ filename: 'chat.zip', bytes: zip('script.exe', 'x') }),
     ).rejects.toThrow('disallowed');
   });
+  it('rejects archive symlinks, encryption and expanded byte limits', async () => {
+    const data = Buffer.from(zip('chat.txt', 'User: ESP32'));
+    const centralOffset = data.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+    const symlink = Buffer.from(data);
+    symlink.writeUInt32LE((0xa000 << 16) >>> 0, centralOffset + 38);
+    await expect(parseConversation({ filename: 'chat.zip', bytes: symlink })).rejects.toThrow(
+      'symbolic links',
+    );
+    const encrypted = Buffer.from(data);
+    encrypted.writeUInt16LE(1, centralOffset + 8);
+    await expect(parseConversation({ filename: 'chat.zip', bytes: encrypted })).rejects.toThrow();
+    await expect(
+      parseConversation({
+        filename: 'chat.zip',
+        bytes: data,
+        limits: { maxArchiveExpandedBytes: 3 },
+      }),
+    ).rejects.toThrow('decompression limits');
+  });
   it('rejects invalid PDF signature', async () => {
     await expect(parse('not a PDF', 'chat.pdf')).rejects.toThrow('not a PDF');
   });
@@ -277,6 +296,15 @@ describe('normalization and source safety', () => {
     expect(result.conversations[0]!.messages[0]!.content).toContain('ESP32 LED circuit');
     expect(result.conversations[0]!.messages[0]!.source.page).toBe(1);
     expect(result.conversations[0]!.warnings.join(' ')).toContain('whitespace');
+  });
+  it('rejects PDF with no readable text', async () => {
+    await expect(parseConversation({ filename: 'image.pdf', bytes: textPdf('') })).rejects.toThrow(
+      'No readable messages',
+    );
+  });
+  it('accepts extension aliases consistently', async () => {
+    expect((await parse('User: ESP32', 'chat.markdown')).messages[0]!.content).toBe('ESP32');
+    expect((await parse('<p>ESP32</p>', 'chat.htm')).messages[0]!.content).toContain('ESP32');
   });
   it('rejects wrong selection IDs', async () => {
     await expect(
