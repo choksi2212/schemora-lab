@@ -9,4 +9,5 @@ test-results/
 !.env.example
 .schemora/
 *.tsbuildinfo
+next-env.d.ts
 .DS_Store
