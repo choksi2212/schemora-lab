@@ -8,6 +8,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@schemora/persistence": "workspace:*",
     "@schemora/simulation": "workspace:*"
   },
   "devDependencies": {

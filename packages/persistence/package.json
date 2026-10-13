@@ -4,11 +4,13 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./runner-replay": "./src/runner-replay-store.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "migrate": "tsx src/migrate.ts"
+    "migrate": "tsx src/migrate.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "drizzle-orm": "0.45.4",
@@ -17,6 +19,7 @@
   },
   "devDependencies": {
     "@types/pg": "8.15.6",
-    "tsx": "4.20.6"
+    "tsx": "4.20.6",
+    "vitest": "^3.2.0"
   }
 }

@@ -5,6 +5,14 @@ import { eq, and, desc, or, ne, lt, sql, getTableColumns } from 'drizzle-orm';
 import type { ConversationBundle, ExtractionResult } from '@schemora/contracts';
 import * as schema from './schema.js';
 
+export {
+  claimRunnerReplayToken,
+  deleteExpiredRunnerReplayClaims,
+  type RunnerReplayClaim,
+  type RunnerReplayQueryable,
+  type RunnerReplayTokenClass,
+} from './runner-replay-store.js';
+
 export interface Project extends QueryResultRow {
   id: string;
   owner_id: string;
