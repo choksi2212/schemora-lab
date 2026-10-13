@@ -5,6 +5,7 @@ import { validateCircuit } from '@schemora/validation';
 import {
   assessSimulationEligibility,
   firmwareArtifactRefSchema,
+  mapEsp32Gpio19ToLedState,
   simulationRunSchema,
   unavailableSimulationRun,
   validateSimulationRunAgainstDesign,
@@ -99,6 +100,85 @@ const binding = {
 };
 
 describe('simulation contracts', () => {
+  it('maps captured GPIO19 digital output to the exact graph-connected LED', () => {
+    const mapped = mapEsp32Gpio19ToLedState({
+      graph,
+      catalog,
+      signals: [
+        { sequence: 0, simulationTimeMs: 0, pin: 19, enabled: true, level: 0 },
+        { sequence: 1, simulationTimeMs: 100, pin: 19, enabled: true, level: 1 },
+        { sequence: 2, simulationTimeMs: 200, pin: 19, enabled: true, level: 0 },
+      ],
+    });
+
+    expect(mapped).toMatchObject({
+      supported: true,
+      componentInstanceId: 'led_1',
+      events: [
+        { kind: 'led_state', sequence: 0, state: 'off', componentInstanceId: 'led_1' },
+        { kind: 'led_state', sequence: 1, state: 'on', componentInstanceId: 'led_1' },
+        { kind: 'led_state', sequence: 2, state: 'off', componentInstanceId: 'led_1' },
+      ],
+    });
+    if (mapped.supported)
+      expect(mapped.limitations.join(' ')).toContain('does not calculate LED current');
+  });
+
+  it('rejects reversed LED polarity, malformed pin signals, and out-of-order observations', () => {
+    const reversedGraph = {
+      ...graph,
+      wires: graph.wires.map((wire) => {
+        if (wire.id === 'wire_resistor_led') {
+          return {
+            ...wire,
+            target: {
+              kind: 'terminal' as const,
+              terminal: { componentInstanceId: 'led_1', catalogTerminalId: 'cathode' },
+            },
+          };
+        }
+        if (wire.id === 'wire_led_ground') {
+          return {
+            ...wire,
+            source: {
+              kind: 'terminal' as const,
+              terminal: { componentInstanceId: 'led_1', catalogTerminalId: 'anode' },
+            },
+          };
+        }
+        return wire;
+      }),
+    };
+    const signal = {
+      sequence: 0,
+      simulationTimeMs: 0,
+      pin: 19 as const,
+      enabled: true as const,
+      level: 1 as const,
+    };
+
+    expect(
+      mapEsp32Gpio19ToLedState({ graph: reversedGraph, catalog, signals: [signal] }),
+    ).toMatchObject({
+      supported: false,
+      reason: expect.stringContaining('supported GPIO19-to-resistor'),
+    });
+    expect(
+      mapEsp32Gpio19ToLedState({ graph, catalog, signals: [{ ...signal, pin: 18 as never }] }),
+    ).toMatchObject({ supported: false, reason: expect.stringContaining('malformed') });
+    expect(
+      mapEsp32Gpio19ToLedState({
+        graph,
+        catalog,
+        signals: [
+          signal,
+          { ...signal, sequence: 1, simulationTimeMs: 100, level: 0 },
+          { ...signal, sequence: 2, simulationTimeMs: 50 },
+        ],
+      }),
+    ).toMatchObject({ supported: false, reason: expect.stringContaining('ordered') });
+  });
+
   it('accepts an exact current project binding only when the provider declares all modeled parts', () => {
     expect(report.status).toBe('unknown');
     expect(
