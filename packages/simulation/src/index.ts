@@ -14,6 +14,10 @@ import { z } from 'zod';
 
 export { mapEsp32Gpio19ToLedState } from './adapters/esp32-gpio19-led.js';
 export type { Esp32Gpio19Signal, LedStateMapping } from './adapters/esp32-gpio19-led.js';
+export {
+  normalizeQemuReferenceCallbacks,
+  type QemuCallbackNormalization,
+} from './adapters/qemu-callback-normalizer.js';
 
 export const SIMULATION_CONTRACT_VERSION = '1.0.0';
 export const MAX_SIMULATION_RESULT_BYTES = 2_000_000;

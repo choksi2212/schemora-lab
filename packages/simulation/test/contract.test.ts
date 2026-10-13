@@ -7,6 +7,7 @@ import {
   assessSimulationEligibility,
   firmwareArtifactRefSchema,
   mapEsp32Gpio19ToLedState,
+  normalizeQemuReferenceCallbacks,
   simulationRunSchema,
   unavailableSimulationRun,
   validateSimulationRunAgainstDesign,
@@ -72,6 +73,13 @@ const capturedGpio19Trace = readFileSync(
   .map(
     (line) => JSON.parse(line) as { sequence: number; type: string; gpio: number; level: 0 | 1 },
   );
+const capturedQemuCallbackTrace = readFileSync(
+  new URL('../../../examples/phase6-qemu-gpio-probe/expected-events.jsonl', import.meta.url),
+  'utf8',
+)
+  .trim()
+  .split('\n')
+  .map((line) => JSON.parse(line) as Record<string, unknown>);
 const firmware = firmwareArtifactRefSchema.parse({
   schemaVersion: 1,
   artifactId: 'firmware_v1',
@@ -111,6 +119,98 @@ const binding = {
 };
 
 describe('simulation contracts', () => {
+  it('normalizes the captured ordered callback golden without inventing firmware provenance or time', () => {
+    const normalized = normalizeQemuReferenceCallbacks({
+      trace: capturedQemuCallbackTrace,
+      graph,
+      catalog,
+    });
+
+    expect(normalized.supported).toBe(true);
+    if (!normalized.supported) return;
+    expect(normalized.events).toHaveLength(327);
+    expect(normalized.events.map((event) => event.sequence)).toEqual(
+      Array.from({ length: 327 }, (_, index) => index + 1),
+    );
+    expect(normalized.events.filter((event) => event.kind === 'led_state')).toMatchObject([
+      { kind: 'led_state', sequence: 1, state: 'off', componentInstanceId: 'led_1' },
+      { kind: 'led_state', sequence: 59, state: 'on', componentInstanceId: 'led_1' },
+      { kind: 'led_state', sequence: 106, state: 'off', componentInstanceId: 'led_1' },
+      { kind: 'led_state', sequence: 153, state: 'on', componentInstanceId: 'led_1' },
+      { kind: 'led_state', sequence: 200, state: 'off', componentInstanceId: 'led_1' },
+      { kind: 'led_state', sequence: 247, state: 'on', componentInstanceId: 'led_1' },
+    ]);
+    expect(
+      normalized.events
+        .filter((event) => event.kind === 'serial')
+        .map((event) => event.text)
+        .join('')
+        .replaceAll('\r', ''),
+    ).toBe(
+      [
+        'SCHEMORA_GPIO19_SETUP=OK',
+        'SCHEMORA_QEMU_REFERENCE_START',
+        'SCHEMORA_GPIO19_REQUESTED=1,RESULT=OK,TICK=0',
+        'SCHEMORA_GPIO19_REQUESTED=0,RESULT=OK,TICK=1',
+        'SCHEMORA_GPIO19_REQUESTED=1,RESULT=OK,TICK=2',
+        'SCHEMORA_GPIO19_REQUESTED=0,RESULT=OK,TICK=3',
+        'SCHEMORA_GPIO19_REQUESTED=1,RESULT=OK,TICK=4',
+        'SCHEMORA_QEMU_REFERENCE_COMPLETE',
+        '',
+      ].join('\n'),
+    );
+    expect(normalized.events.every((event) => event.simulationTimeMs === 0)).toBe(true);
+    expect(normalized.limitations.join(' ')).toContain('does not prove which firmware binary');
+  });
+
+  it('rejects unsupported callback channels, values, and sequence order', () => {
+    expect(
+      normalizeQemuReferenceCallbacks({
+        trace: [{ sequence: 1, type: 'gpio_level', gpio: 18, level: 1 }],
+        graph,
+        catalog,
+      }),
+    ).toMatchObject({ supported: false, reason: expect.stringContaining('GPIO19') });
+    expect(
+      normalizeQemuReferenceCallbacks({
+        trace: [{ sequence: 1, type: 'uart_byte', uart: 1, value: 65 }],
+        graph,
+        catalog,
+      }),
+    ).toMatchObject({ supported: false, reason: expect.stringContaining('UART0') });
+    expect(
+      normalizeQemuReferenceCallbacks({
+        trace: [{ sequence: 1, type: 'uart_byte', uart: 0, value: 27 }],
+        graph,
+        catalog,
+      }),
+    ).toMatchObject({ supported: false, reason: expect.stringContaining('printable ASCII') });
+    expect(
+      normalizeQemuReferenceCallbacks({
+        trace: [{ sequence: 1, type: 'uart_byte', uart: 0, value: 127 }],
+        graph,
+        catalog,
+      }),
+    ).toMatchObject({ supported: false, reason: expect.stringContaining('printable ASCII') });
+    expect(
+      normalizeQemuReferenceCallbacks({
+        trace: [{ sequence: Number.MAX_SAFE_INTEGER + 1, type: 'uart_byte', uart: 0, value: 65 }],
+        graph,
+        catalog,
+      }),
+    ).toMatchObject({ supported: false, reason: 'Callback trace is invalid.' });
+    expect(
+      normalizeQemuReferenceCallbacks({
+        trace: [
+          { sequence: 2, type: 'gpio_level', gpio: 19, level: 1 },
+          { sequence: 2, type: 'uart_byte', uart: 0, value: 65 },
+        ],
+        graph,
+        catalog,
+      }),
+    ).toMatchObject({ supported: false, reason: expect.stringContaining('strictly increasing') });
+  });
+
   it('replays the captured QEMU callback trace into the exact graph-connected LED state', () => {
     expect(
       capturedGpio19Trace.every((event) => event.type === 'gpio_level' && event.gpio === 19),
