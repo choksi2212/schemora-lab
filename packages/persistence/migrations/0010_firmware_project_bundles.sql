@@ -6,7 +6,15 @@ ALTER TABLE firmware_artifacts
   ADD COLUMN build_system text CHECK (build_system IS NULL OR build_system IN ('arduino-cli','esp-idf')),
   ADD COLUMN target jsonb;
 
+-- The prior migration's immutable-artifact trigger also rejects metadata-only
+-- UPDATE statements. Temporarily remove it inside this transactional migration
+-- while backfilling the additive aggregate-length column, then restore it before
+-- adding any new artifact rows can occur.
+DROP TRIGGER firmware_artifacts_immutable ON firmware_artifacts;
 UPDATE firmware_artifacts SET total_byte_length=byte_length;
+CREATE TRIGGER firmware_artifacts_immutable
+  BEFORE UPDATE ON firmware_artifacts
+  FOR EACH ROW EXECUTE FUNCTION reject_schemora_firmware_update();
 ALTER TABLE firmware_artifacts ALTER COLUMN total_byte_length SET NOT NULL;
 ALTER TABLE firmware_artifacts ADD CONSTRAINT firmware_artifact_total_length_check
   CHECK (total_byte_length BETWEEN 1 AND 8000000);
