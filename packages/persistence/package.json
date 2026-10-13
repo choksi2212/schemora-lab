@@ -15,7 +15,8 @@
   "dependencies": {
     "drizzle-orm": "0.45.4",
     "pg": "8.23.1",
-    "@schemora/contracts": "workspace:*"
+    "@schemora/contracts": "workspace:*",
+    "@schemora/simulation": "workspace:*"
   },
   "devDependencies": {
     "@types/pg": "8.15.6",

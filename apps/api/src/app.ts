@@ -12,7 +12,7 @@ import {
   publicReview,
   requestDigest,
 } from '@schemora/persistence';
-import { MAX_SOURCE_BYTES, type PrivateStorage } from '@schemora/storage';
+import { MAX_SOURCE_BYTES, type PrivateBuildStorage, type PrivateStorage } from '@schemora/storage';
 import {
   MAX_FIRMWARE_ARTIFACT_BYTES,
   createFirmwareProjectBundle,
@@ -36,6 +36,10 @@ const expectedRevision = z.number().int().positive();
 const scope = z.object({ projectId: uuid });
 const importScope = scope.extend({ importId: uuid });
 const firmwareArtifactScope = scope.extend({ artifactId: uuid });
+const firmwareBuildScope = firmwareArtifactScope.extend({ buildId: uuid });
+const firmwareBuildArtifactScope = firmwareBuildScope.extend({
+  role: z.enum(['application', 'bootloader', 'partition_table']),
+});
 const firmwareFileQuery = z.object({ path: z.string().min(1).max(240) }).strict();
 const simulationRunScope = scope.extend({ runId: uuid });
 const mutation = z.object({ expectedRevision }).strict();
@@ -215,7 +219,11 @@ async function cancelQueuedSimulationRuns(
   );
 }
 
-export function buildApp(config: ApiConfig, repository: Repository, storage: PrivateStorage) {
+export function buildApp(
+  config: ApiConfig,
+  repository: Repository,
+  storage: PrivateStorage & Partial<PrivateBuildStorage>,
+) {
   const app = Fastify({
     bodyLimit: 14 * 1024 * 1024,
     logger: false,
@@ -1289,6 +1297,54 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
     const record = await repository.firmwareArtifactRecord(owner(request), projectId, artifactId);
     return envelope(request, { artifact: publicFirmwareArtifact(record) });
   });
+  app.get('/v1/projects/:projectId/firmware-artifacts/:artifactId/builds', async (request) => {
+    const { projectId, artifactId } = firmwareArtifactScope.parse(request.params);
+    const items = await repository.firmwareBuilds(owner(request), projectId, artifactId);
+    return envelope(request, { items });
+  });
+  app.get(
+    '/v1/projects/:projectId/firmware-artifacts/:artifactId/builds/:buildId',
+    async (request) => {
+      const { projectId, artifactId, buildId } = firmwareBuildScope.parse(request.params);
+      const build = await repository.firmwareBuild(owner(request), projectId, artifactId, buildId);
+      return envelope(request, { build });
+    },
+  );
+  app.get(
+    '/v1/projects/:projectId/firmware-artifacts/:artifactId/builds/:buildId/artifacts/:role',
+    async (request, reply) => {
+      const { projectId, artifactId, buildId, role } = firmwareBuildArtifactScope.parse(
+        request.params,
+      );
+      if (!storage.readBuildArtifact)
+        throw new RepositoryError('FIRMWARE_BUILD_STORAGE_UNAVAILABLE', 503);
+      const { record, bytes } = await repository.withFirmwareBuildArtifact(
+        owner(request),
+        projectId,
+        artifactId,
+        buildId,
+        role,
+        async (record) => {
+          const bytes = await storage.readBuildArtifact!(
+            record.object_key,
+            record.sha256,
+            record.byte_length,
+          );
+          if (bytes.length !== record.byte_length)
+            throw new RepositoryError('FIRMWARE_BUILD_CORRUPT', 500);
+          return { record, bytes };
+        },
+      );
+      return reply
+        .header('Cache-Control', 'no-store')
+        .header(
+          'Content-Disposition',
+          "attachment; filename*=UTF-8''" + encodeDownloadFilename(record.path.split('/').at(-1)!),
+        )
+        .type('application/octet-stream')
+        .send(bytes);
+    },
+  );
   app.get('/v1/projects/:projectId/firmware-artifacts/:artifactId/files', async (request) => {
     const { projectId, artifactId } = firmwareArtifactScope.parse(request.params);
     const rows = await repository.firmwareArtifactFiles(owner(request), projectId, artifactId);

@@ -283,6 +283,9 @@ importers:
       '@schemora/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@schemora/simulation':
+        specifier: workspace:*
+        version: link:../simulation
       drizzle-orm:
         specifier: 0.45.4
         version: 0.45.4(@types/pg@8.15.6)(pg@8.23.1)

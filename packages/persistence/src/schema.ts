@@ -142,6 +142,52 @@ export const firmwareArtifactFiles = pgTable(
   },
   (table) => [primaryKey({ columns: [table.projectId, table.artifactId, table.path] })],
 );
+export const firmwareBuilds = pgTable(
+  'firmware_builds',
+  {
+    projectId: uuid('project_id').notNull(),
+    id: uuid('id').notNull(),
+    sourceArtifactId: uuid('source_artifact_id').notNull(),
+    sourceManifestDigest: text('source_manifest_digest').notNull(),
+    compilerProfileId: text('compiler_profile_id').notNull(),
+    compilerProfileDigest: text('compiler_profile_digest').notNull(),
+    imageDigest: text('image_digest').notNull(),
+    status: text('status').notNull(),
+    result: jsonb('result').notNull(),
+    resultDigest: text('result_digest').notNull(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    requestDigest: text('request_digest').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projectId, table.id] }),
+    uniqueIndex('firmware_builds_project_idempotency').on(table.projectId, table.idempotencyKey),
+    index('firmware_builds_source_latest').on(
+      table.projectId,
+      table.sourceArtifactId,
+      table.createdAt,
+      table.id,
+    ),
+  ],
+);
+export const firmwareBuildArtifacts = pgTable(
+  'firmware_build_artifacts',
+  {
+    projectId: uuid('project_id').notNull(),
+    buildId: uuid('build_id').notNull(),
+    role: text('role').notNull(),
+    path: text('path').notNull(),
+    objectKey: uuid('object_key').notNull(),
+    sha256: text('sha256').notNull(),
+    byteLength: integer('byte_length').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projectId, table.buildId, table.role] }),
+    uniqueIndex('firmware_build_artifacts_object_key').on(table.objectKey),
+    uniqueIndex('firmware_build_artifacts_path').on(table.projectId, table.buildId, table.path),
+  ],
+);
 export const firmwareReviews = pgTable('firmware_reviews', {
   id: uuid('id').primaryKey(),
   projectId: uuid('project_id').notNull(),

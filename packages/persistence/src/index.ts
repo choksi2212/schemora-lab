@@ -3,6 +3,13 @@ import { Pool, type PoolClient, type QueryResultRow } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { eq, and, desc, or, ne, lt, sql, getTableColumns } from 'drizzle-orm';
 import type { ConversationBundle, ExtractionResult } from '@schemora/contracts';
+import {
+  firmwareCompileResultMatchesProfile,
+  firmwareCompileResultSchema,
+  firmwareCompilerProfileSchema,
+  type FirmwareCompileResult,
+  type FirmwareCompilerProfile,
+} from '@schemora/simulation';
 import * as schema from './schema.js';
 
 export {
@@ -124,6 +131,45 @@ export interface FirmwareArtifactFileRow extends QueryResultRow {
   byte_length: number;
   is_entrypoint: boolean;
 }
+export interface FirmwareBuildRow extends QueryResultRow {
+  id: string;
+  project_id: string;
+  source_artifact_id: string;
+  source_manifest_digest: string;
+  compiler_profile_id: string;
+  compiler_profile_digest: string;
+  image_digest: string;
+  status: FirmwareCompileResult['status'];
+  result: FirmwareCompileResult;
+  result_digest: string;
+  idempotency_key: string;
+  request_digest: string;
+  created_at: Date;
+}
+export interface FirmwareBuildArtifactRow extends QueryResultRow {
+  project_id: string;
+  build_id: string;
+  role: FirmwareCompileResult['artifacts'][number]['role'];
+  path: string;
+  object_key: string;
+  sha256: string;
+  byte_length: number;
+}
+export interface FirmwareBuildArtifactObject {
+  role: FirmwareCompileResult['artifacts'][number]['role'];
+  path: string;
+  objectKey: string;
+  sha256: string;
+  byteLength: number;
+}
+export interface PersistFirmwareBuildInput {
+  id: string;
+  sourceArtifactId: string;
+  idempotencyKey: string;
+  profile: FirmwareCompilerProfile;
+  result: FirmwareCompileResult;
+  artifacts: readonly FirmwareBuildArtifactObject[];
+}
 export class RepositoryError extends Error {
   constructor(
     public code: string,
@@ -225,6 +271,31 @@ export function publicFirmwareArtifact(artifact: FirmwareArtifactRow) {
     reviewStatus: artifact.review_status ?? 'pending',
     reviewReason: artifact.review_reason,
     createdAt: artifact.created_at.toISOString(),
+  };
+}
+
+export function publicFirmwareBuild(build: FirmwareBuildRow) {
+  const result = firmwareCompileResultSchema.parse(build.result);
+  if (
+    canonicalDigest(result) !== build.result_digest ||
+    result.status !== build.status ||
+    result.sourceManifestDigest !== build.source_manifest_digest ||
+    result.profileDigest !== build.compiler_profile_digest ||
+    result.imageDigest !== build.image_digest
+  )
+    throw new RepositoryError('FIRMWARE_BUILD_RECORD_CORRUPT', 500);
+  return {
+    id: build.id,
+    projectId: build.project_id,
+    sourceArtifactId: build.source_artifact_id,
+    sourceManifestDigest: build.source_manifest_digest,
+    compilerProfileId: build.compiler_profile_id,
+    compilerProfileDigest: build.compiler_profile_digest,
+    imageDigest: build.image_digest,
+    status: build.status,
+    result,
+    resultDigest: build.result_digest,
+    createdAt: build.created_at.toISOString(),
   };
 }
 
@@ -470,6 +541,180 @@ export class Repository {
         reason: review.reason,
         createdAt: review.created_at.toISOString(),
       }));
+    });
+  }
+  async firmwareBuilds(owner: string, projectId: string, sourceArtifactId: string) {
+    return this.transaction(async (client) => {
+      await this.project(client, owner, projectId, 'share');
+      const source = await client.query(
+        'SELECT id FROM firmware_artifacts WHERE project_id=$1 AND id=$2',
+        [projectId, sourceArtifactId],
+      );
+      if (!source.rows[0]) throw new RepositoryError('NOT_FOUND', 404);
+      const builds = await client.query<FirmwareBuildRow>(
+        'SELECT * FROM firmware_builds WHERE project_id=$1 AND source_artifact_id=$2 ORDER BY created_at DESC,id DESC LIMIT 50',
+        [projectId, sourceArtifactId],
+      );
+      return builds.rows.map(publicFirmwareBuild);
+    });
+  }
+  async firmwareBuild(owner: string, projectId: string, sourceArtifactId: string, buildId: string) {
+    return this.transaction(async (client) => {
+      await this.project(client, owner, projectId, 'share');
+      const build = await client.query<FirmwareBuildRow>(
+        'SELECT * FROM firmware_builds WHERE project_id=$1 AND source_artifact_id=$2 AND id=$3',
+        [projectId, sourceArtifactId, buildId],
+      );
+      if (!build.rows[0]) throw new RepositoryError('NOT_FOUND', 404);
+      return publicFirmwareBuild(build.rows[0]);
+    });
+  }
+  async withFirmwareBuildArtifact<T>(
+    owner: string,
+    projectId: string,
+    sourceArtifactId: string,
+    buildId: string,
+    role: FirmwareBuildArtifactRow['role'],
+    action: (record: FirmwareBuildArtifactRow) => Promise<T>,
+  ) {
+    return this.transaction(async (client) => {
+      await this.project(client, owner, projectId, 'share');
+      const result = await client.query<FirmwareBuildArtifactRow>(
+        `SELECT a.project_id,a.build_id,a.role,a.path,a.object_key,a.sha256,a.byte_length
+         FROM firmware_build_artifacts a JOIN firmware_builds b
+           ON b.project_id=a.project_id AND b.id=a.build_id
+         WHERE a.project_id=$1 AND a.build_id=$2 AND a.role=$3 AND b.status='succeeded'
+           AND b.source_artifact_id=$4`,
+        [projectId, buildId, role, sourceArtifactId],
+      );
+      const artifact = result.rows[0];
+      if (!artifact) throw new RepositoryError('NOT_FOUND', 404);
+      return action(artifact);
+    });
+  }
+  /** Persist only a result already verified by the isolated compiler boundary. */
+  async persistFirmwareBuild(owner: string, projectId: string, input: PersistFirmwareBuildInput) {
+    const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (
+      !idPattern.test(input.id) ||
+      !idPattern.test(input.sourceArtifactId) ||
+      !idPattern.test(input.idempotencyKey) ||
+      input.artifacts.some((item) => !idPattern.test(item.objectKey))
+    )
+      throw new RepositoryError('INVALID_FIRMWARE_BUILD', 400);
+    const profile = firmwareCompilerProfileSchema.safeParse(input.profile);
+    const result = firmwareCompileResultSchema.safeParse(input.result);
+    if (!profile.success || !result.success)
+      throw new RepositoryError('INVALID_FIRMWARE_BUILD', 400);
+
+    return this.transaction(async (client) => {
+      const project = await this.project(client, owner, projectId, true);
+      if (project.status !== 'active') throw new RepositoryError('PROJECT_ARCHIVED', 409);
+      const source = await client.query<{
+        bundle_digest: string | null;
+        sha256: string;
+        build_system: string | null;
+        target: unknown;
+      }>(
+        'SELECT bundle_digest,sha256,build_system,target FROM firmware_artifacts WHERE project_id=$1 AND id=$2 FOR SHARE',
+        [projectId, input.sourceArtifactId],
+      );
+      const sourceArtifact = source.rows[0];
+      if (!sourceArtifact) throw new RepositoryError('NOT_FOUND', 404);
+      const sourceDigest = sourceArtifact.bundle_digest ?? sourceArtifact.sha256;
+      if (
+        sourceArtifact.build_system !== 'esp-idf' ||
+        canonicalDigest(sourceArtifact.target) !== canonicalDigest(profile.data.target) ||
+        !firmwareCompileResultMatchesProfile(result.data, profile.data, sourceDigest)
+      )
+        throw new RepositoryError('FIRMWARE_BUILD_BINDING_MISMATCH', 409);
+
+      const resultDigest = canonicalDigest(result.data);
+      const compilerProfileDigest = canonicalDigest(profile.data);
+      const requestDigest = canonicalDigest({
+        sourceArtifactId: input.sourceArtifactId,
+        sourceManifestDigest: sourceDigest,
+        compilerProfileDigest,
+        resultDigest,
+      });
+      const prior = await client.query<FirmwareBuildRow>(
+        'SELECT * FROM firmware_builds WHERE project_id=$1 AND idempotency_key=$2 FOR UPDATE',
+        [projectId, input.idempotencyKey],
+      );
+      if (prior.rows[0]) {
+        if (prior.rows[0].request_digest !== requestDigest)
+          throw new RepositoryError('IDEMPOTENCY_CONFLICT', 409);
+        return publicFirmwareBuild(prior.rows[0]);
+      }
+
+      const manifest = new Map(result.data.artifacts.map((item) => [item.role, item]));
+      if (
+        input.artifacts.length !== result.data.artifacts.length ||
+        new Set(input.artifacts.map((item) => item.role)).size !== input.artifacts.length ||
+        input.artifacts.some((item) => {
+          const expected = manifest.get(item.role);
+          return (
+            !expected ||
+            expected.path !== item.path ||
+            expected.sha256 !== item.sha256 ||
+            expected.byteLength !== item.byteLength
+          );
+        })
+      )
+        throw new RepositoryError('FIRMWARE_BUILD_OUTPUT_MISMATCH', 409);
+
+      const objectKeys = input.artifacts.map((item) => item.objectKey);
+      if (new Set(objectKeys).size !== objectKeys.length)
+        throw new RepositoryError('INVALID_FIRMWARE_BUILD', 400);
+      if (objectKeys.length) {
+        const intents = await client.query<{ object_key: string }>(
+          'SELECT object_key FROM upload_intents WHERE project_id=$1 AND object_key=ANY($2::uuid[]) AND expires_at>now() FOR UPDATE',
+          [projectId, objectKeys],
+        );
+        if (intents.rowCount !== objectKeys.length)
+          throw new RepositoryError('UPLOAD_EXPIRED', 409);
+      }
+
+      await client.query(
+        `INSERT INTO firmware_builds(
+          project_id,id,source_artifact_id,source_manifest_digest,compiler_profile_id,
+          compiler_profile_digest,image_digest,status,result,result_digest,idempotency_key,request_digest
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [
+          projectId,
+          input.id,
+          input.sourceArtifactId,
+          sourceDigest,
+          profile.data.profileId,
+          compilerProfileDigest,
+          profile.data.imageDigest,
+          result.data.status,
+          JSON.stringify(result.data),
+          resultDigest,
+          input.idempotencyKey,
+          requestDigest,
+        ],
+      );
+      for (const artifact of input.artifacts) {
+        await this.consumeUploadIntent(client, projectId, artifact.objectKey);
+        await client.query(
+          'INSERT INTO firmware_build_artifacts(project_id,build_id,role,path,object_key,sha256,byte_length) VALUES($1,$2,$3,$4,$5,$6,$7)',
+          [
+            projectId,
+            input.id,
+            artifact.role,
+            artifact.path,
+            artifact.objectKey,
+            artifact.sha256,
+            artifact.byteLength,
+          ],
+        );
+      }
+      const saved = await client.query<FirmwareBuildRow>(
+        'SELECT * FROM firmware_builds WHERE project_id=$1 AND id=$2',
+        [projectId, input.id],
+      );
+      return publicFirmwareBuild(saved.rows[0]!);
     });
   }
   async import(client: PoolClient, projectId: string, id: string) {
@@ -940,7 +1185,7 @@ export class Repository {
         );
         if (!intent.rows[0]) return;
         const accepted = await client.query(
-          'SELECT id FROM imports WHERE object_key=$1 UNION ALL SELECT id FROM firmware_artifacts WHERE object_key=$1 UNION ALL SELECT artifact_id AS id FROM firmware_artifact_files WHERE object_key=$1 LIMIT 1',
+          'SELECT id FROM imports WHERE object_key=$1 UNION ALL SELECT id FROM firmware_artifacts WHERE object_key=$1 UNION ALL SELECT artifact_id AS id FROM firmware_artifact_files WHERE object_key=$1 UNION ALL SELECT build_id AS id FROM firmware_build_artifacts WHERE object_key=$1 LIMIT 1',
           [item.object_key],
         );
         if (!accepted.rows[0]) await removeObject(item.object_key);
