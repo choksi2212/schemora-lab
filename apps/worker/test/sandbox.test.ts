@@ -24,7 +24,9 @@ afterEach(async () => {
   noSpawn.mockClear();
 });
 
-function tarArchive(entries: Array<{ name: string; data: Buffer; type?: number; size?: number }>) {
+function tarArchive(
+  entries: Array<{ name: string; data: Buffer; type?: number; size?: number; prefix?: string }>,
+) {
   const blocks: Buffer[] = [];
   for (const entry of entries) {
     const header = Buffer.alloc(512);
@@ -43,6 +45,7 @@ function tarArchive(entries: Array<{ name: string; data: Buffer; type?: number; 
     header[156] = entry.type ?? 48;
     header.write('ustar\0', 257, 6, 'ascii');
     header.write('00', 263, 2, 'ascii');
+    if (entry.prefix) header.write(entry.prefix, 345, 155, 'utf8');
     let checksum = 0;
     for (const byte of header) checksum += byte;
     header.write(checksum.toString(8).padStart(6, '0') + '\0 ', 148, 8, 'ascii');
@@ -70,6 +73,10 @@ function fakeDocker(
   },
   outputTypes?: number[],
   malformedArchive = false,
+  outputPrefixes?: string[],
+  outputDeclaredSizes?: number[],
+  truncateArchive = false,
+  overflowArchive = false,
 ) {
   return ((_: string, args: string[], options: unknown) => {
     calls.push({ args, options });
@@ -133,9 +140,13 @@ function fakeDocker(
         );
       } else if (subcommand === 'start') child.stdout.write('simulator output');
       else if (subcommand === 'cp') {
-        const entries: Array<{ name: string; data: Buffer; type?: number; size?: number }> = [
-          { name: '.', data: Buffer.alloc(0), type: 53 },
-        ];
+        const entries: Array<{
+          name: string;
+          data: Buffer;
+          type?: number;
+          size?: number;
+          prefix?: string;
+        }> = [{ name: '.', data: Buffer.alloc(0), type: 53 }];
         for (let index = 0; index < fileCount; index += 1) {
           const name =
             outputNames?.[index] ?? (fileCount === 1 ? 'trace.json' : `empty-${index}.bin`);
@@ -146,6 +157,8 @@ function fakeDocker(
           entries.push({
             name,
             type: outputTypes?.[index],
+            prefix: outputPrefixes?.[index],
+            size: outputDeclaredSizes?.[index],
             data:
               outputSize === 11
                 ? Buffer.from(fileCount === 1 ? '{"ok":true}' : '')
@@ -154,7 +167,9 @@ function fakeDocker(
         }
         const archive = tarArchive(entries);
         if (malformedArchive) archive[0] ^= 1;
-        child.stdout.write(archive);
+        if (overflowArchive)
+          child.stdout.write(Buffer.alloc(resourceLimits.outputBytes + 384 * 1024 + 1));
+        else child.stdout.write(truncateArchive ? archive.subarray(0, -1025) : archive);
       }
       child.emit('close', failedCommands.includes(subcommand ?? '') ? 1 : 0);
     });
@@ -459,6 +474,54 @@ describe('DockerSandbox fail-closed preflight', () => {
       await expect(sandbox.run({ image, firmware: new Uint8Array([1]), limits })).rejects.toThrow(
         'SANDBOX_OUTPUT_INVALID',
       );
+    }
+  });
+
+  it('rejects oversized declarations, traversal prefixes, truncated tar data, and archive overflow', async () => {
+    const smallLimits = { ...limits, outputBytes: 1024 };
+    const cases: Array<{
+      outputDeclaredSizes?: number[];
+      outputPrefixes?: string[];
+      truncateArchive?: boolean;
+      overflowArchive?: boolean;
+    }> = [
+      { outputDeclaredSizes: [0o77777777777] },
+      { outputPrefixes: ['../outside'] },
+      { truncateArchive: true },
+      { overflowArchive: true },
+    ];
+    for (const options of cases) {
+      const calls: Array<{ args: string[]; options: unknown }> = [];
+      const sandbox = new DockerSandbox({
+        platform: 'linux',
+        uid: 1000,
+        spawn: fakeDocker(
+          {
+            OSType: 'linux',
+            ServerVersion: '27.0',
+            CgroupVersion: '2',
+            SecurityOptions: ['name=rootless'],
+          },
+          calls,
+          11,
+          smallLimits,
+          [],
+          undefined,
+          1,
+          null,
+          undefined,
+          undefined,
+          undefined,
+          false,
+          options.outputPrefixes,
+          options.outputDeclaredSizes,
+          options.truncateArchive,
+          options.overflowArchive,
+        ),
+      });
+      await expect(
+        sandbox.run({ image, firmware: new Uint8Array([1]), limits: smallLimits }),
+      ).rejects.toThrow();
     }
   });
 
