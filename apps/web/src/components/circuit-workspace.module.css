@@ -173,6 +173,17 @@
   color: var(--muted, #65716f);
   font-size: 0.82rem;
 }
+.diagnosticLocation {
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--link, #315e4d);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
+}
 .buildArtifacts a {
   width: fit-content;
 }

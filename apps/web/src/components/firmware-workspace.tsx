@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
+import type { editor as MonacoEditorApi } from 'monaco-editor';
+import { Uri } from 'monaco-editor';
 import { api, friendlyError, type Project } from '@/lib/api';
 import {
   canCancelQueuedRun,
@@ -121,6 +123,10 @@ function encodeBase64(value: string) {
   return encodeBase64Bytes(new TextEncoder().encode(value));
 }
 
+function firmwareEditorModelPath(projectId: string, artifactId: string, filePath: string) {
+  return Uri.file(`/schemora/${projectId}/${artifactId}/${filePath}`).toString();
+}
+
 function encodeBase64Bytes(bytes: Uint8Array) {
   let binary = '';
   for (let start = 0; start < bytes.length; start += 8192)
@@ -168,6 +174,13 @@ export function FirmwareWorkspace({
   const [run, setRun] = useState<StoredRun | null>(null);
   const [builds, setBuilds] = useState<FirmwareBuild[]>([]);
   const [buildError, setBuildError] = useState('');
+  const [pendingDiagnosticLocation, setPendingDiagnosticLocation] = useState<{
+    path: string;
+    line: number;
+    column: number;
+  } | null>(null);
+  const [editorEpoch, setEditorEpoch] = useState(0);
+  const monacoEditor = useRef<MonacoEditorApi.IStandaloneCodeEditor | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -251,6 +264,31 @@ export function FirmwareWorkspace({
       active = false;
     };
   }, [projectId, currentArtifact?.id]);
+
+  useEffect(() => {
+    if (!pendingDiagnosticLocation) return;
+    const editor = monacoEditor.current;
+    const model = editor?.getModel();
+    const expectedModelPath = currentArtifact
+      ? `/schemora/${projectId}/${currentArtifact.id}/${pendingDiagnosticLocation.path}`
+      : '';
+    if (!editor || !model || model.uri.path !== expectedModelPath) return;
+    const line = Math.min(pendingDiagnosticLocation.line, model.getLineCount());
+    editor.setPosition({
+      lineNumber: line,
+      column: Math.min(pendingDiagnosticLocation.column, model.getLineMaxColumn(line)),
+    });
+    editor.revealLineInCenter(line);
+    editor.focus();
+    setPendingDiagnosticLocation(null);
+  }, [
+    pendingDiagnosticLocation,
+    activeBundlePath,
+    source,
+    editorEpoch,
+    currentArtifact,
+    projectId,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -815,8 +853,19 @@ export function FirmwareWorkspace({
             <MonacoEditor
               height="390px"
               language={language === 'c' || language === 'esp-idf-c' ? 'c' : 'cpp'}
-              path={(authoringMode === 'esp-idf' ? activeBundlePath : entrypoint) || 'src/main.cpp'}
+              path={firmwareEditorModelPath(
+                projectId,
+                currentArtifact?.id ?? 'draft',
+                (authoringMode === 'esp-idf' ? activeBundlePath : entrypoint) || 'src/main.cpp',
+              )}
               value={source}
+              onMount={(instance) => {
+                monacoEditor.current = instance;
+                instance.onDidChangeModel(() => {
+                  setEditorEpoch((epoch) => epoch + 1);
+                });
+                setEditorEpoch((epoch) => epoch + 1);
+              }}
               onChange={(value) => {
                 const nextSource = value ?? '';
                 setSource(nextSource);
@@ -1001,13 +1050,40 @@ export function FirmwareWorkspace({
                       <strong>
                         {diagnostic.severity.toUpperCase()} · {diagnostic.code}
                       </strong>
-                      {diagnostic.sourcePath && (
-                        <code>
-                          {diagnostic.sourcePath}
-                          {diagnostic.line !== null && `:${diagnostic.line}`}
-                          {diagnostic.column !== null && `:${diagnostic.column}`}
-                        </code>
-                      )}
+                      {diagnostic.sourcePath &&
+                        (diagnostic.line !== null &&
+                        diagnostic.column !== null &&
+                        (currentArtifact.buildSystem !== 'esp-idf'
+                          ? diagnostic.sourcePath === currentArtifact.entrypoint
+                          : bundleFiles.some((file) => file.path === diagnostic.sourcePath)) ? (
+                          <button
+                            type="button"
+                            className={styles.diagnosticLocation}
+                            onClick={() => {
+                              if (currentArtifact.buildSystem === 'esp-idf') {
+                                const file = bundleFiles.find(
+                                  (item) => item.path === diagnostic.sourcePath,
+                                );
+                                if (!file) return;
+                                setActiveBundlePath(file.path);
+                                setSource(file.source);
+                              }
+                              setPendingDiagnosticLocation({
+                                path: diagnostic.sourcePath!,
+                                line: diagnostic.line!,
+                                column: diagnostic.column!,
+                              });
+                            }}
+                          >
+                            {diagnostic.sourcePath}:{diagnostic.line}:{diagnostic.column}
+                          </button>
+                        ) : (
+                          <code>
+                            {diagnostic.sourcePath}
+                            {diagnostic.line !== null && `:${diagnostic.line}`}
+                            {diagnostic.column !== null && `:${diagnostic.column}`}
+                          </code>
+                        ))}
                       <span>{diagnostic.message}</span>
                     </li>
                   ))}
