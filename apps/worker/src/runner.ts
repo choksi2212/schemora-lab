@@ -348,6 +348,11 @@ export class Worker {
       const project = await this.repository.jobScope(client, job);
       if (!project || project.status !== 'deleting') return;
       await client.query('DELETE FROM reviews WHERE project_id=$1', [job.project_id]);
+      // The attempt ledger intentionally retains terminal rows during normal
+      // operation, so purge its children before removing their run parents.
+      await client.query('DELETE FROM simulation_run_attempts WHERE project_id=$1', [
+        job.project_id,
+      ]);
       await client.query('DELETE FROM simulation_runs WHERE project_id=$1', [job.project_id]);
       await client.query('DELETE FROM firmware_reviews WHERE project_id=$1', [job.project_id]);
       await client.query('DELETE FROM firmware_builds WHERE project_id=$1', [job.project_id]);
