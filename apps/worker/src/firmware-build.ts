@@ -1,9 +1,21 @@
 import { randomUUID } from 'node:crypto';
-import type { Repository } from '@schemora/persistence';
+import { RepositoryError, type Repository } from '@schemora/persistence';
 import type { PrivateBuildStorage, PrivateStorage } from '@schemora/storage';
 import { compileFirmwareProject, type FirmwareCompilerSandbox } from '@schemora/simulation';
+import { z } from 'zod';
 import type { FirmwareCompilerProfileRegistry } from './firmware-compiler-profiles.js';
 import { resolveFirmwareCompilerBundle } from './firmware-source.js';
+
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const firmwareBuildRequestSchema = z
+  .object({
+    ownerId: z.string().regex(uuidPattern),
+    projectId: z.string().regex(uuidPattern),
+    sourceArtifactId: z.string().regex(uuidPattern),
+    idempotencyKey: z.string().regex(uuidPattern),
+    profileId: z.string().min(1).max(100),
+  })
+  .strict();
 
 export interface PersistFirmwareBuildRequest {
   ownerId: string;
@@ -24,8 +36,11 @@ export async function compileAndPersistFirmwareBuild(
   storage: PrivateStorage & PrivateBuildStorage,
   sandbox: FirmwareCompilerSandbox,
   profiles: FirmwareCompilerProfileRegistry,
-  request: PersistFirmwareBuildRequest,
+  requestInput: PersistFirmwareBuildRequest,
 ) {
+  const parsedRequest = firmwareBuildRequestSchema.safeParse(requestInput);
+  if (!parsedRequest.success) throw new RepositoryError('INVALID_FIRMWARE_BUILD', 400);
+  const request = parsedRequest.data;
   const profile = profiles.resolve(request.profileId);
   const prior = await repository.existingFirmwareBuild(
     request.ownerId,
