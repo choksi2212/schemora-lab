@@ -10,14 +10,14 @@
 
 ## Document control
 
-| Field | Value |
-|---|---|
-| Owner | Backend engineering owner (to be assigned) |
-| Status | Engineering execution baseline; infrastructure choices remain gated where marked |
-| Review cadence | At phase exits, schema changes, and release readiness review |
-| Product authority | PRD.md |
-| Technical authority | TRD.md |
-| Change rule | Record data, API, migration, security, and operations impact |
+| Field               | Value                                                                            |
+| ------------------- | -------------------------------------------------------------------------------- |
+| Owner               | Backend engineering owner (to be assigned)                                       |
+| Status              | Engineering execution baseline; infrastructure choices remain gated where marked |
+| Review cadence      | At phase exits, schema changes, and release readiness review                     |
+| Product authority   | PRD.md                                                                           |
+| Technical authority | TRD.md                                                                           |
+| Change rule         | Record data, API, migration, security, and operations impact                     |
 
 ## Contents
 
@@ -42,6 +42,8 @@
 
 ## 1. Purpose
 
+**Phase 1 product delivery:** The repository's first implemented product phase covers foundation, ownership, upload/normalization, extraction, and review, corresponding to this plan's tranches 0–3. The initial durable transport is PostgreSQL outbox/jobs, private development storage is filesystem-backed, production storage uses the S3 port, and identity uses GitHub OAuth through the web/API boundary. These concrete choices are recorded in [Phase-1-Implementation.md](Phase-1-Implementation.md); the later catalog, graph, validation, assembly, and operations tranches retain their own exit criteria.
+
 This plan turns the approved product and technical boundaries into a backend and database delivery sequence. It is intended to be used for engineering breakdown, migration review, release planning, and operational handoff. It is not a second PRD or a generic list of backend best practices.
 
 The work is organized around one central invariant: every saved or derived result must be traceable to a project revision and the exact hardware, rules, and processing versions that shaped it. The implementation starts with the smallest user-visible workflow that can prove the product: import an existing conversation, review what was extracted, represent a supported circuit, demonstrate its assembly, and report what is known or still uncertain.
@@ -58,22 +60,22 @@ Each phase produces an integrated, reviewable capability. A table existing witho
 
 ## 2. Workstream map
 
-| Workstream | Accountable area | Primary output | Depends on |
-|---|---|---|---|
-| Application foundation | Backend platform | Typed domain packages, API/worker entry points, configuration, migration baseline | Stack and vendor decisions |
-| Project persistence | Project domain | Authorization, project lifecycle, immutable revisions | Identity mapping |
-| Import pipeline | Source/ingestion | Private upload, parser adapters, normalized messages, durable jobs | Storage and queue adapters |
-| Evidence workflow | Design domain | Candidate facts, provenance, human review, conflict handling | Normalized messages |
-| Hardware truth | Catalog and hardware review | Versioned catalog, exact pins, topology, assets, citations | Selected MVP hardware |
-| Circuit state | Graph domain | Typed graph commands, connectivity, versioned snapshots | Catalog release |
-| Readiness and guidance | Validation/planning | Immutable findings, readiness, assembly plan, progress | Graph and ruleset |
-| Production operations | Operations/security | Release process, recovery, deletion, monitoring, incident readiness | All canonical data paths |
+| Workstream             | Accountable area            | Primary output                                                                    | Depends on                 |
+| ---------------------- | --------------------------- | --------------------------------------------------------------------------------- | -------------------------- |
+| Application foundation | Backend platform            | Typed domain packages, API/worker entry points, configuration, migration baseline | Stack and vendor decisions |
+| Project persistence    | Project domain              | Authorization, project lifecycle, immutable revisions                             | Identity mapping           |
+| Import pipeline        | Source/ingestion            | Private upload, parser adapters, normalized messages, durable jobs                | Storage and queue adapters |
+| Evidence workflow      | Design domain               | Candidate facts, provenance, human review, conflict handling                      | Normalized messages        |
+| Hardware truth         | Catalog and hardware review | Versioned catalog, exact pins, topology, assets, citations                        | Selected MVP hardware      |
+| Circuit state          | Graph domain                | Typed graph commands, connectivity, versioned snapshots                           | Catalog release            |
+| Readiness and guidance | Validation/planning         | Immutable findings, readiness, assembly plan, progress                            | Graph and ruleset          |
+| Production operations  | Operations/security         | Release process, recovery, deletion, monitoring, incident readiness               | All canonical data paths   |
 
 A workstream may proceed in parallel only after its shared contract has an owner and a reviewed version. For example, the workbench can prototype against a fixture graph while the parser is being built, but both must converge on the same versioned project schema before integration.
 
 ## 3. Phase sequence
 
-~~~mermaid
+```mermaid
 flowchart LR
   A[0 Foundation and decisions] --> B[1 Project and revisions]
   B --> C[2 Upload and normalized conversation]
@@ -84,20 +86,20 @@ flowchart LR
   G --> H[6 Optional integrations]
   H --> I[7 Production hardening]
   B --> E
-~~~
+```
 
 ### Phase summary
 
-| Phase | Outcome | Exit evidence |
-|---|---|---|
-| 0. Foundation | Reproducible repository, configuration, migrations, local services, decision ownership | Clean CI bootstrap and approved dependency decisions |
-| 1. Project and revisions | Authorized project lifecycle and concurrency-safe revision history | Cross-project tests, concurrent write test, revision reconstruction |
-| 2. Import | Private upload, safe parsing, normalized conversation and job lifecycle | Format fixtures, hostile archive tests, retry and deletion checks |
-| 3. Evidence | Provenance-backed candidates and explicit user review | Extraction benchmark, review audit, conflict and unknown scenarios |
-| 4. Catalog and graph | Exact supported hardware and canonical connectivity | Catalog review, pin-anchor check, deterministic graph fixtures |
-| 5. Validation and assembly | Version-bound readiness and step-by-step guide | Golden rule suite, plan predicates, stale-state tests, novice study |
-| 6. Optional integrations | Individually gated tutor, simulation, photo recognition | Per-capability quality, legal, privacy, and operational approval |
-| 7. Production | Recoverable, monitored, secure release | Backup/restore rehearsal, release scorecard, on-call handoff |
+| Phase                      | Outcome                                                                                | Exit evidence                                                       |
+| -------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| 0. Foundation              | Reproducible repository, configuration, migrations, local services, decision ownership | Clean CI bootstrap and approved dependency decisions                |
+| 1. Project and revisions   | Authorized project lifecycle and concurrency-safe revision history                     | Cross-project tests, concurrent write test, revision reconstruction |
+| 2. Import                  | Private upload, safe parsing, normalized conversation and job lifecycle                | Format fixtures, hostile archive tests, retry and deletion checks   |
+| 3. Evidence                | Provenance-backed candidates and explicit user review                                  | Extraction benchmark, review audit, conflict and unknown scenarios  |
+| 4. Catalog and graph       | Exact supported hardware and canonical connectivity                                    | Catalog review, pin-anchor check, deterministic graph fixtures      |
+| 5. Validation and assembly | Version-bound readiness and step-by-step guide                                         | Golden rule suite, plan predicates, stale-state tests, novice study |
+| 6. Optional integrations   | Individually gated tutor, simulation, photo recognition                                | Per-capability quality, legal, privacy, and operational approval    |
+| 7. Production              | Recoverable, monitored, secure release                                                 | Backup/restore rehearsal, release scorecard, on-call handoff        |
 
 ## 4. Phase 0 — Foundation and decisions
 
@@ -221,12 +223,12 @@ Use known-good circuits and deliberately faulty variants as golden fixtures. Tes
 
 Each capability is implemented behind an adapter and enabled independently. Do not make a shared “AI enabled” flag that couples extraction, tutoring, vision, and simulation.
 
-| Capability | Required proof before enablement | Safe behavior before proof |
-|---|---|---|
-| Extraction | Benchmark quality, evidence localization, schema reliability, retention and privacy review, quota control | Fake adapter in tests; manual review or unavailable state |
-| Tutor | Context minimization, grounding quality, privacy review, output policy | Curated explanations remain available |
-| Vision | Representative image benchmark, exact-model confirmation, consent and metadata handling | Manual catalog selection |
-| Simulation | API/engine access, commercial rights, supported components, sandbox, repeatable outputs | Mark unsupported/unavailable; preserve circuit and firmware |
+| Capability | Required proof before enablement                                                                          | Safe behavior before proof                                  |
+| ---------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Extraction | Benchmark quality, evidence localization, schema reliability, retention and privacy review, quota control | Fake adapter in tests; manual review or unavailable state   |
+| Tutor      | Context minimization, grounding quality, privacy review, output policy                                    | Curated explanations remain available                       |
+| Vision     | Representative image benchmark, exact-model confirmation, consent and metadata handling                   | Manual catalog selection                                    |
+| Simulation | API/engine access, commercial rights, supported components, sandbox, repeatable outputs                   | Mark unsupported/unavailable; preserve circuit and firmware |
 
 Firmware and simulator workloads execute outside the web process under explicit CPU, memory, wall-clock, and output-size budgets. Provider URLs are configuration-controlled, never client-supplied. All provider output is untrusted and validated before persistence.
 
@@ -260,19 +262,19 @@ A data migration is not assumed reversible. Before production, rehearse it on a 
 
 Migration work should be split so that each tranche has one domain owner and a focused compatibility review. The identifiers below are proposed planning labels; the repository migration tool assigns the final immutable IDs when work is scheduled.
 
-| Tranche | Schema change | Compatibility approach | Verification focus |
-|---|---|---|---|
-| M0 | Migration ledger and principal mapping | Additive; no project data yet | Empty database bootstrap and checksum verification |
-| M1 | Projects, memberships, revisions | Create project root before revision pointer becomes required | Owner integrity, revision ordering, concurrent head update |
-| M2 | Upload intent and source object metadata | Add lifecycle columns before enabling upload | Type, digest, expiry, and cleanup behavior |
-| M3 | Conversation, message, parser-run records | New tables; parser output is versioned | Stable ordering, source locator, deletion propagation |
-| M4 | Evidence, facts, issues, review actions | Append-only review history | Candidate/confirmed separation and provenance constraints |
-| M5 | Catalog release and component records | Published release is immutable | Digest, source, unit, and pin uniqueness checks |
-| M6 | Graph revision, instances, terminals, edges | Add graph head before enabling graph commands | Same-project references and deterministic digest |
-| M7 | Rulesets, validation runs, findings | Immutable output tables | Exact input binding and result-state vocabulary |
-| M8 | Plans, steps, progress events | Progress separated from immutable plan | Predicate reference and projection rebuild |
-| M9 | Jobs, attempts, outbox, idempotency | Required before async work is accepted | Duplicate publish, lease recovery, key uniqueness |
-| M10 | Audit, deletion, retention, export metadata | Add before production source retention | Deletion coverage and restore ledger |
+| Tranche | Schema change                               | Compatibility approach                                       | Verification focus                                         |
+| ------- | ------------------------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------- |
+| M0      | Migration ledger and principal mapping      | Additive; no project data yet                                | Empty database bootstrap and checksum verification         |
+| M1      | Projects, memberships, revisions            | Create project root before revision pointer becomes required | Owner integrity, revision ordering, concurrent head update |
+| M2      | Upload intent and source object metadata    | Add lifecycle columns before enabling upload                 | Type, digest, expiry, and cleanup behavior                 |
+| M3      | Conversation, message, parser-run records   | New tables; parser output is versioned                       | Stable ordering, source locator, deletion propagation      |
+| M4      | Evidence, facts, issues, review actions     | Append-only review history                                   | Candidate/confirmed separation and provenance constraints  |
+| M5      | Catalog release and component records       | Published release is immutable                               | Digest, source, unit, and pin uniqueness checks            |
+| M6      | Graph revision, instances, terminals, edges | Add graph head before enabling graph commands                | Same-project references and deterministic digest           |
+| M7      | Rulesets, validation runs, findings         | Immutable output tables                                      | Exact input binding and result-state vocabulary            |
+| M8      | Plans, steps, progress events               | Progress separated from immutable plan                       | Predicate reference and projection rebuild                 |
+| M9      | Jobs, attempts, outbox, idempotency         | Required before async work is accepted                       | Duplicate publish, lease recovery, key uniqueness          |
+| M10     | Audit, deletion, retention, export metadata | Add before production source retention                       | Deletion coverage and restore ledger                       |
 
 The migration owner maintains the final IDs, ordering, and checksum in repository history. A migration label in this plan is not a database identity and must not be used by runtime code.
 
@@ -286,34 +288,34 @@ If the migration changes ownership or retention fields, security and privacy own
 
 Routes parse HTTP concerns and delegate to application services. Application services enforce authorization, revision checks, idempotency, and domain transitions. Repositories take explicit project scope and transaction context and return domain values rather than ORM entities. Serializers emit stable public contracts. Provider SDKs remain behind adapters.
 
-| Concern | Implementation rule |
-|---|---|
-| Authentication | Principal derives from trusted session or identity assertion |
-| Authorization | Project scope is checked before nested record retrieval |
-| Concurrency | Mutations compare expected revision atomically |
-| Idempotency | Stable keys are scoped by principal, project, and operation; payload digest mismatch is rejected |
-| Errors | Stable code, retryability, correlation ID, and safe message |
-| Pagination | Bounded cursor with deterministic tie-breaker |
-| Jobs | Durable job ID and status returned for asynchronous work |
-| Freshness | Derived resources expose input version and stale state |
-| Serialization | ORM models and internal object keys never cross the API boundary |
+| Concern        | Implementation rule                                                                              |
+| -------------- | ------------------------------------------------------------------------------------------------ |
+| Authentication | Principal derives from trusted session or identity assertion                                     |
+| Authorization  | Project scope is checked before nested record retrieval                                          |
+| Concurrency    | Mutations compare expected revision atomically                                                   |
+| Idempotency    | Stable keys are scoped by principal, project, and operation; payload digest mismatch is rejected |
+| Errors         | Stable code, retryability, correlation ID, and safe message                                      |
+| Pagination     | Bounded cursor with deterministic tie-breaker                                                    |
+| Jobs           | Durable job ID and status returned for asynchronous work                                         |
+| Freshness      | Derived resources expose input version and stale state                                           |
+| Serialization  | ORM models and internal object keys never cross the API boundary                                 |
 
 ### 13.1 Route-to-record mapping
 
 Every route is reviewed against its canonical tables, transaction boundary, and invalidation behavior. This mapping prevents a route from writing a second copy of a fact owned by another domain.
 
-| Operation | Canonical reads | Canonical writes | Derived or async effect |
-|---|---|---|---|
-| Create project | Principal, published catalog release | Project, initial revision, owner membership, audit | Optional initialization outbox event |
-| Update project metadata | Project head, current revision | New revision, project summary projection, audit | Read projection refresh if used |
-| Create import | Project scope, quota policy | Pending source intent | Scoped upload capability |
-| Complete import | Source intent, object metadata | Accepted/rejected source state, audit | Inspection outbox event |
-| Review extracted fact | Candidate, evidence, current revision | Review action, fact state, issue transition, revision | Validation/plan invalidation event |
-| Search catalog | Published release and search projection | None for ordinary user | Optional cache keyed by release digest |
-| Graph command | Project, graph head, catalog terminal facts | Graph revision, project revision, audit | Invalidation outbox event |
-| Request validation | Graph, catalog, ruleset, project scope | Validation run and job intent | Worker evaluation and immutable report |
-| Submit assembly action | Plan, step predicate, current graph | Progress event and projection | No external provider call |
-| Delete project | Owner scope and lifecycle | Deleting state, audit, deletion job | Object and derived-data cleanup |
+| Operation               | Canonical reads                             | Canonical writes                                      | Derived or async effect                |
+| ----------------------- | ------------------------------------------- | ----------------------------------------------------- | -------------------------------------- |
+| Create project          | Principal, published catalog release        | Project, initial revision, owner membership, audit    | Optional initialization outbox event   |
+| Update project metadata | Project head, current revision              | New revision, project summary projection, audit       | Read projection refresh if used        |
+| Create import           | Project scope, quota policy                 | Pending source intent                                 | Scoped upload capability               |
+| Complete import         | Source intent, object metadata              | Accepted/rejected source state, audit                 | Inspection outbox event                |
+| Review extracted fact   | Candidate, evidence, current revision       | Review action, fact state, issue transition, revision | Validation/plan invalidation event     |
+| Search catalog          | Published release and search projection     | None for ordinary user                                | Optional cache keyed by release digest |
+| Graph command           | Project, graph head, catalog terminal facts | Graph revision, project revision, audit               | Invalidation outbox event              |
+| Request validation      | Graph, catalog, ruleset, project scope      | Validation run and job intent                         | Worker evaluation and immutable report |
+| Submit assembly action  | Plan, step predicate, current graph         | Progress event and projection                         | No external provider call              |
+| Delete project          | Owner scope and lifecycle                   | Deleting state, audit, deletion job                   | Object and derived-data cleanup        |
 
 Routes must load a nested resource using both its identifier and project identifier. Authorization is checked before source bytes or sensitive details are fetched. If the route creates a revision, that fact is stated in the API contract and response.
 
@@ -333,14 +335,14 @@ Release evidence records source revision, artifact digest, schema version, job/e
 
 Every worker type has one registered payload schema, lease policy, retry class, resource limit, output record, and deletion interaction. New types are added through review rather than arbitrary queue dispatch.
 
-| Job type | Input reference | Durable output | Retry posture | Stop condition |
-|---|---|---|---|---|
-| InspectSource | Accepted source asset ID and digest | Inspection result and parser eligibility | Retry transient storage failure; do not retry invalid bytes | Source deleted, quarantined, or expired |
-| NormalizeConversation | Source asset ID and parser profile | Conversation and ordered message set | Retry transient worker failure idempotently | Source no longer accepted |
-| ExtractDesignCandidates | Conversation ID, task profile, approved provider policy | Candidate set and provider run metadata | Bounded retry under quota policy | Consent withdrawn, source deleted, or project deleting |
-| RunValidation | Graph digest, catalog, ruleset, profile | Immutable run, findings, aggregate | Retry deterministic execution fault only within budget | Run cancelled or inputs unavailable |
-| GenerateExport | Project revision and selected data classes | Expiring export object and manifest | Retry object/transient failure | Project deleted or authorization revoked |
-| DeleteProjectData | Project ID and deletion scope | Per-class cleanup completion | Idempotent bounded retry | Permission/integrity anomaly requiring review |
+| Job type                | Input reference                                         | Durable output                           | Retry posture                                               | Stop condition                                         |
+| ----------------------- | ------------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------ |
+| InspectSource           | Accepted source asset ID and digest                     | Inspection result and parser eligibility | Retry transient storage failure; do not retry invalid bytes | Source deleted, quarantined, or expired                |
+| NormalizeConversation   | Source asset ID and parser profile                      | Conversation and ordered message set     | Retry transient worker failure idempotently                 | Source no longer accepted                              |
+| ExtractDesignCandidates | Conversation ID, task profile, approved provider policy | Candidate set and provider run metadata  | Bounded retry under quota policy                            | Consent withdrawn, source deleted, or project deleting |
+| RunValidation           | Graph digest, catalog, ruleset, profile                 | Immutable run, findings, aggregate       | Retry deterministic execution fault only within budget      | Run cancelled or inputs unavailable                    |
+| GenerateExport          | Project revision and selected data classes              | Expiring export object and manifest      | Retry object/transient failure                              | Project deleted or authorization revoked               |
+| DeleteProjectData       | Project ID and deletion scope                           | Per-class cleanup completion             | Idempotent bounded retry                                    | Permission/integrity anomaly requiring review          |
 
 ### 14.2 Verification dataset
 
@@ -358,32 +360,31 @@ Changes to product outcome go to PRD.md. Changes to system boundary, versioning,
 
 ## 16. Decision register
 
-| ID | Decision | Owner | Closure evidence | Blocks |
-|---|---|---|---|---|
-| BD-01 | Exact first board and LED circuit | Product + hardware reviewer | Approved source facts, physical measurements, pin anchor review | Catalog and graph release |
-| BD-02 | Identity provider and account lifecycle | Product + security | Subject mapping, revocation and deletion proof | Production account workflows |
-| BD-03 | Object storage service and region | Operations + privacy | Private access, digest, lifecycle, restore, regional review | Production uploads |
-| BD-04 | Durable queue | Backend + operations | Duplicate delivery, leases, replay, dead-letter proof | Production async work |
-| BD-05 | Extraction provider | Product + privacy + engineering | Benchmark, retention terms, region, cost, safe fallback | Live extraction |
-| BD-06 | Simulation integration | Engineering + legal | Rights, API proof, coverage, sandbox, reference run | Simulation claim |
-| BD-07 | Sharing roles | Product + security | Approved role matrix and access tests | Collaboration |
-| BD-08 | Numeric SLOs | Product + operations | Baseline load and user-device measurement | Production acceptance |
+| ID    | Decision                                | Owner                           | Closure evidence                                                | Blocks                       |
+| ----- | --------------------------------------- | ------------------------------- | --------------------------------------------------------------- | ---------------------------- |
+| BD-01 | Exact first board and LED circuit       | Product + hardware reviewer     | Approved source facts, physical measurements, pin anchor review | Catalog and graph release    |
+| BD-02 | Identity provider and account lifecycle | Product + security              | Subject mapping, revocation and deletion proof                  | Production account workflows |
+| BD-03 | Object storage service and region       | Operations + privacy            | Private access, digest, lifecycle, restore, regional review     | Production uploads           |
+| BD-04 | Durable queue                           | Backend + operations            | Duplicate delivery, leases, replay, dead-letter proof           | Production async work        |
+| BD-05 | Extraction provider                     | Product + privacy + engineering | Benchmark, retention terms, region, cost, safe fallback         | Live extraction              |
+| BD-06 | Simulation integration                  | Engineering + legal             | Rights, API proof, coverage, sandbox, reference run             | Simulation claim             |
+| BD-07 | Sharing roles                           | Product + security              | Approved role matrix and access tests                           | Collaboration                |
+| BD-08 | Numeric SLOs                            | Product + operations            | Baseline load and user-device measurement                       | Production acceptance        |
 
 ## 17. Implementation acceptance matrix
 
-| Capability | Minimum evidence before release |
-|---|---|
-| Project and revision persistence | Atomic creation, authorization, stale-write conflict, digest reconstruction |
-| Upload and parsing | Private verified upload, safe parser isolation, format fixtures, deletion behavior |
-| Extraction and evidence | Provenance, review action, conflict/unknown handling, benchmark |
-| Catalog and graph | Reviewed exact hardware, anchor verification, deterministic connectivity, concurrency test |
-| Validation and assembly | Immutable versioned results, unknown state, predicates, invalidation behavior |
-| Optional integrations | Independent decision evidence, bounded execution, safe unavailable behavior |
-| Production operations | Migration rehearsal, backup/restore, deletion, monitoring, runbooks, accountable on-call |
+| Capability                       | Minimum evidence before release                                                            |
+| -------------------------------- | ------------------------------------------------------------------------------------------ |
+| Project and revision persistence | Atomic creation, authorization, stale-write conflict, digest reconstruction                |
+| Upload and parsing               | Private verified upload, safe parser isolation, format fixtures, deletion behavior         |
+| Extraction and evidence          | Provenance, review action, conflict/unknown handling, benchmark                            |
+| Catalog and graph                | Reviewed exact hardware, anchor verification, deterministic connectivity, concurrency test |
+| Validation and assembly          | Immutable versioned results, unknown state, predicates, invalidation behavior              |
+| Optional integrations            | Independent decision evidence, bounded execution, safe unavailable behavior                |
+| Production operations            | Migration rehearsal, backup/restore, deletion, monitoring, runbooks, accountable on-call   |
 
 A release is blocked by a critical authorization failure, silent data loss, false save success, incorrect exact-pin mapping, unknown-to-pass conversion, stale worker mutation, or unreviewed catalog fact. Any noncritical exception records impact, mitigation, owner, and expiry.
 
 ## 18. Handoff
 
 This plan is ready to be decomposed into engineering work after its named infrastructure and hardware decisions are assigned and closed. Completion is based on verified product behavior and release evidence, not on the number of tables, routes, or sections produced.
-

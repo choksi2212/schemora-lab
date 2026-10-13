@@ -10,13 +10,13 @@
 
 ## Document control
 
-| Field | Value |
-|---|---|
-| Owner | Architecture owner (to be assigned) |
-| Audience | Product engineering, platform/operations, security, data, and hardware catalog teams |
-| Status | Architecture baseline for implementation and review |
-| Change rule | Update this design when a system boundary, scaling strategy, data contract, or failure model changes; reconcile detailed contracts in TRD.md |
-| Review cadence | Before production, after load evidence, and at each service extraction decision |
+| Field          | Value                                                                                                                                        |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Owner          | Architecture owner (to be assigned)                                                                                                          |
+| Audience       | Product engineering, platform/operations, security, data, and hardware catalog teams                                                         |
+| Status         | Architecture baseline for implementation and review                                                                                          |
+| Change rule    | Update this design when a system boundary, scaling strategy, data contract, or failure model changes; reconcile detailed contracts in TRD.md |
+| Review cadence | Before production, after load evidence, and at each service extraction decision                                                              |
 
 ## Contents
 
@@ -44,6 +44,8 @@
 
 ## 1. Executive design
 
+**Phase 1 implementation decision:** Durable queue transport is initially implemented in PostgreSQL using an outbox, SKIP LOCKED claims, token-fenced leases, heartbeat renewal, bounded retries, and durable status. The API and worker are separate entry points. A dedicated queue provider is introduced through the transport boundary only when measured throughput, scheduling, isolation, or recovery requirements justify it. The shipped implementation and external deployment gates are recorded in [Phase-1-Implementation.md](Phase-1-Implementation.md).
+
 Schemora turns imported conversation data into a reviewed hardware design, an exact catalog-bound circuit graph, validation findings, and ordered assembly guidance. The system must scale this workflow without allowing independent subsystems to disagree about which design is current or which facts are verified.
 
 The initial production shape is a **modular TypeScript application deployed in separate stateless web/API and worker process roles**, backed by PostgreSQL, private object storage, and a durable queue. The browser receives a versioned projection of the project and renders it; it does not own durable electrical truth. Long-running parsing, extraction, and optional simulation work execute asynchronously. Each worker family can scale independently by queue depth and resource profile while sharing domain contracts and application services.
@@ -54,16 +56,16 @@ The key architecture constraint is version alignment. Project revisions, catalog
 
 ### 1.1 Architecture summary
 
-| Concern | Initial design | Scale path |
-|---|---|---|
-| User-facing application | Desktop web client plus stateless TypeScript API | Add API replicas; separate delivery/CDN; isolate hot read paths only with evidence |
-| Domain execution | Modular monolith with explicit packages | Extract bounded worker or service by measured scale, isolation, or ownership need |
-| Durable state | PostgreSQL relational data and immutable revision references | Tune/index, pool, partition high-volume tables, add read replicas for eligible reads, shard only after hard limits |
-| Large files and immutable assets | Private object storage | Direct signed upload/download, lifecycle tiers, CDN only for public/versioned catalog assets |
-| Async work | Transactional outbox plus durable queue and idempotent workers | Separate queues and autoscaling pools by workload and priority |
-| Client updates | Request/response plus job polling or server events per TRD contract | SSE for scalable one-way progress; WebSocket only if interactive collaboration requires it |
-| Hardware data | Immutable, content-addressed catalog releases | Replicated/CDN distribution with signature/digest verification |
-| Analytics and operations | Structured telemetry without user content | Dedicated analytics pipeline and retention controls when product needs mature |
+| Concern                          | Initial design                                                      | Scale path                                                                                                         |
+| -------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| User-facing application          | Desktop web client plus stateless TypeScript API                    | Add API replicas; separate delivery/CDN; isolate hot read paths only with evidence                                 |
+| Domain execution                 | Modular monolith with explicit packages                             | Extract bounded worker or service by measured scale, isolation, or ownership need                                  |
+| Durable state                    | PostgreSQL relational data and immutable revision references        | Tune/index, pool, partition high-volume tables, add read replicas for eligible reads, shard only after hard limits |
+| Large files and immutable assets | Private object storage                                              | Direct signed upload/download, lifecycle tiers, CDN only for public/versioned catalog assets                       |
+| Async work                       | Transactional outbox plus durable queue and idempotent workers      | Separate queues and autoscaling pools by workload and priority                                                     |
+| Client updates                   | Request/response plus job polling or server events per TRD contract | SSE for scalable one-way progress; WebSocket only if interactive collaboration requires it                         |
+| Hardware data                    | Immutable, content-addressed catalog releases                       | Replicated/CDN distribution with signature/digest verification                                                     |
+| Analytics and operations         | Structured telemetry without user content                           | Dedicated analytics pipeline and retention controls when product needs mature                                      |
 
 ## 2. Goals, constraints, and non-goals
 
@@ -101,7 +103,7 @@ This design does not set unsupported user counts, request rates, uptime commitme
 
 ### 4.1 Context diagram
 
-~~~mermaid
+```mermaid
 flowchart LR
   User[Builder in desktop browser] --> Edge[DNS / TLS / edge protection]
   Edge --> Web[Web application]
@@ -121,11 +123,11 @@ flowchart LR
   API --> Telemetry[Metrics / logs / traces]
   Web --> Telemetry
   Workers --> Telemetry
-~~~
+```
 
 ### 4.2 Logical components
 
-~~~mermaid
+```mermaid
 flowchart TB
   subgraph Client[Browser]
     UX[Next.js UI]
@@ -160,7 +162,7 @@ flowchart TB
   Queue -.-> Sim
   Gateway --> App
   Client --> Gateway
-~~~
+```
 
 The API applies authentication, project authorization, request validation, rate limiting, and response shaping. Application use cases own transaction boundaries and call domain packages. Persistence and provider adapters implement explicit interfaces. Workers invoke the same application/domain contracts as synchronous operations; they do not call route handlers or bypass authorization/lifecycle checks.
 
@@ -168,17 +170,17 @@ The API applies authentication, project authorization, request validation, rate 
 
 Scaling decisions depend on which resource saturates. The main expected dimensions differ and should not be collapsed into one “server load” number.
 
-| Workload | Main bottleneck | Scale control | User impact if saturated |
-|---|---|---|---|
-| Static UI and catalog assets | Network egress and cache misses | CDN, compression, cache policy, asset budgets | Slow initial load or scene load |
-| Interactive project reads | API CPU, database read IOPS/locks | API replicas, query tuning, bounded payloads, eligible cache/read replica | Delayed screen updates |
-| Graph mutations | Database transaction latency and contention | Short transactions, optimistic concurrency, pool limits, hot-row analysis | Save delay/conflict |
-| Upload | Object storage bandwidth and API ingress | Signed direct upload, size/concurrency limits, multipart where justified | Upload delay or retry |
-| Parsing | CPU, memory, decompression, hostile input | Isolated worker pool, per-file limits, queue concurrency | Longer import wait |
-| Extraction/provider work | Provider quotas, latency, cost, token/context size | Separate queue/pool, quota-aware dispatch, retry policy, budget controls | Delayed or unavailable candidate facts |
-| Deterministic validation | Graph/rule complexity and CPU | Input bounds, profiling, cache by full semantic key, separate pool if needed | Delayed feedback |
-| Simulation | CPU/memory, external licenses, run duration | Isolated bounded workers, quotas, per-run limits | Simulation queue delay |
-| PostgreSQL | Connections, CPU, IO, locks, table/index growth | Pooling, query/index design, scale-up, read replicas, partitioning when proven | Broad degradation or write unavailability |
+| Workload                     | Main bottleneck                                    | Scale control                                                                  | User impact if saturated                  |
+| ---------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------- |
+| Static UI and catalog assets | Network egress and cache misses                    | CDN, compression, cache policy, asset budgets                                  | Slow initial load or scene load           |
+| Interactive project reads    | API CPU, database read IOPS/locks                  | API replicas, query tuning, bounded payloads, eligible cache/read replica      | Delayed screen updates                    |
+| Graph mutations              | Database transaction latency and contention        | Short transactions, optimistic concurrency, pool limits, hot-row analysis      | Save delay/conflict                       |
+| Upload                       | Object storage bandwidth and API ingress           | Signed direct upload, size/concurrency limits, multipart where justified       | Upload delay or retry                     |
+| Parsing                      | CPU, memory, decompression, hostile input          | Isolated worker pool, per-file limits, queue concurrency                       | Longer import wait                        |
+| Extraction/provider work     | Provider quotas, latency, cost, token/context size | Separate queue/pool, quota-aware dispatch, retry policy, budget controls       | Delayed or unavailable candidate facts    |
+| Deterministic validation     | Graph/rule complexity and CPU                      | Input bounds, profiling, cache by full semantic key, separate pool if needed   | Delayed feedback                          |
+| Simulation                   | CPU/memory, external licenses, run duration        | Isolated bounded workers, quotas, per-run limits                               | Simulation queue delay                    |
+| PostgreSQL                   | Connections, CPU, IO, locks, table/index growth    | Pooling, query/index design, scale-up, read replicas, partitioning when proven | Broad degradation or write unavailability |
 
 ### 5.1 Workload classes and priority
 
@@ -196,7 +198,7 @@ Deploy a stateless web/API runtime and one or more independently scalable worker
 
 The web runtime may be hosted on a frontend platform, but API execution, request duration, network egress, private connectivity, and worker guarantees must be verified against production needs. If the web platform cannot host durable or bounded API work reliably, place API services in a separate managed runtime. Long-running work never depends on a browser request remaining open.
 
-~~~mermaid
+```mermaid
 flowchart TB
   subgraph Public[Public edge]
     DNS[DNS and TLS]
@@ -226,7 +228,7 @@ flowchart TB
   WorkerB --> DB
   WorkerB --> Obj
   WorkerC --> DB
-~~~
+```
 
 ### 6.2 Environment separation
 
@@ -234,15 +236,15 @@ Maintain local, CI, development, staging, and production environments with separ
 
 ### 6.3 Runtime process roles
 
-| Role | Stateless? | Scaling unit | Must not do |
-|---|---|---|---|
-| Web frontend | Yes | Replicas or platform instances | Hold canonical project state or private credentials in client bundles |
-| API | Yes | Replicas behind load balancer | Run long parsing/provider/simulation work inline |
-| Outbox relay | Leased/idempotent process | Replicas with safe row claiming | Publish uncommitted or unrecorded business events |
-| Parser worker | Yes between jobs; bounded temp workspace | Concurrency per CPU/memory/input limit | Access arbitrary network or unbounded archives |
-| Extraction worker | Yes between jobs | Provider quota and tenant fair-share | Treat generated output as confirmed facts |
-| Validation worker/service | Stateless computation over versioned input | CPU concurrency and bounded graph sizes | Mutate graph or claim physical safety |
-| Simulation worker | Isolated process/container | Per-run resources and product quotas | Share unrestricted host access or credentials |
+| Role                      | Stateless?                                 | Scaling unit                            | Must not do                                                           |
+| ------------------------- | ------------------------------------------ | --------------------------------------- | --------------------------------------------------------------------- |
+| Web frontend              | Yes                                        | Replicas or platform instances          | Hold canonical project state or private credentials in client bundles |
+| API                       | Yes                                        | Replicas behind load balancer           | Run long parsing/provider/simulation work inline                      |
+| Outbox relay              | Leased/idempotent process                  | Replicas with safe row claiming         | Publish uncommitted or unrecorded business events                     |
+| Parser worker             | Yes between jobs; bounded temp workspace   | Concurrency per CPU/memory/input limit  | Access arbitrary network or unbounded archives                        |
+| Extraction worker         | Yes between jobs                           | Provider quota and tenant fair-share    | Treat generated output as confirmed facts                             |
+| Validation worker/service | Stateless computation over versioned input | CPU concurrency and bounded graph sizes | Mutate graph or claim physical safety                                 |
+| Simulation worker         | Isolated process/container                 | Per-run resources and product quotas    | Share unrestricted host access or credentials                         |
 
 ## 7. Service boundaries and evolution path
 
@@ -266,13 +268,13 @@ Before extraction, define API/event contracts, data ownership, retry semantics, 
 
 ### 7.3 Plausible extraction sequence
 
-| Candidate | Earliest trigger | Extraction shape |
-|---|---|---|
-| Conversation parser | Hostile-file isolation or independent CPU scaling is operationally necessary | Sandboxed parser workers consuming source references and emitting versioned normalized outputs |
-| AI extraction | Provider-specific quotas, secrets, cost controls, or regional processing require isolation | Provider gateway/worker service with minimized payload and normalized candidate contract |
-| Simulation | Long-running, resource-heavy, licensed, or untrusted execution requires a strong sandbox | Isolated simulation service with strict run API and result schema |
-| Catalog delivery | Asset volume or external reuse creates independent distribution needs | Immutable catalog build/publish pipeline and CDN/object origin |
-| Analytics | Product analytics volume and retention need isolation from transactional queries | Event pipeline with minimized, governed schema |
+| Candidate           | Earliest trigger                                                                           | Extraction shape                                                                               |
+| ------------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| Conversation parser | Hostile-file isolation or independent CPU scaling is operationally necessary               | Sandboxed parser workers consuming source references and emitting versioned normalized outputs |
+| AI extraction       | Provider-specific quotas, secrets, cost controls, or regional processing require isolation | Provider gateway/worker service with minimized payload and normalized candidate contract       |
+| Simulation          | Long-running, resource-heavy, licensed, or untrusted execution requires a strong sandbox   | Isolated simulation service with strict run API and result schema                              |
+| Catalog delivery    | Asset volume or external reuse creates independent distribution needs                      | Immutable catalog build/publish pipeline and CDN/object origin                                 |
+| Analytics           | Product analytics volume and retention need isolation from transactional queries           | Event pipeline with minimized, governed schema                                                 |
 
 These are candidates, not an approved roadmap. They remain in-process or in worker roles until a trigger is observed.
 
@@ -288,7 +290,7 @@ These are candidates, not an approved roadmap. They remain in-process or in work
 
 ### 8.2 Asynchronous job path
 
-~~~mermaid
+```mermaid
 sequenceDiagram
   participant API
   participant DB as PostgreSQL
@@ -308,7 +310,7 @@ sequenceDiagram
   W->>W: Process under bounded resources
   W->>DB: Persist result if input revision still applies
   W->>Q: Acknowledge after durable completion
-~~~
+```
 
 ### 8.3 Job contract
 
@@ -373,14 +375,14 @@ Before expensive work begins and before its result is applied, verify that the p
 
 Cache only data with a clear identity, scope, and invalidation rule. Do not cache authorization decisions beyond the session/request boundary, mutable project ownership, current revision preconditions, or deletion status in a way that can expose data or accept stale writes.
 
-| Data | Cache policy | Invalidation / safety |
-|---|---|---|
-| Hashed web bundles | Long-lived immutable CDN cache | New content hash on deploy |
-| Catalog release assets | Long-lived immutable cache by digest | New release gets new URLs/digests |
-| Public help/reference material | CDN cache if licensed and public | Versioned content publication |
-| Private project data | Short-lived or no shared cache by default | Private scope, revision-aware keys, purge on deletion |
-| Validation results | Domain cache by complete semantic key | Key includes graph, catalog, ruleset and relevant config versions |
-| API authorization | Request/session scoped | Reauthorize sensitive access; never infer from cache hit |
+| Data                           | Cache policy                              | Invalidation / safety                                             |
+| ------------------------------ | ----------------------------------------- | ----------------------------------------------------------------- |
+| Hashed web bundles             | Long-lived immutable CDN cache            | New content hash on deploy                                        |
+| Catalog release assets         | Long-lived immutable cache by digest      | New release gets new URLs/digests                                 |
+| Public help/reference material | CDN cache if licensed and public          | Versioned content publication                                     |
+| Private project data           | Short-lived or no shared cache by default | Private scope, revision-aware keys, purge on deletion             |
+| Validation results             | Domain cache by complete semantic key     | Key includes graph, catalog, ruleset and relevant config versions |
+| API authorization              | Request/session scoped                    | Reauthorize sensitive access; never infer from cache hit          |
 
 Large assets should use compression and appropriate image/mesh formats, lazy loading, and explicit scene budgets. The UI requests only assets referenced by the active catalog/project. CDN observability should distinguish cache hit, origin error, and missing digest.
 
@@ -406,18 +408,18 @@ Apply per-IP and per-principal request controls at the edge/API, per-tenant limi
 
 ### 13.1 Failure matrix
 
-| Failure | Containment and behavior |
-|---|---|
-| Web/API instance termination | Load balancer routes to healthy replica; browser retries only idempotent/safely keyed requests |
-| Queue outage | Job intent remains in outbox; API reports queued/pending, relay retries, backpressure limits new work if backlog exceeds policy |
-| Worker crash | Lease expires; job retries idempotently; repeated/permanent failures are quarantined and observable |
-| Database unavailable | Fail mutations clearly; do not claim saved; retry-safe reads may return controlled unavailable response |
-| Object storage unavailable | Do not accept unverified upload; preserve upload intent and retry path; workers pause before reading |
-| Provider unavailable or throttled | Circuit breaker and quota-aware retry; keep project review/manual correction available |
-| Catalog CDN/origin unavailable | Use verified cached immutable assets when available; otherwise semantic UI and labeled placeholder |
-| 3D context loss | Recover scene or switch to semantic list; graph state remains unchanged |
-| Bad deployment/schema mismatch | Compatibility check prevents activation; rollback app or forward-fix via additive migration |
-| Region failure | Restore or fail over according to approved recovery objectives and provider capabilities |
+| Failure                           | Containment and behavior                                                                                                        |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Web/API instance termination      | Load balancer routes to healthy replica; browser retries only idempotent/safely keyed requests                                  |
+| Queue outage                      | Job intent remains in outbox; API reports queued/pending, relay retries, backpressure limits new work if backlog exceeds policy |
+| Worker crash                      | Lease expires; job retries idempotently; repeated/permanent failures are quarantined and observable                             |
+| Database unavailable              | Fail mutations clearly; do not claim saved; retry-safe reads may return controlled unavailable response                         |
+| Object storage unavailable        | Do not accept unverified upload; preserve upload intent and retry path; workers pause before reading                            |
+| Provider unavailable or throttled | Circuit breaker and quota-aware retry; keep project review/manual correction available                                          |
+| Catalog CDN/origin unavailable    | Use verified cached immutable assets when available; otherwise semantic UI and labeled placeholder                              |
+| 3D context loss                   | Recover scene or switch to semantic list; graph state remains unchanged                                                         |
+| Bad deployment/schema mismatch    | Compatibility check prevents activation; rollback app or forward-fix via additive migration                                     |
+| Region failure                    | Restore or fail over according to approved recovery objectives and provider capabilities                                        |
 
 ### 13.2 Backpressure and overload
 
@@ -433,16 +435,16 @@ Use structured logs, metrics, traces, and audit events with a shared correlation
 
 ### 14.1 Required operational signals
 
-| Area | Signals |
-|---|---|
-| API | Request rate, latency percentiles, status class, saturation, pool wait, payload rejection, auth denial |
-| Database | CPU, IO, connections, lock waits, replication lag, slow query fingerprints, storage/index growth, backup status |
-| Queue/outbox | Oldest pending age, depth by type, publish lag, redelivery, lease expiry, dead-letter count |
-| Workers | Throughput, duration, resource use, attempts, cancellation, failure class, version, tenant fairness |
-| Providers | Availability, latency, rate limit, token/cost usage, circuit state, schema rejection |
-| Object store | Upload/download errors, checksum mismatch, lifecycle backlog, orphan count, deletion delay |
+| Area                | Signals                                                                                                             |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| API                 | Request rate, latency percentiles, status class, saturation, pool wait, payload rejection, auth denial              |
+| Database            | CPU, IO, connections, lock waits, replication lag, slow query fingerprints, storage/index growth, backup status     |
+| Queue/outbox        | Oldest pending age, depth by type, publish lag, redelivery, lease expiry, dead-letter count                         |
+| Workers             | Throughput, duration, resource use, attempts, cancellation, failure class, version, tenant fairness                 |
+| Providers           | Availability, latency, rate limit, token/cost usage, circuit state, schema rejection                                |
+| Object store        | Upload/download errors, checksum mismatch, lifecycle backlog, orphan count, deletion delay                          |
 | Product correctness | Stale-result rejection, graph revision conflict, unknown fact counts, validation run states, catalog asset fallback |
-| Browser/workbench | Core web vitals, scene load/render fallback, context loss, uncaught error class, task-path completion events |
+| Browser/workbench   | Core web vitals, scene load/render fallback, context loss, uncaught error class, task-path completion events        |
 
 Dashboards separate technical success from user success. Every page/alert has an owner, runbook, impact statement, and escalation path. High-cardinality identifiers are used in traces/logs only where retention and access controls are suitable, not as unbounded metric labels.
 
@@ -512,49 +514,49 @@ Launch in a selected primary region based on user geography, data policy, provid
 
 The following are trigger categories; thresholds are set using production baselines and approved service objectives.
 
-| Decision | Trigger evidence | First response | More costly step |
-|---|---|---|---|
-| Add API replicas | API CPU/latency or concurrency saturation while DB remains healthy | Add stateless capacity; inspect hot endpoints | Split read-heavy or independently scaled API domain |
-| Add worker capacity | Queue age rises and downstream quota/resources allow more parallelism | Increase bounded per-class worker concurrency | Dedicated worker service/pool or separate queue topology |
-| Separate provider work | Provider outages/quotas cause unrelated user-path contention or secret boundary demands it | Isolate provider adapter and concurrency budgets | Independently deployed provider gateway/service |
-| Add read replica | Read workload consumes primary capacity and queries tolerate lag | Optimize queries and add replica for eligible reads | Shard or redesign read model only after measurement |
-| Partition tables | Retention, vacuum, index maintenance, or query latency degrades due to measured table growth | Archive and tune indexes/retention | Partition with migration and rollback proof |
-| Add cache | Repeated immutable/derived reads materially load origin and have reliable keying | Cache by digest/revision with clear expiry | Distributed cache for selected projections |
-| Isolate simulation | Resource use or untrusted execution risks host/app availability | Dedicated bounded worker sandbox | Separate simulation service/account/cluster |
-| Add second region | Recovery objectives or data locality cannot be met in primary region | Tested standby and restore automation | Regional routing; active-active only with explicit consistency design |
-| Shard tenant data | Primary capacity remains limiting after tuning/scale-up and tenant boundaries are stable | Design placement and migration tooling | Multi-shard control plane and tenant relocation |
+| Decision               | Trigger evidence                                                                             | First response                                      | More costly step                                                      |
+| ---------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------- | --------------------------------------------------------------------- |
+| Add API replicas       | API CPU/latency or concurrency saturation while DB remains healthy                           | Add stateless capacity; inspect hot endpoints       | Split read-heavy or independently scaled API domain                   |
+| Add worker capacity    | Queue age rises and downstream quota/resources allow more parallelism                        | Increase bounded per-class worker concurrency       | Dedicated worker service/pool or separate queue topology              |
+| Separate provider work | Provider outages/quotas cause unrelated user-path contention or secret boundary demands it   | Isolate provider adapter and concurrency budgets    | Independently deployed provider gateway/service                       |
+| Add read replica       | Read workload consumes primary capacity and queries tolerate lag                             | Optimize queries and add replica for eligible reads | Shard or redesign read model only after measurement                   |
+| Partition tables       | Retention, vacuum, index maintenance, or query latency degrades due to measured table growth | Archive and tune indexes/retention                  | Partition with migration and rollback proof                           |
+| Add cache              | Repeated immutable/derived reads materially load origin and have reliable keying             | Cache by digest/revision with clear expiry          | Distributed cache for selected projections                            |
+| Isolate simulation     | Resource use or untrusted execution risks host/app availability                              | Dedicated bounded worker sandbox                    | Separate simulation service/account/cluster                           |
+| Add second region      | Recovery objectives or data locality cannot be met in primary region                         | Tested standby and restore automation               | Regional routing; active-active only with explicit consistency design |
+| Shard tenant data      | Primary capacity remains limiting after tuning/scale-up and tenant boundaries are stable     | Design placement and migration tooling              | Multi-shard control plane and tenant relocation                       |
 
 Every scale-out proposal includes current bottleneck evidence, expected capacity gain, operational cost, migration/rollback, new failure modes, data ownership, and the metric that will verify success.
 
 ## 19. Implementation roadmap
 
-| Stage | Architecture work | Exit evidence |
-|---|---|---|
-| A. Foundation | Enforce module boundaries, typed configuration, environment separation, migrations, telemetry context, local adapters | Reproducible startup; CI uses fake providers; dependency rules checked |
-| B. Durable core | Project revisions, authorization, private storage, job/outbox model, queue adapter | Mutation conflicts, duplicate jobs, retries, deletion gates demonstrated |
-| C. First vertical slice | Import/parser/extraction, evidence review, narrow catalog, graph/validation/assembly | End-to-end supported design with stale-result protection |
-| D. Production baseline | Managed runtime, resource limits, backup/restore, runbooks, security/privacy review | Operational rehearsal and approved SLO/RPO/RTO decisions |
-| E. Measured scale | Workload tests, dashboards, capacity model, cost per workflow | Saturation curves and prioritized bottleneck fixes |
-| F. Evidence-based isolation | Extract only proven hot or high-risk workloads | Independent service contract, deployment, observability, rollback, ownership |
+| Stage                       | Architecture work                                                                                                     | Exit evidence                                                                |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| A. Foundation               | Enforce module boundaries, typed configuration, environment separation, migrations, telemetry context, local adapters | Reproducible startup; CI uses fake providers; dependency rules checked       |
+| B. Durable core             | Project revisions, authorization, private storage, job/outbox model, queue adapter                                    | Mutation conflicts, duplicate jobs, retries, deletion gates demonstrated     |
+| C. First vertical slice     | Import/parser/extraction, evidence review, narrow catalog, graph/validation/assembly                                  | End-to-end supported design with stale-result protection                     |
+| D. Production baseline      | Managed runtime, resource limits, backup/restore, runbooks, security/privacy review                                   | Operational rehearsal and approved SLO/RPO/RTO decisions                     |
+| E. Measured scale           | Workload tests, dashboards, capacity model, cost per workflow                                                         | Saturation curves and prioritized bottleneck fixes                           |
+| F. Evidence-based isolation | Extract only proven hot or high-risk workloads                                                                        | Independent service contract, deployment, observability, rollback, ownership |
 
 This order supports a complete product proof before large-scale infrastructure investment. Production security, durability, and resource bounds are foundational and are not deferred until after user growth.
 
 ## 20. Architecture decisions and open questions
 
-| ID | Decision / question | Current baseline | Closure evidence / owner |
-|---|---|---|---|
-| SD-01 | Initial execution topology | Modular monolith; stateless web/API and separate worker roles | Confirm hosting limits and runtime isolation; engineering/operations |
-| SD-02 | Queue provider and delivery guarantees | Provider-neutral durable queue with at-least-once delivery | Delivery, ordering, visibility timeout, DLQ, regional recovery proof; operations |
-| SD-03 | Object storage provider | Private object store behind adapter | Signed upload, lifecycle, checksum, deletion, regional and restore proof; security/operations |
-| SD-04 | Identity and tenant model | Trusted external identity; project-scoped authorization | Provider lifecycle, session revocation, sharing decision; product/security |
-| SD-05 | Browser job update channel | Polling initially; SSE if progress experience requires push | Hosting support, reconnect behavior, cost, user evidence; UI/platform |
-| SD-06 | SLO, RPO, RTO values | Not set | Baseline and business impact workshop; product/operations |
-| SD-07 | Provider service extraction | Keep behind adapter/worker role initially | Isolation, quota, cost, or ownership evidence; engineering/security |
-| SD-08 | Catalog CDN policy | Immutable public/licensed assets may use CDN; user data private | License, cache, invalidation, integrity review; catalog/security |
-| SD-09 | Database read scaling | Primary first; tune before replica | Read load and lag-tolerant endpoint inventory; data/operations |
-| SD-10 | Multi-region recovery | Single write region initially | Approved geography and recovery objectives; product/operations |
-| SD-11 | Analytics pipeline | Operational telemetry only at first | Product measurement plan, privacy review, retention; product/data |
-| SD-12 | Quantitative capacity budgets | Establish through synthetic and pilot workload | Representative datasets and baseline devices; engineering/QA |
+| ID    | Decision / question                    | Current baseline                                                | Closure evidence / owner                                                                      |
+| ----- | -------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| SD-01 | Initial execution topology             | Modular monolith; stateless web/API and separate worker roles   | Confirm hosting limits and runtime isolation; engineering/operations                          |
+| SD-02 | Queue provider and delivery guarantees | Provider-neutral durable queue with at-least-once delivery      | Delivery, ordering, visibility timeout, DLQ, regional recovery proof; operations              |
+| SD-03 | Object storage provider                | Private object store behind adapter                             | Signed upload, lifecycle, checksum, deletion, regional and restore proof; security/operations |
+| SD-04 | Identity and tenant model              | Trusted external identity; project-scoped authorization         | Provider lifecycle, session revocation, sharing decision; product/security                    |
+| SD-05 | Browser job update channel             | Polling initially; SSE if progress experience requires push     | Hosting support, reconnect behavior, cost, user evidence; UI/platform                         |
+| SD-06 | SLO, RPO, RTO values                   | Not set                                                         | Baseline and business impact workshop; product/operations                                     |
+| SD-07 | Provider service extraction            | Keep behind adapter/worker role initially                       | Isolation, quota, cost, or ownership evidence; engineering/security                           |
+| SD-08 | Catalog CDN policy                     | Immutable public/licensed assets may use CDN; user data private | License, cache, invalidation, integrity review; catalog/security                              |
+| SD-09 | Database read scaling                  | Primary first; tune before replica                              | Read load and lag-tolerant endpoint inventory; data/operations                                |
+| SD-10 | Multi-region recovery                  | Single write region initially                                   | Approved geography and recovery objectives; product/operations                                |
+| SD-11 | Analytics pipeline                     | Operational telemetry only at first                             | Product measurement plan, privacy review, retention; product/data                             |
+| SD-12 | Quantitative capacity budgets          | Establish through synthetic and pilot workload                  | Representative datasets and baseline devices; engineering/QA                                  |
 
 ## 21. Acceptance and review checklist
 
@@ -575,6 +577,6 @@ Before implementation is considered aligned with this design, reviewers can veri
 
 ## Change record
 
-| Version | Date | Change |
-|---|---|---|
-| 1.0 | 13 October 2026 | Initial scalable system design aligned with the existing PRD, TRD, backend plan, and UI/UX plan |
+| Version | Date            | Change                                                                                          |
+| ------- | --------------- | ----------------------------------------------------------------------------------------------- |
+| 1.0     | 13 October 2026 | Initial scalable system design aligned with the existing PRD, TRD, backend plan, and UI/UX plan |

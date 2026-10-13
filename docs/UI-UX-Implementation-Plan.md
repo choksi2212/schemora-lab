@@ -11,13 +11,13 @@
 
 ## Document control
 
-| Field | Value |
-|---|---|
-| Owner | Product design and frontend engineering (named owners to be assigned) |
-| Audience | Product, design, frontend, backend, hardware catalog, QA, and support |
-| Status | Implementation baseline; open decisions are called out explicitly |
-| Change rule | Product behavior changes are reconciled with the PRD; API and data changes with the TRD |
-| Review cadence | At each phase exit and when a core workflow or trust state changes |
+| Field          | Value                                                                                   |
+| -------------- | --------------------------------------------------------------------------------------- |
+| Owner          | Product design and frontend engineering (named owners to be assigned)                   |
+| Audience       | Product, design, frontend, backend, hardware catalog, QA, and support                   |
+| Status         | Implementation baseline; open decisions are called out explicitly                       |
+| Change rule    | Product behavior changes are reconciled with the PRD; API and data changes with the TRD |
+| Review cadence | At each phase exit and when a core workflow or trust state changes                      |
 
 ## Contents
 
@@ -55,13 +55,13 @@ The first release is desktop-first. A semantic, keyboard-usable path must preser
 
 ### 1.2 Source-of-truth relationship
 
-| Concern | Authority | UI/UX responsibility |
-|---|---|---|
-| User problem, promise, scope, product requirements | PRD.md | Make the required outcomes understandable and achievable |
-| API, graph, job, validation, catalog, and persistence contracts | TRD.md | Render contract states accurately; request changes through owning team |
-| Deployment topology, reliability, and scale-out strategy | System-Design.md | Keep user-facing behavior coherent with service and data boundaries |
-| Backend sequence and migration evidence | Backend-DB-Implementation-Plan.md | Coordinate screen dependencies with available capabilities |
-| Layout, navigation, interaction, copy, and visual hierarchy | This document | Define and validate the interface implementation |
+| Concern                                                         | Authority                         | UI/UX responsibility                                                   |
+| --------------------------------------------------------------- | --------------------------------- | ---------------------------------------------------------------------- |
+| User problem, promise, scope, product requirements              | PRD.md                            | Make the required outcomes understandable and achievable               |
+| API, graph, job, validation, catalog, and persistence contracts | TRD.md                            | Render contract states accurately; request changes through owning team |
+| Deployment topology, reliability, and scale-out strategy        | System-Design.md                  | Keep user-facing behavior coherent with service and data boundaries    |
+| Backend sequence and migration evidence                         | Backend-DB-Implementation-Plan.md | Coordinate screen dependencies with available capabilities             |
+| Layout, navigation, interaction, copy, and visual hierarchy     | This document                     | Define and validate the interface implementation                       |
 
 ## 2. Experience outcomes and design principles
 
@@ -69,30 +69,30 @@ The interface succeeds when a novice can move from a conversation to a reproduci
 
 ### 2.1 Principles
 
-| Principle | Product behavior |
-|---|---|
-| Show what is known and how it is known | Candidate facts show source excerpts or user confirmation; catalog-verified facts carry an explicit verified status |
-| Make correction local | A user can fix one component, pin, or connection without restarting the whole import |
-| Keep the design and the scene in agreement | The 3D scene is a view of the selected graph revision, not an independent drawing surface |
-| Explain actionable errors | Every blocking finding names the affected item, why it matters, and the next available correction |
-| Let users choose explanation depth | Short guidance is the default; definitions and technical detail are available in context |
-| Preserve user agency | Destructive or ambiguous changes are previewed, undoable where possible, and explicit about their effect |
-| Use consistent terms | A pin, terminal, wire, breadboard row, and board model retain the same name across review, workbench, and assembly |
-| Prefer useful clarity to realism | Scene styling supports orientation and connection reading; decorative detail never obscures terminals or state |
+| Principle                                  | Product behavior                                                                                                    |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| Show what is known and how it is known     | Candidate facts show source excerpts or user confirmation; catalog-verified facts carry an explicit verified status |
+| Make correction local                      | A user can fix one component, pin, or connection without restarting the whole import                                |
+| Keep the design and the scene in agreement | The 3D scene is a view of the selected graph revision, not an independent drawing surface                           |
+| Explain actionable errors                  | Every blocking finding names the affected item, why it matters, and the next available correction                   |
+| Let users choose explanation depth         | Short guidance is the default; definitions and technical detail are available in context                            |
+| Preserve user agency                       | Destructive or ambiguous changes are previewed, undoable where possible, and explicit about their effect            |
+| Use consistent terms                       | A pin, terminal, wire, breadboard row, and board model retain the same name across review, workbench, and assembly  |
+| Prefer useful clarity to realism           | Scene styling supports orientation and connection reading; decorative detail never obscures terminals or state      |
 
 ### 2.2 Experience measures
 
 The team will establish baseline values through moderated sessions before treating a numeric threshold as a product promise. Instrumentation and research should measure completion and understanding together; a user who clicks through while misunderstanding a warning has not succeeded.
 
-| Measure | Capture method | Segment or interpretation |
-|---|---|---|
-| Supported import completion | Product event plus session observation | Break down by file format and parser outcome |
-| Correction effort | Count edited facts and connections before build readiness | Separate harmless naming edits from electrical corrections |
-| Provenance comprehension | Ask participants to locate evidence for a selected extracted fact | Required before guidance depends on that fact |
-| Build task completion | Observe a reference LED circuit task | Report novice and experienced users separately |
-| Fault recovery | Introduce a wrong pin or missing wire and observe recovery | Report by known supported fault type |
-| Confidence calibration | Ask how certain the user is and compare with system state | High confidence on unresolved facts is a failure signal |
-| Accessibility task completion | Keyboard and assistive-technology task walkthroughs | Record barriers by task, not only automated scan totals |
+| Measure                       | Capture method                                                    | Segment or interpretation                                  |
+| ----------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------- |
+| Supported import completion   | Product event plus session observation                            | Break down by file format and parser outcome               |
+| Correction effort             | Count edited facts and connections before build readiness         | Separate harmless naming edits from electrical corrections |
+| Provenance comprehension      | Ask participants to locate evidence for a selected extracted fact | Required before guidance depends on that fact              |
+| Build task completion         | Observe a reference LED circuit task                              | Report novice and experienced users separately             |
+| Fault recovery                | Introduce a wrong pin or missing wire and observe recovery        | Report by known supported fault type                       |
+| Confidence calibration        | Ask how certain the user is and compare with system state         | High confidence on unresolved facts is a failure signal    |
+| Accessibility task completion | Keyboard and assistive-technology task walkthroughs               | Record barriers by task, not only automated scan totals    |
 
 ## 3. Users, tasks, and evidence
 
@@ -100,15 +100,15 @@ The UI must support the different levels of confidence and vocabulary in the PRD
 
 ### 3.1 Primary tasks
 
-| User need | User task | Evidence the UI must provide |
-|---|---|---|
-| Bring in a prior design | Select a supported export and start import | Accepted formats, privacy handling, processing progress, and retry route |
-| Understand extraction | Compare proposed parts and connections with the conversation | Source message, candidate/confirmed state, conflicts, and editable values |
-| Resolve ambiguity | Choose or supply a missing exact board or component | Why the choice is needed, supported candidates, and consequence of unresolved choice |
-| Build virtually | Place and connect supported components | Exact endpoints, preview before commit, selected item identity, and graph status |
-| Learn a step | Follow an ordered assembly instruction | One action, a visible target, plain-language reason, and optional terminology help |
-| Repair a design | Find and correct a reported issue | Location in scene/list, severity, actionable remedy, and revalidation state |
-| Transition to physical work | Review the completed circuit before touching hardware | Exact hardware identity, unresolved findings, and a deliberate pre-power checklist |
+| User need                   | User task                                                    | Evidence the UI must provide                                                         |
+| --------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| Bring in a prior design     | Select a supported export and start import                   | Accepted formats, privacy handling, processing progress, and retry route             |
+| Understand extraction       | Compare proposed parts and connections with the conversation | Source message, candidate/confirmed state, conflicts, and editable values            |
+| Resolve ambiguity           | Choose or supply a missing exact board or component          | Why the choice is needed, supported candidates, and consequence of unresolved choice |
+| Build virtually             | Place and connect supported components                       | Exact endpoints, preview before commit, selected item identity, and graph status     |
+| Learn a step                | Follow an ordered assembly instruction                       | One action, a visible target, plain-language reason, and optional terminology help   |
+| Repair a design             | Find and correct a reported issue                            | Location in scene/list, severity, actionable remedy, and revalidation state          |
+| Transition to physical work | Review the completed circuit before touching hardware        | Exact hardware identity, unresolved findings, and a deliberate pre-power checklist   |
 
 ### 3.2 Representative acceptance scenarios
 
@@ -122,7 +122,7 @@ The UI must support the different levels of confidence and vocabulary in the PRD
 
 Navigation follows the project’s lifecycle rather than exposing internal services. The persistent project shell provides orientation and recovery; each workflow stage owns a clear primary action and displays what is blocking the next stage.
 
-~~~mermaid
+```mermaid
 flowchart TD
   Home[Projects home] --> New[New project / import]
   New --> Progress[Import status]
@@ -137,7 +137,7 @@ flowchart TD
   Review --> History[Project revisions]
   Bench --> History
   Ready --> History
-~~~
+```
 
 ### 4.1 Navigation rules
 
@@ -151,7 +151,7 @@ flowchart TD
 
 The interface presents progress in user terms. Technical job status may exist in system events, but the user sees the current activity and the next meaningful action. Processing is asynchronous; users can leave and return without losing the project.
 
-~~~mermaid
+```mermaid
 sequenceDiagram
   actor User
   participant UI as Web interface
@@ -171,38 +171,38 @@ sequenceDiagram
   UI->>API: Apply graph commands and request validation
   API-->>UI: Current graph and validation revision
   User->>UI: Follow assembly and pre-power review
-~~~
+```
 
 ### 5.1 Stage transition contract
 
 Each stage has: a concise purpose, a visible completion condition, a blocker explanation, and a safe way to return. The stage header should state “what you are doing” and “what is needed to continue.” Avoid percentage-complete displays unless the underlying operation has a meaningful measurable denominator.
 
-| Transition | Required user understanding | Continue condition |
-|---|---|---|
-| Import → review | The file was accepted and the system found content to review | Parsing completed with a readable conversation or a recoverable failure |
-| Review → hardware selection | Extracted facts and unresolved questions are visible | Required design facts confirmed or explicitly left unresolved |
-| Hardware selection → workbench | Exact model identity and supported status are known | Model is catalog-supported and required asset/terminal mapping is available |
-| Workbench → validation | Current graph revision is saved or clearly marked unsaved | Validation can run against a stable revision |
-| Validation → assembly | Blocking findings are resolved or the product explicitly permits a limited review state | Required graph and catalog conditions pass |
-| Assembly → physical review | Steps completed or intentionally skipped are visible | Physical handoff checklist presented with all unresolved state retained |
+| Transition                     | Required user understanding                                                             | Continue condition                                                          |
+| ------------------------------ | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Import → review                | The file was accepted and the system found content to review                            | Parsing completed with a readable conversation or a recoverable failure     |
+| Review → hardware selection    | Extracted facts and unresolved questions are visible                                    | Required design facts confirmed or explicitly left unresolved               |
+| Hardware selection → workbench | Exact model identity and supported status are known                                     | Model is catalog-supported and required asset/terminal mapping is available |
+| Workbench → validation         | Current graph revision is saved or clearly marked unsaved                               | Validation can run against a stable revision                                |
+| Validation → assembly          | Blocking findings are resolved or the product explicitly permits a limited review state | Required graph and catalog conditions pass                                  |
+| Assembly → physical review     | Steps completed or intentionally skipped are visible                                    | Physical handoff checklist presented with all unresolved state retained     |
 
 ## 6. Screen inventory and specifications
 
 The inventory is the minimum screen set for the initial release. A screen may be a route or a state within a route; routing is an implementation decision so long as browser history, deep links, and return behavior remain predictable.
 
-| ID | Screen | Main user decision/action | Required states |
-|---|---|---|---|
-| UI-S01 | Projects home | Start or resume a project | Empty, loading, populated, load error |
-| UI-S02 | Import setup | Choose a file and understand processing | Empty selection, unsupported file, upload progress, upload failure |
-| UI-S03 | Import progress | Wait, leave, or retry | Queued, parsing, extracting, needs attention, complete, failed, cancelled |
-| UI-S04 | Conversation and design review | Confirm, edit, or question extracted facts | Candidate, confirmed, conflict, missing evidence, unsupported |
-| UI-S05 | Hardware selection | Select an exact catalog model | Search, no results, candidate comparison, selected, unavailable |
-| UI-S06 | Workbench | Inspect and edit supported circuit | Loading, ready, unsaved, saving, validation stale, render fallback, error |
-| UI-S07 | Validation review | Understand and resolve findings | No findings, advisory, blocking, stale, service failure |
-| UI-S08 | Assembly guide | Complete or revisit ordered actions | Ready, active, complete, blocked, skipped, stale after graph change |
-| UI-S09 | Physical review | Verify conditions before physical assembly | Checklist incomplete, review ready, unresolved caveat |
-| UI-S10 | Revision/history | Compare or restore project versions | Empty, current revision, prior revisions, restore confirmation |
-| UI-S11 | Account/preferences/help | Adjust supported preferences and get help | Signed out/in, save failure, accessible help |
+| ID     | Screen                         | Main user decision/action                  | Required states                                                           |
+| ------ | ------------------------------ | ------------------------------------------ | ------------------------------------------------------------------------- |
+| UI-S01 | Projects home                  | Start or resume a project                  | Empty, loading, populated, load error                                     |
+| UI-S02 | Import setup                   | Choose a file and understand processing    | Empty selection, unsupported file, upload progress, upload failure        |
+| UI-S03 | Import progress                | Wait, leave, or retry                      | Queued, parsing, extracting, needs attention, complete, failed, cancelled |
+| UI-S04 | Conversation and design review | Confirm, edit, or question extracted facts | Candidate, confirmed, conflict, missing evidence, unsupported             |
+| UI-S05 | Hardware selection             | Select an exact catalog model              | Search, no results, candidate comparison, selected, unavailable           |
+| UI-S06 | Workbench                      | Inspect and edit supported circuit         | Loading, ready, unsaved, saving, validation stale, render fallback, error |
+| UI-S07 | Validation review              | Understand and resolve findings            | No findings, advisory, blocking, stale, service failure                   |
+| UI-S08 | Assembly guide                 | Complete or revisit ordered actions        | Ready, active, complete, blocked, skipped, stale after graph change       |
+| UI-S09 | Physical review                | Verify conditions before physical assembly | Checklist incomplete, review ready, unresolved caveat                     |
+| UI-S10 | Revision/history               | Compare or restore project versions        | Empty, current revision, prior revisions, restore confirmation            |
+| UI-S11 | Account/preferences/help       | Adjust supported preferences and get help  | Signed out/in, save failure, accessible help                              |
 
 ### 6.1 UI-S01 — Projects home
 
@@ -236,7 +236,7 @@ The workbench is the primary construction surface. It combines a 3D scene, proje
 
 Initial layout proposal for wide desktop:
 
-~~~text
+```text
 +-----------------------------------------------------------------------+
 | Project / stage trail                 Save state     Help / account   |
 +------------------+-----------------------------------+----------------+
@@ -248,7 +248,7 @@ Initial layout proposal for wide desktop:
 +------------------+-----------------------------------+----------------+
 | Validation summary / actionable findings                             |
 +-----------------------------------------------------------------------+
-~~~
+```
 
 Panel widths, collapse behavior, and default pane selection must be validated at the supported desktop viewport. The scene cannot be squeezed until connection endpoints become hard to target. On smaller supported widths, secondary panels become drawers or tabs and maintain a visible indication of findings and unsaved work.
 
@@ -278,16 +278,16 @@ The workbench provides discoverable operations with pointer, keyboard, and seman
 
 ### 7.1 Core operations
 
-| Operation | Interaction contract | Required feedback |
-|---|---|---|
-| Select component | Click/tap target or choose it from the component list | Selection highlight, exact identity, inspector content, keyboard equivalent |
-| Inspect pin/terminal | Select a visible endpoint or its semantic list entry | Pin name, capability if relevant, owning component, focus remains predictable |
-| Create wire | Start from a valid endpoint, preview destination, select valid endpoint, review and commit | Live endpoint labels, preview distinct from saved wire, invalid destination explanation |
-| Move/place part | Use explicit move mode or handle; preview position before committing | Placement preview, collision/constraint feedback if modeled, cancel and undo |
-| Remove connection | Select wire, invoke remove, confirm when consequence is material | Affected endpoints named; operation undoable where supported |
-| Navigate scene | Orbit, pan, zoom through visible controls and documented pointer gestures | Reset view and focus/selection remain available |
-| Undo/redo | Visible controls and standard keyboard shortcut where safe | Action label and state updates; unavailable states disabled with accessible name |
-| Switch representation | Choose 3D scene or connection list | Same graph revision and selection reflected in both views |
+| Operation             | Interaction contract                                                                       | Required feedback                                                                       |
+| --------------------- | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| Select component      | Click/tap target or choose it from the component list                                      | Selection highlight, exact identity, inspector content, keyboard equivalent             |
+| Inspect pin/terminal  | Select a visible endpoint or its semantic list entry                                       | Pin name, capability if relevant, owning component, focus remains predictable           |
+| Create wire           | Start from a valid endpoint, preview destination, select valid endpoint, review and commit | Live endpoint labels, preview distinct from saved wire, invalid destination explanation |
+| Move/place part       | Use explicit move mode or handle; preview position before committing                       | Placement preview, collision/constraint feedback if modeled, cancel and undo            |
+| Remove connection     | Select wire, invoke remove, confirm when consequence is material                           | Affected endpoints named; operation undoable where supported                            |
+| Navigate scene        | Orbit, pan, zoom through visible controls and documented pointer gestures                  | Reset view and focus/selection remain available                                         |
+| Undo/redo             | Visible controls and standard keyboard shortcut where safe                                 | Action label and state updates; unavailable states disabled with accessible name        |
+| Switch representation | Choose 3D scene or connection list                                                         | Same graph revision and selection reflected in both views                               |
 
 ### 7.2 Wire creation and editing
 
@@ -309,16 +309,16 @@ All visible states derive from domain state or explicitly transient interaction 
 
 ### 8.1 State presentation map
 
-| Domain state | UI treatment | User action |
-|---|---|---|
-| Candidate fact | Neutral label; source and confidence context visible | Confirm, edit, or leave unresolved |
-| User-confirmed fact | Confirmed by user, with edit history where relevant | Review or change |
-| Catalog-verified fact | Catalog source/release indicated | Inspect detail; do not imply physical testing |
-| Rule-checked result | Rule-check label and revision/time context | Inspect findings or rerun after change |
-| Unknown or unsupported | Plain-language explanation and affected task | Provide information, choose supported option, or save unresolved |
-| Stale validation/assembly | State the design changed since result was produced | Revalidate or regenerate affected work |
-| Unsaved graph mutation | Persistent unsaved indicator and pending action context | Save, undo, or resolve conflict |
-| Failed request | Preserve recoverable input and identify retry/edit path | Retry or return safely |
+| Domain state              | UI treatment                                            | User action                                                      |
+| ------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------- |
+| Candidate fact            | Neutral label; source and confidence context visible    | Confirm, edit, or leave unresolved                               |
+| User-confirmed fact       | Confirmed by user, with edit history where relevant     | Review or change                                                 |
+| Catalog-verified fact     | Catalog source/release indicated                        | Inspect detail; do not imply physical testing                    |
+| Rule-checked result       | Rule-check label and revision/time context              | Inspect findings or rerun after change                           |
+| Unknown or unsupported    | Plain-language explanation and affected task            | Provide information, choose supported option, or save unresolved |
+| Stale validation/assembly | State the design changed since result was produced      | Revalidate or regenerate affected work                           |
+| Unsaved graph mutation    | Persistent unsaved indicator and pending action context | Save, undo, or resolve conflict                                  |
+| Failed request            | Preserve recoverable input and identify retry/edit path | Retry or return safely                                           |
 
 ### 8.2 Save, concurrency, and job feedback
 
@@ -336,15 +336,15 @@ Build a small token set before screen-specific styling. The initial visual direc
 
 ### 9.1 Token decisions to define
 
-| Token family | Required variants | Usage rule |
-|---|---|---|
-| Color | Surface, text, border, focus, selected, success, warning, error, informational | Status always has text/icon or shape in addition to color |
-| Typography | Display, page title, section title, body, label, code/value, helper | Pin names and code retain legibility at default zoom |
-| Spacing | Base spacing scale and panel gutters | Consistent alignment across review, workbench, and lists |
-| Shape | Control, card, panel, overlay radii | Avoid excessive rounding that weakens dense technical layouts |
-| Elevation | Base surface, floating panel, modal | Use to clarify layering, not decoration |
-| Motion | Duration and easing tokens plus reduced-motion behavior | No motion required to understand a status or complete a task |
-| Focus | Visible keyboard focus ring for every interactive control | Never remove browser focus without equivalent treatment |
+| Token family | Required variants                                                              | Usage rule                                                    |
+| ------------ | ------------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| Color        | Surface, text, border, focus, selected, success, warning, error, informational | Status always has text/icon or shape in addition to color     |
+| Typography   | Display, page title, section title, body, label, code/value, helper            | Pin names and code retain legibility at default zoom          |
+| Spacing      | Base spacing scale and panel gutters                                           | Consistent alignment across review, workbench, and lists      |
+| Shape        | Control, card, panel, overlay radii                                            | Avoid excessive rounding that weakens dense technical layouts |
+| Elevation    | Base surface, floating panel, modal                                            | Use to clarify layering, not decoration                       |
+| Motion       | Duration and easing tokens plus reduced-motion behavior                        | No motion required to understand a status or complete a task  |
+| Focus        | Visible keyboard focus ring for every interactive control                      | Never remove browser focus without equivalent treatment       |
 
 ### 9.2 Component inventory
 
@@ -377,13 +377,13 @@ Use the TRD baseline: Next.js, React, TypeScript, Tailwind/shadcn UI, Three.js t
 
 ### 11.1 Ownership boundaries
 
-| Data/state | Owner | Examples |
-|---|---|---|
-| Canonical project and design | API/domain | Confirmed facts, graph revision, catalog release, validation, assembly plan |
-| Transient interaction | Browser | Hover, selection, camera pose, open panel, active tool, provisional wire |
-| Pending mutation | Browser until accepted | Command payload, optimistic render, retry state, conflict resolution context |
-| Derived presentation | Frontend selectors | Grouped findings, labels, stage readiness, visible scene objects |
-| Hardware geometry and anchors | Versioned catalog asset | Mesh, terminal anchor, asset release metadata |
+| Data/state                    | Owner                   | Examples                                                                     |
+| ----------------------------- | ----------------------- | ---------------------------------------------------------------------------- |
+| Canonical project and design  | API/domain              | Confirmed facts, graph revision, catalog release, validation, assembly plan  |
+| Transient interaction         | Browser                 | Hover, selection, camera pose, open panel, active tool, provisional wire     |
+| Pending mutation              | Browser until accepted  | Command payload, optimistic render, retry state, conflict resolution context |
+| Derived presentation          | Frontend selectors      | Grouped findings, labels, stage readiness, visible scene objects             |
+| Hardware geometry and anchors | Versioned catalog asset | Mesh, terminal anchor, asset release metadata                                |
 
 ### 11.2 Mutation lifecycle
 
@@ -404,14 +404,14 @@ Use direct, concrete language. Address the user as “you.” Define technical t
 
 ### 12.1 Copy patterns
 
-| Situation | Recommended pattern | Avoid |
-|---|---|---|
-| Missing exact board | “Choose the exact ESP32 board so we can show the correct pin locations.” | “Invalid device” |
-| Candidate fact | “The conversation suggests GPIO 18. Confirm this pin before continuing.” | “GPIO 18 verified” |
-| Validation issue | “This wire ends at GPIO 19, while the reviewed design uses GPIO 18.” | “Circuit failed” |
-| Stale check | “The design changed after this check. Run validation again.” | “Validation complete” |
-| Unsupported detail | “We don’t have a reviewed model for this board yet. You can keep the design saved, but exact placement steps are unavailable.” | A generic unsupported error |
-| Physical handoff | “Review these connections before powering the board.” | “Your circuit is safe” |
+| Situation           | Recommended pattern                                                                                                            | Avoid                       |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------- |
+| Missing exact board | “Choose the exact ESP32 board so we can show the correct pin locations.”                                                       | “Invalid device”            |
+| Candidate fact      | “The conversation suggests GPIO 18. Confirm this pin before continuing.”                                                       | “GPIO 18 verified”          |
+| Validation issue    | “This wire ends at GPIO 19, while the reviewed design uses GPIO 18.”                                                           | “Circuit failed”            |
+| Stale check         | “The design changed after this check. Run validation again.”                                                                   | “Validation complete”       |
+| Unsupported detail  | “We don’t have a reviewed model for this board yet. You can keep the design saved, but exact placement steps are unavailable.” | A generic unsupported error |
+| Physical handoff    | “Review these connections before powering the board.”                                                                          | “Your circuit is safe”      |
 
 Avoid declaring “correct,” “safe,” “verified,” or “complete” without a precisely defined domain state. Where space is limited, preserve the object and action; place background explanation in an expandable detail.
 
@@ -445,14 +445,14 @@ Automated component checks and end-to-end browser flows should cover every accep
 
 Phases align to the PRD journey and backend plan. Work can overlap where contracts are stable, but screen implementation must use agreed API/domain shapes. Each phase produces reviewable artifacts and a tested user path.
 
-| Phase | Scope | Deliverables | Exit evidence |
-|---|---|---|---|
-| UI-0: Workflow and design foundation | Confirm terms, stage model, viewport, wireframes, tokens, content rules | Journey map, screen flows, design tokens, component foundations, interaction prototypes | Product/design/engineering review resolves blocking interaction questions |
-| UI-1: Project shell and import | Home, import setup, progress, recoverable job states | Responsive shell, upload states, job status, empty/error patterns | User can start import, leave, return, and recover from supported failures |
-| UI-2: Evidence and design review | Transcript, candidate facts, provenance, conflicts, partial save | Review screens, fact editing, source navigation, ambiguity handling | Acceptance scenarios for clean and conflicting conversations complete |
-| UI-3: Catalog and workbench | Exact model choice, scene, semantic list, selection, wire editing | Catalog cards, workbench layout, 3D asset mapping, fallback | A reference circuit can be inspected and edited in both representations |
-| UI-4: Validation and assembly | Findings, stale state, step guide, pre-power review | Validation panel, assembly progression, physical review | Injected fault is understood and recoverable; unsupported claims are absent |
-| UI-5: Accessibility and release hardening | Keyboard, assistive technology, responsive, failure and performance review | Audit evidence, defect closure, help content, release checklist | All blocking UI gates in §16 have evidence and named owner signoff |
+| Phase                                     | Scope                                                                      | Deliverables                                                                            | Exit evidence                                                               |
+| ----------------------------------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| UI-0: Workflow and design foundation      | Confirm terms, stage model, viewport, wireframes, tokens, content rules    | Journey map, screen flows, design tokens, component foundations, interaction prototypes | Product/design/engineering review resolves blocking interaction questions   |
+| UI-1: Project shell and import            | Home, import setup, progress, recoverable job states                       | Responsive shell, upload states, job status, empty/error patterns                       | User can start import, leave, return, and recover from supported failures   |
+| UI-2: Evidence and design review          | Transcript, candidate facts, provenance, conflicts, partial save           | Review screens, fact editing, source navigation, ambiguity handling                     | Acceptance scenarios for clean and conflicting conversations complete       |
+| UI-3: Catalog and workbench               | Exact model choice, scene, semantic list, selection, wire editing          | Catalog cards, workbench layout, 3D asset mapping, fallback                             | A reference circuit can be inspected and edited in both representations     |
+| UI-4: Validation and assembly             | Findings, stale state, step guide, pre-power review                        | Validation panel, assembly progression, physical review                                 | Injected fault is understood and recoverable; unsupported claims are absent |
+| UI-5: Accessibility and release hardening | Keyboard, assistive technology, responsive, failure and performance review | Audit evidence, defect closure, help content, release checklist                         | All blocking UI gates in §16 have evidence and named owner signoff          |
 
 ### 15.1 Design and engineering handoff package
 
@@ -464,48 +464,48 @@ Release readiness is demonstrated with evidence tied to the product requirements
 
 ### 16.1 UI acceptance gates
 
-| Gate | Pass condition | Evidence |
-|---|---|---|
-| UI-G1 Journey continuity | User can move from project creation through physical review without an orphan state | End-to-end supported reference task |
-| UI-G2 Provenance | Every extracted fact used in assembly can be traced to source evidence or user confirmation | Review fixture audit and user task observation |
-| UI-G3 Exact hardware | Physical guidance is unavailable until an exact supported model is selected | Family-only and unsupported-model scenarios |
-| UI-G4 Revision honesty | Validation and assembly identify stale outputs after design change | Graph mutation walkthrough and API revision evidence |
-| UI-G5 Recovery | Failed upload, job, save, and render paths preserve user context and offer recovery | Failure injection walkthrough |
-| UI-G6 Semantic parity | Core inspection/editing tasks work without 3D rendering | WebGL-disabled task completion |
-| UI-G7 Accessible operation | Core tasks work by keyboard and expose equivalent structure to assistive technology | Manual accessibility task record and automated findings |
-| UI-G8 Physical boundary | Interface does not present validation as a safety certification | Copy review and release screen audit |
-| UI-G9 User comprehension | Participants can explain candidate, confirmed, catalog, and rule-check distinctions | Moderated comprehension evidence |
+| Gate                       | Pass condition                                                                              | Evidence                                                |
+| -------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| UI-G1 Journey continuity   | User can move from project creation through physical review without an orphan state         | End-to-end supported reference task                     |
+| UI-G2 Provenance           | Every extracted fact used in assembly can be traced to source evidence or user confirmation | Review fixture audit and user task observation          |
+| UI-G3 Exact hardware       | Physical guidance is unavailable until an exact supported model is selected                 | Family-only and unsupported-model scenarios             |
+| UI-G4 Revision honesty     | Validation and assembly identify stale outputs after design change                          | Graph mutation walkthrough and API revision evidence    |
+| UI-G5 Recovery             | Failed upload, job, save, and render paths preserve user context and offer recovery         | Failure injection walkthrough                           |
+| UI-G6 Semantic parity      | Core inspection/editing tasks work without 3D rendering                                     | WebGL-disabled task completion                          |
+| UI-G7 Accessible operation | Core tasks work by keyboard and expose equivalent structure to assistive technology         | Manual accessibility task record and automated findings |
+| UI-G8 Physical boundary    | Interface does not present validation as a safety certification                             | Copy review and release screen audit                    |
+| UI-G9 User comprehension   | Participants can explain candidate, confirmed, catalog, and rule-check distinctions         | Moderated comprehension evidence                        |
 
 ### 16.2 Traceability
 
-| Product requirement area | UI coverage |
-|---|---|
-| PRD core journey and workflow states | §§4–8 |
-| PRD import, review, ambiguity, and recovery | §§5–6, §8 |
-| PRD desktop workbench and interaction | §§6–7, §13 |
-| PRD progressive explanation and accessibility | §§2, 9–10, 12 |
-| PRD trust, correctness, and safety boundary | §§1, 6, 8, 12, 16 |
-| TRD graph/versioning and API state | §§8, 11 |
-| TRD catalog assets and rendering | §§6, 7, 11 |
-| TRD verification and performance | §§13–16 |
+| Product requirement area                      | UI coverage       |
+| --------------------------------------------- | ----------------- |
+| PRD core journey and workflow states          | §§4–8             |
+| PRD import, review, ambiguity, and recovery   | §§5–6, §8         |
+| PRD desktop workbench and interaction         | §§6–7, §13        |
+| PRD progressive explanation and accessibility | §§2, 9–10, 12     |
+| PRD trust, correctness, and safety boundary   | §§1, 6, 8, 12, 16 |
+| TRD graph/versioning and API state            | §§8, 11           |
+| TRD catalog assets and rendering              | §§6, 7, 11        |
+| TRD verification and performance              | §§13–16           |
 
 ## 17. Open decisions
 
 These decisions require product or engineering evidence before the affected UI is treated as final. Owners should record the resolution in the source document that governs the decision and then update this plan.
 
-| ID | Decision | Needed before | Suggested evidence |
-|---|---|---|---|
-| UX-D1 | Minimum supported desktop viewport and browser matrix | UI-0 completion | Target user device data and browser support policy |
-| UX-D2 | Initial visual brand palette and typography | Token implementation | Brand input and contrast review |
-| UX-D3 | Default workbench panel widths and collapsed behavior | UI-3 implementation | Prototype sessions at laptop and large desktop sizes |
-| UX-D4 | Exact input gestures and keyboard shortcuts for wire editing | UI-3 implementation | Prototype tests with novice and keyboard users |
-| UX-D5 | Which import and processing events are exposed in user copy | UI-1 completion | Backend job states and comprehension test |
-| UX-D6 | Whether users can share/export a project in the first release | Scope freeze | PRD decision and privacy review |
-| UX-D7 | Numeric usability and rendering thresholds | Release candidate | Baseline study and TRD performance evidence |
-| UX-D8 | Final physical pre-power checklist wording | UI-4 completion | Product/hardware review and PRD acceptance criteria |
+| ID    | Decision                                                      | Needed before        | Suggested evidence                                   |
+| ----- | ------------------------------------------------------------- | -------------------- | ---------------------------------------------------- |
+| UX-D1 | Minimum supported desktop viewport and browser matrix         | UI-0 completion      | Target user device data and browser support policy   |
+| UX-D2 | Initial visual brand palette and typography                   | Token implementation | Brand input and contrast review                      |
+| UX-D3 | Default workbench panel widths and collapsed behavior         | UI-3 implementation  | Prototype sessions at laptop and large desktop sizes |
+| UX-D4 | Exact input gestures and keyboard shortcuts for wire editing  | UI-3 implementation  | Prototype tests with novice and keyboard users       |
+| UX-D5 | Which import and processing events are exposed in user copy   | UI-1 completion      | Backend job states and comprehension test            |
+| UX-D6 | Whether users can share/export a project in the first release | Scope freeze         | PRD decision and privacy review                      |
+| UX-D7 | Numeric usability and rendering thresholds                    | Release candidate    | Baseline study and TRD performance evidence          |
+| UX-D8 | Final physical pre-power checklist wording                    | UI-4 completion      | Product/hardware review and PRD acceptance criteria  |
 
 ## Change record
 
-| Version | Date | Change |
-|---|---|---|
-| 1.0 | 13 October 2026 | Initial UI/UX implementation baseline aligned with PRD v1.0 and TRD v1.0 |
+| Version | Date            | Change                                                                   |
+| ------- | --------------- | ------------------------------------------------------------------------ |
+| 1.0     | 13 October 2026 | Initial UI/UX implementation baseline aligned with PRD v1.0 and TRD v1.0 |

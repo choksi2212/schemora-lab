@@ -8,16 +8,16 @@
 
 ## Document control
 
-| Field | Value |
-|---|---|
-| Product | Schemora |
-| Primary user | Beginner or intermediate builder with an existing AI-generated hardware project |
-| Primary outcome | Convert a prior hardware conversation into a clear, reviewable, step-by-step virtual and physical assembly experience |
-| Initial proof | A supported ESP32 development board and LED circuit |
-| Product boundary | The platform interprets and demonstrates supported designs; it does not guarantee arbitrary hardware safety or simulate every physical system |
-| Companion technical document | TRD.md |
-| Companion delivery document | Backend-DB-Implementation-Plan.md |
-| System deployment and scale design | System-Design.md |
+| Field                              | Value                                                                                                                                         |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Product                            | Schemora                                                                                                                                      |
+| Primary user                       | Beginner or intermediate builder with an existing AI-generated hardware project                                                               |
+| Primary outcome                    | Convert a prior hardware conversation into a clear, reviewable, step-by-step virtual and physical assembly experience                         |
+| Initial proof                      | A supported ESP32 development board and LED circuit                                                                                           |
+| Product boundary                   | The platform interprets and demonstrates supported designs; it does not guarantee arbitrary hardware safety or simulate every physical system |
+| Companion technical document       | TRD.md                                                                                                                                        |
+| Companion delivery document        | Backend-DB-Implementation-Plan.md                                                                                                             |
+| System deployment and scale design | System-Design.md                                                                                                                              |
 
 ## Contents
 
@@ -78,30 +78,30 @@ The product therefore has two linked responsibilities: interpretation, which pre
 
 ### 4.1 Product goals
 
-| Goal | Intended user outcome | Evidence of success |
-|---|---|---|
-| G1. Reduce translation effort | The user does not have to manually convert a chat transcript into a pin-by-pin diagram | A beginner can reach the reviewable design from a supported conversation with limited correction |
-| G2. Make assembly actionable | The user can identify both ends of each connection on the exact supported hardware | Users can complete the virtual build and reproduce the supported physical layout |
-| G3. Teach in context | The user understands unfamiliar terms at the moment they encounter them | Usability sessions show successful task completion without prior electronics knowledge |
-| G4. Preserve correctness boundaries | Unsupported and uncertain details are visible and never silently passed | Reference circuits and deliberately faulty circuits produce expected validator states |
-| G5. Build a reusable foundation | New supported components can be added through reviewed data and models | Catalog additions do not require rewriting the core graph and assembly systems |
+| Goal                                | Intended user outcome                                                                  | Evidence of success                                                                              |
+| ----------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| G1. Reduce translation effort       | The user does not have to manually convert a chat transcript into a pin-by-pin diagram | A beginner can reach the reviewable design from a supported conversation with limited correction |
+| G2. Make assembly actionable        | The user can identify both ends of each connection on the exact supported hardware     | Users can complete the virtual build and reproduce the supported physical layout                 |
+| G3. Teach in context                | The user understands unfamiliar terms at the moment they encounter them                | Usability sessions show successful task completion without prior electronics knowledge           |
+| G4. Preserve correctness boundaries | Unsupported and uncertain details are visible and never silently passed                | Reference circuits and deliberately faulty circuits produce expected validator states            |
+| G5. Build a reusable foundation     | New supported components can be added through reviewed data and models                 | Catalog additions do not require rewriting the core graph and assembly systems                   |
 
 ### 4.2 Outcome measures
 
 Targets require a baseline study with representative conversations and novice participants. The team should not set a numerical quality claim before measuring the first reference set.
 
-| Measure | Definition | Baseline / target treatment |
-|---|---|---|
-| Import completion | Share of supported files that reach a readable normalized conversation | Establish baseline by format; set release threshold after a representative fixture set |
-| Extraction correction burden | Number and severity of user corrections before the design is usable | Track per design and per fact type; distinguish wording corrections from electrical corrections |
-| Provenance coverage | Share of extracted design facts linked to a source message or an explicit user assertion | Required for any fact used in assembly guidance |
-| Exact-hardware match | Share of generated physical instructions mapped to an exact reviewed catalog model | No inferred exact model may count as a match |
-| Virtual build completion | Share of usability participants completing a supported reference build | Measure novice and experienced participants separately |
-| Fault detection | Detection rate for supported, deliberately injected faults | Report by fault class; do not imply unmodeled faults are covered |
-| Physical reproduction | Share of participants reproducing the supported circuit from the guide | Observe directly and record assistance required |
-| False confidence | Cases where the product presents unsupported or unknown state as verified | Zero tolerance for known cases; maintain a regression suite |
-| Performance | Workbench load and interaction responsiveness on baseline desktop hardware | Define a baseline machine and thresholds before release candidate |
-| Reliability | Successful save, import, and derived-job completion under expected load | Set service objectives before production launch |
+| Measure                      | Definition                                                                               | Baseline / target treatment                                                                     |
+| ---------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Import completion            | Share of supported files that reach a readable normalized conversation                   | Establish baseline by format; set release threshold after a representative fixture set          |
+| Extraction correction burden | Number and severity of user corrections before the design is usable                      | Track per design and per fact type; distinguish wording corrections from electrical corrections |
+| Provenance coverage          | Share of extracted design facts linked to a source message or an explicit user assertion | Required for any fact used in assembly guidance                                                 |
+| Exact-hardware match         | Share of generated physical instructions mapped to an exact reviewed catalog model       | No inferred exact model may count as a match                                                    |
+| Virtual build completion     | Share of usability participants completing a supported reference build                   | Measure novice and experienced participants separately                                          |
+| Fault detection              | Detection rate for supported, deliberately injected faults                               | Report by fault class; do not imply unmodeled faults are covered                                |
+| Physical reproduction        | Share of participants reproducing the supported circuit from the guide                   | Observe directly and record assistance required                                                 |
+| False confidence             | Cases where the product presents unsupported or unknown state as verified                | Zero tolerance for known cases; maintain a regression suite                                     |
+| Performance                  | Workbench load and interaction responsiveness on baseline desktop hardware               | Define a baseline machine and thresholds before release candidate                               |
+| Reliability                  | Successful save, import, and derived-job completion under expected load                  | Set service objectives before production launch                                                 |
 
 ### 4.3 Non-goals for the initial release
 
@@ -109,19 +109,19 @@ The initial release is not a universal electronics simulator, automatic hardware
 
 ## 5. Users and primary needs
 
-| User | Context | Need | Product response |
-|---|---|---|---|
-| First-time hardware builder | Has an AI conversation and little electronics knowledge | Wants to know exactly what to connect and why | Plain-language review, exact pin highlighting, guided steps, and contextual explanations |
-| Hackathon or project builder | Has a design, code, and parts but needs to assemble quickly | Wants a reliable translation from instructions to a working physical layout | Conversation import, conflict detection, pin-specific workbench, and targeted fault feedback |
-| Experienced maker | Understands electronics but wants a faster way to inspect a design | Wants exact identities, provenance, and validation detail | Compact mode with source links, component facts, graph view, and rule findings |
-| Catalog reviewer | Maintains hardware definitions and evidence | Needs to publish accurate, traceable board and component records | Versioned catalog review and publication workflow |
-| Product support / operator | Helps diagnose processing and account issues | Needs safe status and correlation data without routine access to private source content | User-safe diagnostics and audited privileged access |
+| User                         | Context                                                            | Need                                                                                    | Product response                                                                             |
+| ---------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| First-time hardware builder  | Has an AI conversation and little electronics knowledge            | Wants to know exactly what to connect and why                                           | Plain-language review, exact pin highlighting, guided steps, and contextual explanations     |
+| Hackathon or project builder | Has a design, code, and parts but needs to assemble quickly        | Wants a reliable translation from instructions to a working physical layout             | Conversation import, conflict detection, pin-specific workbench, and targeted fault feedback |
+| Experienced maker            | Understands electronics but wants a faster way to inspect a design | Wants exact identities, provenance, and validation detail                               | Compact mode with source links, component facts, graph view, and rule findings               |
+| Catalog reviewer             | Maintains hardware definitions and evidence                        | Needs to publish accurate, traceable board and component records                        | Versioned catalog review and publication workflow                                            |
+| Product support / operator   | Helps diagnose processing and account issues                       | Needs safe status and correlation data without routine access to private source content | User-safe diagnostics and audited privileged access                                          |
 
 The primary persona is the first-time builder. The product can expose expert detail, but it must not make beginners decode that detail to proceed.
 
 ## 6. Core user journey
 
-~~~mermaid
+```mermaid
 journey
   title Conversation-to-assembly journey
   section Import
@@ -140,7 +140,7 @@ journey
     Review validation and unknowns: 4: Builder
     Follow the physical pre-power checklist: 4: Builder
     Run supported simulation if available: 4: Builder
-~~~
+```
 
 ### 6.1 Import and review
 
@@ -162,16 +162,16 @@ The validation panel reports what was checked, which rule set and hardware facts
 
 The interface must distinguish progress from confidence. Import can be processing, partially readable, ready for review, or failed. A design can be incomplete even when import succeeded. Component identity can be suggested, confirmed, or unsupported. A connection can be extracted, reviewed, checked by a named rule, or unknown. A plan step can be blocked, ready, in progress, completed, skipped, or stale. These states should not be collapsed into one generic green “complete” indicator.
 
-| Screen / state | User question | Information shown | Available action |
-|---|---|---|---|
-| Import setup | What can I upload? | Supported formats, size guidance, privacy summary | Choose file or cancel |
-| Import processing | Is the conversation being read? | Current stage and safe warning, if any | Wait, cancel, or retry when eligible |
-| Conversation review | Did the system preserve the conversation correctly? | Ordered messages, speakers, code blocks, source locators, partial-import warnings | Inspect, remove source, continue |
-| Design review | Did it understand the final project? | Exact board candidate, parts, connections, firmware, conflicts, missing facts | Confirm, correct, reject, or ask for clarification |
-| Hardware selection | Is this the board I own? | Candidate images/labels, model identity, pin-map coverage | Select exact model or mark unsupported |
-| Workbench | Where does this wire go? | Active step, source pin, destination, circuit state, contextual explanation | Place, undo, inspect, or switch to semantic list |
-| Validation review | What has actually been checked? | Findings, evidence, rule-set version, unknowns, stale state | Resolve issue, edit design, or export report |
-| Physical handoff | Can I build this safely? | Project-specific checklist and limits of virtual validation | Confirm checklist or stop and review |
+| Screen / state      | User question                                       | Information shown                                                                 | Available action                                   |
+| ------------------- | --------------------------------------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------- |
+| Import setup        | What can I upload?                                  | Supported formats, size guidance, privacy summary                                 | Choose file or cancel                              |
+| Import processing   | Is the conversation being read?                     | Current stage and safe warning, if any                                            | Wait, cancel, or retry when eligible               |
+| Conversation review | Did the system preserve the conversation correctly? | Ordered messages, speakers, code blocks, source locators, partial-import warnings | Inspect, remove source, continue                   |
+| Design review       | Did it understand the final project?                | Exact board candidate, parts, connections, firmware, conflicts, missing facts     | Confirm, correct, reject, or ask for clarification |
+| Hardware selection  | Is this the board I own?                            | Candidate images/labels, model identity, pin-map coverage                         | Select exact model or mark unsupported             |
+| Workbench           | Where does this wire go?                            | Active step, source pin, destination, circuit state, contextual explanation       | Place, undo, inspect, or switch to semantic list   |
+| Validation review   | What has actually been checked?                     | Findings, evidence, rule-set version, unknowns, stale state                       | Resolve issue, edit design, or export report       |
+| Physical handoff    | Can I build this safely?                            | Project-specific checklist and limits of virtual validation                       | Confirm checklist or stop and review               |
 
 ### 6.5 Ambiguity and recovery behavior
 
@@ -189,18 +189,18 @@ The exact ESP32 board and resistor value must be selected and verified during ca
 
 ### 7.2 Capability release sequence
 
-| Capability | Initial disposition | Gate to broader release |
-|---|---|---|
-| Conversation import | Core | Parser coverage, message order, source locators, privacy and safe archive handling |
-| Structured extraction | Core, review required | Benchmark against varied conversations; every candidate retains provenance |
-| Hardware catalog | Core, deliberately narrow | Electrical and physical facts reviewed; model, pin anchors, source, and license checked |
-| Circuit graph and validator | Core for supported cases | Known-good and fault fixtures; unknown is distinct from pass |
-| 3D workbench | Core | Pin-level interaction correctness and acceptable performance on baseline desktop |
-| Assembly planner | Core | Deterministic steps, dependencies, and verifiable completion predicates |
-| Beginner explanations | Core, curated first | Tested with novice participants and grounded in approved facts |
-| Simulation | Conditional | Integration, commercial terms, supported component coverage, isolation, and repeatable reference results |
-| Photo-based recognition | Later / optional | Measured identification quality, user confirmation, privacy and image-retention controls |
-| Robotics and advanced physics | Later | Dedicated component, mechanical, electrical, and simulation models |
+| Capability                    | Initial disposition       | Gate to broader release                                                                                  |
+| ----------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Conversation import           | Core                      | Parser coverage, message order, source locators, privacy and safe archive handling                       |
+| Structured extraction         | Core, review required     | Benchmark against varied conversations; every candidate retains provenance                               |
+| Hardware catalog              | Core, deliberately narrow | Electrical and physical facts reviewed; model, pin anchors, source, and license checked                  |
+| Circuit graph and validator   | Core for supported cases  | Known-good and fault fixtures; unknown is distinct from pass                                             |
+| 3D workbench                  | Core                      | Pin-level interaction correctness and acceptable performance on baseline desktop                         |
+| Assembly planner              | Core                      | Deterministic steps, dependencies, and verifiable completion predicates                                  |
+| Beginner explanations         | Core, curated first       | Tested with novice participants and grounded in approved facts                                           |
+| Simulation                    | Conditional               | Integration, commercial terms, supported component coverage, isolation, and repeatable reference results |
+| Photo-based recognition       | Later / optional          | Measured identification quality, user confirmation, privacy and image-retention controls                 |
+| Robotics and advanced physics | Later                     | Dedicated component, mechanical, electrical, and simulation models                                       |
 
 ### 7.3 Desktop support
 
@@ -220,30 +220,30 @@ The scenario is successful only when the participant can identify the exact boar
 
 ## 8. Functional requirements
 
-| ID | Requirement | Acceptance condition |
-|---|---|---|
-| PR-001 | The user can import supported conversation files | Unsupported type, size, or malformed content is rejected with a clear reason |
-| PR-002 | Conversation messages retain order and source location | A displayed fact links to the message or source locator from which it was extracted |
-| PR-003 | The system identifies revisions and conflicts | Superseded and contradictory instructions are not merged silently |
-| PR-004 | Extraction returns a typed project candidate | Candidate conforms to schema; invalid references are rejected |
-| PR-005 | The user can review extracted hardware facts | Candidate, confirmed, rejected, unknown, and conflicting states are visually distinct |
-| PR-006 | The user can confirm exact hardware models | Board family alone cannot be treated as an exact supported board |
-| PR-007 | The user can inspect supported components in the workbench | Each terminal maps to a stable catalog identity and physical anchor |
-| PR-008 | The user can create and remove wires through the scene | Every visible wire corresponds to a graph edge; removal updates graph and validation state |
-| PR-009 | Breadboard connections reflect selected board topology | Holes that share a modeled node are treated as electrically connected |
-| PR-010 | The workbench supports undo and redo | Reversal creates a consistent graph state and cannot erase revision history |
-| PR-011 | The system validates supported electrical constraints | Each finding identifies a rule, affected entity, result state, and relevant evidence |
-| PR-012 | Unknown or unsupported conditions remain explicit | An unknown value cannot be defaulted into a passing result |
-| PR-013 | The user can follow ordered assembly instructions | Each step has target components, action, prerequisite, and completion predicate |
-| PR-014 | Step progress reflects the circuit state | User action alone cannot mark a failed predicate complete |
-| PR-015 | The product explains terminology in context | “Why?” help references the selected component, step, or finding |
-| PR-016 | The product supports a physical pre-power checklist | The user sees limits of virtual validation before building the real circuit |
-| PR-017 | Firmware can be associated with a project | Firmware version and source are retained; arbitrary code is not executed in the web process |
-| PR-018 | Simulation is shown only for supported integrations | Unsupported design or unavailable engine is reported accurately |
-| PR-019 | The user can optionally identify physical hardware from photos | Recognition is a candidate and requires exact-model confirmation |
-| PR-020 | The user can save and resume projects | Project state and derived artifacts preserve their version and freshness |
-| PR-021 | The user can delete a project and its associated data | Access is revoked immediately; cleanup status is visible and retryable |
-| PR-022 | The user can export a project guide | Export identifies catalog and design versions and follows access and retention policy |
+| ID     | Requirement                                                    | Acceptance condition                                                                        |
+| ------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| PR-001 | The user can import supported conversation files               | Unsupported type, size, or malformed content is rejected with a clear reason                |
+| PR-002 | Conversation messages retain order and source location         | A displayed fact links to the message or source locator from which it was extracted         |
+| PR-003 | The system identifies revisions and conflicts                  | Superseded and contradictory instructions are not merged silently                           |
+| PR-004 | Extraction returns a typed project candidate                   | Candidate conforms to schema; invalid references are rejected                               |
+| PR-005 | The user can review extracted hardware facts                   | Candidate, confirmed, rejected, unknown, and conflicting states are visually distinct       |
+| PR-006 | The user can confirm exact hardware models                     | Board family alone cannot be treated as an exact supported board                            |
+| PR-007 | The user can inspect supported components in the workbench     | Each terminal maps to a stable catalog identity and physical anchor                         |
+| PR-008 | The user can create and remove wires through the scene         | Every visible wire corresponds to a graph edge; removal updates graph and validation state  |
+| PR-009 | Breadboard connections reflect selected board topology         | Holes that share a modeled node are treated as electrically connected                       |
+| PR-010 | The workbench supports undo and redo                           | Reversal creates a consistent graph state and cannot erase revision history                 |
+| PR-011 | The system validates supported electrical constraints          | Each finding identifies a rule, affected entity, result state, and relevant evidence        |
+| PR-012 | Unknown or unsupported conditions remain explicit              | An unknown value cannot be defaulted into a passing result                                  |
+| PR-013 | The user can follow ordered assembly instructions              | Each step has target components, action, prerequisite, and completion predicate             |
+| PR-014 | Step progress reflects the circuit state                       | User action alone cannot mark a failed predicate complete                                   |
+| PR-015 | The product explains terminology in context                    | “Why?” help references the selected component, step, or finding                             |
+| PR-016 | The product supports a physical pre-power checklist            | The user sees limits of virtual validation before building the real circuit                 |
+| PR-017 | Firmware can be associated with a project                      | Firmware version and source are retained; arbitrary code is not executed in the web process |
+| PR-018 | Simulation is shown only for supported integrations            | Unsupported design or unavailable engine is reported accurately                             |
+| PR-019 | The user can optionally identify physical hardware from photos | Recognition is a candidate and requires exact-model confirmation                            |
+| PR-020 | The user can save and resume projects                          | Project state and derived artifacts preserve their version and freshness                    |
+| PR-021 | The user can delete a project and its associated data          | Access is revoked immediately; cleanup status is visible and retryable                      |
+| PR-022 | The user can export a project guide                            | Export identifies catalog and design versions and follows access and retention policy       |
 
 ## 9. Experience and interaction requirements
 
@@ -271,28 +271,28 @@ The product processes conversations and code that may contain private informatio
 
 The product separates four statements that are often confused:
 
-| State | Meaning |
-|---|---|
-| Extracted | A parser or model proposed this value from source content |
-| User-confirmed | A user accepted or corrected the value |
-| Catalog-verified | A reviewed hardware record supports the fact |
-| Rule-checked | A named deterministic rule evaluated the current design |
+| State            | Meaning                                                   |
+| ---------------- | --------------------------------------------------------- |
+| Extracted        | A parser or model proposed this value from source content |
+| User-confirmed   | A user accepted or corrected the value                    |
+| Catalog-verified | A reviewed hardware record supports the fact              |
+| Rule-checked     | A named deterministic rule evaluated the current design   |
 
 A project can have a mixture of these states. A model confidence score does not equal confirmation. A visually connected wire does not prove electrical validity. A successful simulation does not prove physical safety. Every validation report states the checked scope and the inputs used.
 
 ## 11. Non-functional requirements
 
-| Area | Product requirement |
-|---|---|
-| Correctness | Identical graph, catalog, and rule versions produce deterministic validation outcomes |
-| Performance | Workbench remains usable on the agreed baseline laptop; baseline hardware and numeric budgets are approved before release testing |
-| Reliability | Save failures are visible; accepted user changes are not represented as saved until durable confirmation |
-| Privacy | Conversation text, firmware, and photos are excluded from routine logs and analytics |
-| Security | Every project and nested resource is authorized server-side; uploaded content is isolated |
-| Compatibility | Supported desktop browsers and graphics fallback behavior are published |
-| Maintainability | Catalog and rules can be versioned without embedding hardware facts in rendering code |
-| Portability | Project export includes schema and version references; import revalidates unsupported mappings |
-| Accessibility | Keyboard and semantic alternatives cover the core assembly workflow |
+| Area            | Product requirement                                                                                                               |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Correctness     | Identical graph, catalog, and rule versions produce deterministic validation outcomes                                             |
+| Performance     | Workbench remains usable on the agreed baseline laptop; baseline hardware and numeric budgets are approved before release testing |
+| Reliability     | Save failures are visible; accepted user changes are not represented as saved until durable confirmation                          |
+| Privacy         | Conversation text, firmware, and photos are excluded from routine logs and analytics                                              |
+| Security        | Every project and nested resource is authorized server-side; uploaded content is isolated                                         |
+| Compatibility   | Supported desktop browsers and graphics fallback behavior are published                                                           |
+| Maintainability | Catalog and rules can be versioned without embedding hardware facts in rendering code                                             |
+| Portability     | Project export includes schema and version references; import revalidates unsupported mappings                                    |
+| Accessibility   | Keyboard and semantic alternatives cover the core assembly workflow                                                               |
 
 ## 12. Acceptance strategy and launch gates
 
@@ -302,67 +302,66 @@ A launch candidate must pass the supported conversation-to-assembly scenario and
 
 The usability sample must include people with little or no prior electronics knowledge. The study should observe a supported build without explaining the answer in advance. Researchers record completion, wire errors, outside help, terminology confusion, and whether participants understand the boundary between virtual validation and physical certainty. The sample is not used to claim broad market fit; it tests whether the first workflow is understandable and where it fails.
 
-| Gate | Required evidence |
-|---|---|
-| Product definition | Approved initial board, component set, project scenario, and user study plan |
-| Import | Supported format fixtures, ordering checks, malformed-file behavior, privacy review |
-| Catalog | Exact model, pin anchors, electrical facts, citations, licensing, reviewer approval |
-| Circuit | Graph invariants, breadboard topology fixtures, deterministic rule results |
-| Workbench | Pin selection, wire update, undo/redo, low-performance fallback, accessibility path |
-| Assembly | Stable step sequence, dependencies, completion predicates, novice task observation |
-| Simulation | Licensing and integration proof, repeatable result for named supported circuit |
-| Production | Authorization, migration, backup/restore, deletion, monitoring, and runbooks |
+| Gate               | Required evidence                                                                   |
+| ------------------ | ----------------------------------------------------------------------------------- |
+| Product definition | Approved initial board, component set, project scenario, and user study plan        |
+| Import             | Supported format fixtures, ordering checks, malformed-file behavior, privacy review |
+| Catalog            | Exact model, pin anchors, electrical facts, citations, licensing, reviewer approval |
+| Circuit            | Graph invariants, breadboard topology fixtures, deterministic rule results          |
+| Workbench          | Pin selection, wire update, undo/redo, low-performance fallback, accessibility path |
+| Assembly           | Stable step sequence, dependencies, completion predicates, novice task observation  |
+| Simulation         | Licensing and integration proof, repeatable result for named supported circuit      |
+| Production         | Authorization, migration, backup/restore, deletion, monitoring, and runbooks        |
 
 ## 13. Risks, assumptions, and decisions
 
-| Item | Type | Current position | Closure evidence |
-|---|---|---|---|
-| Conversation exports vary by source and version | Risk | Use format-specific adapters and preserve source only under retention policy | Parser fixture coverage and safe failure behavior |
-| Board names are ambiguous | Risk | Require exact catalog model before pin-accurate assembly | Catalog review and confirmation UX |
-| Prior AI responses may be wrong or contradictory | Risk | Extraction proposes candidates; deterministic rules and user review control acceptance | Benchmark and conflict-resolution tests |
-| Breadboard layouts vary | Risk | Model exact supported topology | Physical reference and connectivity tests |
-| Simulation provider terms may restrict integration | Decision | Do not assume API access or commercial rights | Written terms and technical proof |
-| Vision can confuse similar boards | Risk | Photo match remains candidate until confirmed | Measured benchmark and error analysis |
-| Desktop WebGL performance varies | Risk | Provide semantic fallback and benchmark baseline devices | Performance and context-loss tests |
-| Exact first board and parts | Decision | Select from source-supported scenario before catalog publication | Product and hardware-owner approval |
-| Account and sharing model | Decision | Account persistence is required before production; sharing scope needs product decision | Approved authorization policy |
-| Quantitative product targets | Decision | Establish baseline before setting claims | Usability and reliability measurement |
+| Item                                               | Type     | Current position                                                                        | Closure evidence                                  |
+| -------------------------------------------------- | -------- | --------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| Conversation exports vary by source and version    | Risk     | Use format-specific adapters and preserve source only under retention policy            | Parser fixture coverage and safe failure behavior |
+| Board names are ambiguous                          | Risk     | Require exact catalog model before pin-accurate assembly                                | Catalog review and confirmation UX                |
+| Prior AI responses may be wrong or contradictory   | Risk     | Extraction proposes candidates; deterministic rules and user review control acceptance  | Benchmark and conflict-resolution tests           |
+| Breadboard layouts vary                            | Risk     | Model exact supported topology                                                          | Physical reference and connectivity tests         |
+| Simulation provider terms may restrict integration | Decision | Do not assume API access or commercial rights                                           | Written terms and technical proof                 |
+| Vision can confuse similar boards                  | Risk     | Photo match remains candidate until confirmed                                           | Measured benchmark and error analysis             |
+| Desktop WebGL performance varies                   | Risk     | Provide semantic fallback and benchmark baseline devices                                | Performance and context-loss tests                |
+| Exact first board and parts                        | Decision | Select from source-supported scenario before catalog publication                        | Product and hardware-owner approval               |
+| Account and sharing model                          | Decision | Account persistence is required before production; sharing scope needs product decision | Approved authorization policy                     |
+| Quantitative product targets                       | Decision | Establish baseline before setting claims                                                | Usability and reliability measurement             |
 
 ## 14. Product roadmap
 
-| Phase | Outcome | Dependency / exit |
-|---|---|---|
-| 1. Conversation intelligence | Supported conversation becomes a sourced, reviewable design candidate | Parser coverage and extraction benchmark |
-| 2. Hardware knowledge and validation | Supported facts, board pins, breadboard topology, and deterministic rules | Reviewed catalog and golden circuit fixtures |
-| 3. Interactive workbench | Users place supported components and connect exact terminals | Semantic anchors and graph synchronization |
-| 4. Assembly generation | Verified design becomes ordered visual actions | Dependency graph and completion predicates |
-| 5. Beginner teaching | Explanations match current parts and steps | Curated knowledge and novice usability evidence |
-| 6. Firmware and simulation | Supported firmware produces real simulator output | Provider licensing, isolation, and repeatable integration |
-| 7. Photo recognition | User photographs assist component matching | Benchmark, consent, and exact-model confirmation |
-| 8. Debugging and verification | Known virtual wiring faults produce actionable correction | Rule coverage and fault fixtures |
-| 9. Hardware expansion | New component families become available | Family-specific model, rules, tests, and support boundary |
-| 10. Production and launch | Reliable service with persistence, support, and recovery | Release scorecard and operational sign-off |
+| Phase                                | Outcome                                                                   | Dependency / exit                                         |
+| ------------------------------------ | ------------------------------------------------------------------------- | --------------------------------------------------------- |
+| 1. Conversation intelligence         | Supported conversation becomes a sourced, reviewable design candidate     | Parser coverage and extraction benchmark                  |
+| 2. Hardware knowledge and validation | Supported facts, board pins, breadboard topology, and deterministic rules | Reviewed catalog and golden circuit fixtures              |
+| 3. Interactive workbench             | Users place supported components and connect exact terminals              | Semantic anchors and graph synchronization                |
+| 4. Assembly generation               | Verified design becomes ordered visual actions                            | Dependency graph and completion predicates                |
+| 5. Beginner teaching                 | Explanations match current parts and steps                                | Curated knowledge and novice usability evidence           |
+| 6. Firmware and simulation           | Supported firmware produces real simulator output                         | Provider licensing, isolation, and repeatable integration |
+| 7. Photo recognition                 | User photographs assist component matching                                | Benchmark, consent, and exact-model confirmation          |
+| 8. Debugging and verification        | Known virtual wiring faults produce actionable correction                 | Rule coverage and fault fixtures                          |
+| 9. Hardware expansion                | New component families become available                                   | Family-specific model, rules, tests, and support boundary |
+| 10. Production and launch            | Reliable service with persistence, support, and recovery                  | Release scorecard and operational sign-off                |
 
 ## 15. Traceability and terminology
 
-| Term | Product meaning |
-|---|---|
-| Conversation | Imported source material containing discussion, code, or design instructions |
-| Design candidate | Structured interpretation awaiting required review |
-| Confirmed fact | A value accepted through user action or approved deterministic process |
-| Catalog release | Immutable reviewed hardware data version |
-| Component instance | One placed occurrence of a catalog component in a project |
-| Terminal | A semantic electrical endpoint on a component |
-| Graph edge | A connection represented in the circuit model |
-| Net | A derived set of electrically connected terminals |
-| Assembly step | A typed action with targets, prerequisites, and completion condition |
-| Validation finding | Result of a named rule against versioned inputs |
-| Unknown | A deliberate state meaning the system lacks sufficient evidence |
-| Unsupported | A condition outside the currently modeled product capability |
+| Term               | Product meaning                                                              |
+| ------------------ | ---------------------------------------------------------------------------- |
+| Conversation       | Imported source material containing discussion, code, or design instructions |
+| Design candidate   | Structured interpretation awaiting required review                           |
+| Confirmed fact     | A value accepted through user action or approved deterministic process       |
+| Catalog release    | Immutable reviewed hardware data version                                     |
+| Component instance | One placed occurrence of a catalog component in a project                    |
+| Terminal           | A semantic electrical endpoint on a component                                |
+| Graph edge         | A connection represented in the circuit model                                |
+| Net                | A derived set of electrically connected terminals                            |
+| Assembly step      | A typed action with targets, prerequisites, and completion condition         |
+| Validation finding | Result of a named rule against versioned inputs                              |
+| Unknown            | A deliberate state meaning the system lacks sufficient evidence              |
+| Unsupported        | A condition outside the currently modeled product capability                 |
 
 Product requirements use identifiers PR-001 through PR-022 in the functional requirements table. Technical controls and implementation tasks are linked in TRD.md and Backend-DB-Implementation-Plan.md. IDs are stable; wording may be clarified through document change control.
 
 ## 16. Product approval record
 
 Approval should identify the exact document version and supported initial project scenario. Any change to the primary workflow, exact hardware scope, simulation promise, or physical-safety claim requires product review. Until those decisions are approved, the MVP remains the narrow conversation-to-ESP32-LED assembly proof described above.
-
