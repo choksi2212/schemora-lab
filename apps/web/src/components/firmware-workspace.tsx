@@ -390,6 +390,49 @@ export function FirmwareWorkspace({
         </div>
         <span className="status-chip">{artifacts.length} versions</span>
       </div>
+      <section className={styles.coveragePanel} aria-labelledby="simulation-coverage-title">
+        <div>
+          <h3 id="simulation-coverage-title">Simulation coverage and limits</h3>
+          <p className="fine-text">
+            Coverage describes what this product can currently establish. It is separate from
+            circuit validation and does not imply electrical safety.
+          </p>
+        </div>
+        <dl className={styles.coverageGrid}>
+          <div>
+            <dt>Simulated behavior</dt>
+            <dd>
+              {run?.status === 'completed'
+                ? 'This stored run completed. Review its bound events and limitations below.'
+                : 'None available. The worker reports SIMULATOR_UNAVAILABLE; queued or unavailable records are not simulation evidence.'}
+            </dd>
+          </div>
+          <div>
+            <dt>Visual-only behavior</dt>
+            <dd>
+              The 3D workbench displays circuit components and layout. Rendering does not establish
+              electrical behavior or physical fit.
+            </dd>
+          </div>
+          <div>
+            <dt>Unsupported behavior</dt>
+            <dd>
+              No product simulation provider is approved or configured. Unsupported boards,
+              components, or topologies must fail closed instead of being reported as simulated.
+              {run?.unsupportedFeatures.length
+                ? ` Current run: ${run.unsupportedFeatures.join(' ')}`
+                : ''}
+            </dd>
+          </div>
+          <div>
+            <dt>Unmodeled behavior</dt>
+            <dd>
+              Electrical validation does not establish GPIO current budget, thermal margin,
+              transient response, or other omitted physical behavior.
+            </dd>
+          </div>
+        </dl>
+      </section>
       {graphDirty && (
         <p className="warning-notice" role="status">
           Save circuit edits before attaching firmware. Existing source bindings remain tied to
