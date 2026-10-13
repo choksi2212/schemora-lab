@@ -67,7 +67,7 @@ The initial `mapEsp32Gpio19ToLedState` adapter derives electrical nets from the 
 
 ### Immutable firmware reference
 
-`firmwareArtifactRefSchema` accepts only an immutable artifact reference: project/revision, SHA-256, bounded byte length, language, entry point, exact catalog board ID, and accepted review state. It carries no source text, URL, storage key, token, or executable payload. The package does not create or store such artifacts; that remains follow-up work.
+`firmwareArtifactRefSchema` accepts only an immutable artifact reference: project/revision, SHA-256, bounded byte length, language, entry point, exact catalog board ID, and accepted review state. It carries no source text, URL, storage key, token, or executable payload. Artifact creation and persistence are handled by the API and persistence layers; `packages/simulation` validates only the immutable reference.
 
 ### Bound run identity
 
