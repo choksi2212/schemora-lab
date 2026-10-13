@@ -155,6 +155,35 @@ describe('circuit model', () => {
     ).toBeDefined();
   });
 
+  it('validates a bounded, versioned visual layout independently of connectivity', () => {
+    const arranged: CircuitGraph = {
+      ...graph,
+      visualLayout: {
+        schemaVersion: 1,
+        componentPlacements: [
+          { componentInstanceId: 'board_1', x: 0, z: 0.5, rotationY: 0 },
+          { componentInstanceId: 'led_1', x: 1.25, z: -0.25, rotationY: 90 },
+        ],
+      },
+    };
+    expect(validateCircuitGraph(arranged, catalog)).toEqual({ valid: true, issues: [] });
+    expect(
+      validateCircuitGraph(
+        {
+          ...arranged,
+          visualLayout: {
+            schemaVersion: 1,
+            componentPlacements: [
+              { componentInstanceId: 'missing', x: 0, z: 0, rotationY: 0 },
+              { componentInstanceId: 'led_1', x: 0, z: 0, rotationY: 45 },
+            ],
+          },
+        },
+        catalog,
+      ).valid,
+    ).toBe(false);
+  });
+
   it('honors separate five-hole columns and continuous named rail groups', () => {
     const railGraph: CircuitGraph = {
       ...graph,

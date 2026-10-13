@@ -138,7 +138,7 @@ The graph schema version is `1`. A graph names a project, the project revision a
 }
 ```
 
-This is a contract example, not a complete electrically connected circuit. Production requests must include each required rail group variant from the pinned topology. The complete Zod schema rejects undeclared fields, malformed IDs, unsupported graph schema versions, impossible revisions, and oversized arrays. The graph validator additionally rejects duplicate IDs, missing catalog parts or terminals, unsupported topology/version pairs, unknown holes, duplicate terminal placements, occupied wire holes, invalid rail selections, and endpoint references to unknown components or breadboards.
+This is a contract example, not a complete electrically connected circuit. Production requests must include each required rail group variant from the pinned topology. The complete Zod schema rejects undeclared fields, malformed IDs, unsupported graph schema versions, impossible revisions, and oversized arrays. The graph validator additionally rejects duplicate IDs, missing catalog parts or terminals, unsupported topology/version pairs, unknown holes, duplicate terminal placements, occupied wire holes, invalid rail selections, and endpoint references to unknown components or breadboards. The optional Phase 3 `visualLayout` field stores bounded presentation-only X/Z positions and quarter-turn rotations; it does not participate in connectivity or electrical findings.
 
 ### 4.1 Net derivation
 
@@ -177,7 +177,7 @@ The ruleset does not calculate current, voltage drop, power, resistor derating, 
 
 ## 6. API and persistence
 
-All routes are behind the existing authenticated API and project-ownership checks. The web BFF only allows the catalog listing/detail GET operations as catalog reads; it does not expose arbitrary API paths.
+All routes are behind the existing authenticated API and project-ownership checks. The web BFF forwards only explicit catalog and project operations, including graph writes through `PUT`; it does not expose arbitrary API paths.
 
 | Method and path                                  | Purpose                                                        | Revision/idempotency behavior                                                                                                                      |
 | ------------------------------------------------ | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -196,7 +196,7 @@ Graph save locks the owner-scoped project, replays an identical idempotency requ
 
 The `/catalog` route provides search and category filters for exact board/component records, a detail panel, source citations/claim locators, warnings and limitations, board pin index, release identity/digest, and a visual representation of the BB400 internal connectivity. Exact model details are explicitly distinguished from user-owned hardware identification. The UI does not display a green “safe” state.
 
-The `/projects/:projectId/circuit` route reads the saved graph and latest report, offers catalog terminal selectors and optional BB400 hole placement, handles optimistic revision conflicts, and renders rule findings with sources and current/stale state. It displays a scope warning before a user runs rules. The starter configuration is a semantic graph editor and intentionally contains no 3D geometry, arbitrary component authoring, firmware, or analog simulation. Three-dimensional manipulation is a later product phase and is not required to render or validate a semantic circuit graph.
+The `/projects/:projectId/circuit` route reads the saved graph and latest report, offers catalog terminal selectors and optional BB400 hole placement, handles optimistic revision conflicts, and renders rule findings with sources and current/stale state. It displays a scope warning before a user runs rules. The Phase 3 3D workbench adds graph wire and illustrative layout controls over this semantic editor; it does not add arbitrary component authoring, firmware execution, or analog simulation.
 
 ## 8. Security and operational behavior
 

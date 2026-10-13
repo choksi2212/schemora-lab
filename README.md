@@ -20,7 +20,7 @@ See [Phase 2 implementation details and limits](docs/Phase-2-Implementation.md) 
 
 ## Phase 3 — Interactive 3D workbench (in progress)
 
-The circuit workspace now renders the saved graph in a browser 3D scene with camera orbit, zoom, and reset controls. Users can add a wire by choosing two exact terminals in the scene or its accessible terminal list, and remove wires in the scene or semantic list. The existing editor remains available for optional breadboard-hole assignments. Geometry is illustrative and is not dimension-accurate CAD, a physical-fit guarantee, or electrical validation. Firmware simulation and photo recognition remain later, separately gated work.
+The circuit workspace now renders the saved graph in a browser 3D scene with camera orbit, zoom, and reset controls. Users can move and rotate selected components, add a wire by choosing two exact terminals, remove wires, and undo or redo edits before saving. Component poses are stored in a bounded visual-layout contract separate from electrical connectivity. The existing editor remains available for optional breadboard-hole assignments. Geometry is illustrative and is not dimension-accurate CAD, a physical-fit guarantee, or electrical validation. Firmware simulation and photo recognition remain later, separately gated work.
 
 See [Phase 3 implementation status and remaining work](docs/Phase-3-Implementation.md).
 

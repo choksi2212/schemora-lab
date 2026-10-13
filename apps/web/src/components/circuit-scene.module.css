@@ -58,6 +58,12 @@
   color: #245b71;
   font-weight: 600;
 }
+.arrangeButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
 .editTools ul,
 .wireList {
   display: flex;

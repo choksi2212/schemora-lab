@@ -4,6 +4,8 @@ export {
   holeRefSchema,
   terminalRefSchema,
   wireEdgeSchema,
+  visualComponentPlacementSchema,
+  visualLayoutSchema,
 } from './schema.js';
 export type {
   BreadboardInstance,
@@ -15,6 +17,8 @@ export type {
   TerminalToHolePlacement,
   WireEdge,
   WireEndpoint,
+  VisualComponentPlacement,
+  VisualLayout,
 } from './schema.js';
 export type { BreadboardTopology } from '@schemora/catalog';
 export { deriveNets, validateCircuitGraph } from './graph.js';

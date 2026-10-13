@@ -141,6 +141,16 @@ test('connects exact terminals in the 3D workbench and persists graph edits', as
   await expect(page.getByRole('heading', { name: 'Circuit workbench 3D view' })).toBeVisible();
   await expect(page.getByRole('region', { name: /Illustrative circuit workbench/ })).toBeVisible();
 
+  const arrangeList = page.getByRole('list', { name: 'Components to arrange' });
+  await arrangeList.getByRole('button', { name: 'YAGEO 220 Ω resistor' }).click();
+  await expect(page.getByText(/X 0 · Z 0.12 · rotation 0°/)).toBeVisible();
+  await page.getByRole('button', { name: 'Move right' }).click();
+  await expect(page.getByText(/X 0.25 · Z 0.12 · rotation 0°/)).toBeVisible();
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(page.getByText(/X 0 · Z 0.12 · rotation 0°/)).toBeVisible();
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await expect(page.getByText(/X 0.25 · Z 0.12 · rotation 0°/)).toBeVisible();
+
   await page.getByRole('button', { name: /ESP32-DevKitC V4.*GPIO19/ }).click();
   await page.getByRole('button', { name: /YAGEO 220 Ω resistor: Lead B/ }).click();
   await expect(
@@ -158,6 +168,11 @@ test('connects exact terminals in the 3D workbench and persists graph edits', as
   await expect(page.getByRole('status').filter({ hasText: 'Circuit saved.' })).toBeVisible();
   await page.reload();
   await expect(page.getByText('4 graph wires')).toBeVisible();
+  await page
+    .getByRole('list', { name: 'Components to arrange' })
+    .getByRole('button', { name: 'YAGEO 220 Ω resistor' })
+    .click();
+  await expect(page.getByText(/X 0.25 · Z 0.12 · rotation 0°/)).toBeVisible();
 
   await page.getByRole('button', { name: 'Remove wire 4' }).click();
   await expect(page.getByText('3 graph wires')).toBeVisible();

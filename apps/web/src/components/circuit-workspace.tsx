@@ -2,7 +2,17 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Cable, CircleHelp, RefreshCw, Save, ShieldAlert, Zap } from 'lucide-react';
+import {
+  ArrowLeft,
+  Cable,
+  CircleHelp,
+  Redo2,
+  RefreshCw,
+  Save,
+  ShieldAlert,
+  Undo2,
+  Zap,
+} from 'lucide-react';
 import { api, friendlyError, type Project } from '@/lib/api';
 import { CircuitScene } from './circuit-scene';
 import styles from './circuit-workspace.module.css';
@@ -54,6 +64,15 @@ type Graph = {
     hole: { breadboardInstanceId: string; holeId: string };
   }[];
   wires: { id: string; source: Endpoint; target: Endpoint }[];
+  visualLayout?: {
+    schemaVersion: 1;
+    componentPlacements: {
+      componentInstanceId: string;
+      x: number;
+      z: number;
+      rotationY: number;
+    }[];
+  };
 };
 type Finding = {
   ruleId: string;
@@ -141,6 +160,8 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [dirty, setDirty] = useState(false);
+  const [undoStack, setUndoStack] = useState<Graph[]>([]);
+  const [redoStack, setRedoStack] = useState<Graph[]>([]);
   const load = useCallback(async () => {
     setError('');
     try {
@@ -161,6 +182,8 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
       setGraph(
         saved.graphSnapshot?.graph ?? starterGraph(projectId, p.project.revision, c.release),
       );
+      setUndoStack([]);
+      setRedoStack([]);
       setDirty(!saved.graphSnapshot);
       setReport(validation.report?.report ?? null);
       setIsCurrent(validation.current !== false);
@@ -187,11 +210,35 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
     [graph, partMap],
   );
   function edit(next: Graph) {
+    if (graph) setUndoStack((history) => [...history.slice(-49), graph]);
+    setRedoStack([]);
     setGraph(next);
     setDirty(true);
     setReport(null);
     setIsCurrent(false);
     setMessage('');
+  }
+  function undo() {
+    if (!graph || undoStack.length === 0) return;
+    const previous = undoStack.at(-1)!;
+    setUndoStack((history) => history.slice(0, -1));
+    setRedoStack((history) => [...history, graph]);
+    setGraph(previous);
+    setDirty(true);
+    setReport(null);
+    setIsCurrent(false);
+    setMessage('Last circuit edit undone. Save to record this revision.');
+  }
+  function redo() {
+    if (!graph || redoStack.length === 0) return;
+    const next = redoStack.at(-1)!;
+    setRedoStack((history) => history.slice(0, -1));
+    setUndoStack((history) => [...history, graph]);
+    setGraph(next);
+    setDirty(true);
+    setReport(null);
+    setIsCurrent(false);
+    setMessage('Circuit edit restored. Save to record this revision.');
   }
   function refresh() {
     if (
@@ -296,6 +343,12 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
           </p>
         </div>
         <div className="workspace-actions">
+          <button className="button secondary" onClick={undo} disabled={busy || !undoStack.length}>
+            <Undo2 size={15} /> Undo
+          </button>
+          <button className="button secondary" onClick={redo} disabled={busy || !redoStack.length}>
+            <Redo2 size={15} /> Redo
+          </button>
           <button className="button secondary" onClick={refresh} disabled={busy}>
             <RefreshCw size={15} />
             {dirty ? 'Discard edits & refresh' : 'Refresh'}

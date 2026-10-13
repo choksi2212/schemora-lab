@@ -37,6 +37,15 @@ export type CircuitWorkbenchGraph = {
     hole: { breadboardInstanceId: string; holeId: string };
   }[];
   wires: { id: string; source: Endpoint; target: Endpoint }[];
+  visualLayout?: {
+    schemaVersion: 1;
+    componentPlacements: {
+      componentInstanceId: string;
+      x: number;
+      z: number;
+      rotationY: number;
+    }[];
+  };
 };
 
 type TerminalRef = { componentInstanceId: string; catalogTerminalId: string };
@@ -47,6 +56,7 @@ type Props = {
   title?: string;
 };
 type Vec3 = [number, number, number];
+type VisualPose = { x: number; z: number; rotationY: number };
 
 const partNames: Record<string, string> = {
   'board.espressif.esp32-devkitc-v4.wroom-32e.male': 'ESP32-DevKitC V4 · WROOM-32E',
@@ -63,6 +73,21 @@ const terminalNames: Record<string, Record<string, string>> = {
   'resistor.yageo.cfr-25jb-52-220r': { 'lead-a': 'Lead A', 'lead-b': 'Lead B' },
   'led.kingbright.wp7113id': { anode: 'Anode', cathode: 'Cathode' },
 };
+
+function poseFor(
+  graph: CircuitWorkbenchGraph,
+  componentId: string,
+  catalogPartId: string,
+): VisualPose {
+  const saved = graph.visualLayout?.componentPlacements.find(
+    (placement) => placement.componentInstanceId === componentId,
+  );
+  if (saved) return saved;
+  if (catalogPartId.includes('esp32-devkitc')) return { x: 0, z: 0.63, rotationY: 0 };
+  if (catalogPartId.includes('resistor')) return { x: 0, z: 0.12, rotationY: 0 };
+  if (catalogPartId.includes('led')) return { x: 0.95, z: -0.05, rotationY: 0 };
+  return { x: 0, z: 0, rotationY: 0 };
+}
 
 function isWebGLAvailable() {
   try {
@@ -118,18 +143,28 @@ function pointForHole(holeId: string): Vec3 | null {
 function terminalPoint(partId: string, terminalId: string): Vec3 | null {
   if (partId.includes('esp32-devkitc')) {
     const anchors: Record<string, Vec3> = {
-      gpio19: [-0.63, 0.38, 0.936],
-      'gnd-j3-1': [-0.63, 0.38, 0.32],
-      'gnd-j3-7': [-0.63, 0.38, 0.848],
-      '3v3-j2-1': [0.63, 0.38, 0.32],
+      gpio19: [-0.63, 0.38, 0.306],
+      'gnd-j3-1': [-0.63, 0.38, -0.31],
+      'gnd-j3-7': [-0.63, 0.38, 0.218],
+      '3v3-j2-1': [0.63, 0.38, -0.31],
     };
     return anchors[terminalId] ?? null;
   }
   if (partId.includes('resistor'))
-    return terminalId === 'lead-a' ? [-0.48, 0.36, 0.12] : [0.48, 0.36, 0.12];
-  if (partId.includes('led'))
-    return terminalId === 'anode' ? [0.88, 0.39, -0.05] : [1.02, 0.39, -0.05];
+    return terminalId === 'lead-a' ? [-0.48, 0.36, 0] : [0.48, 0.36, 0];
+  if (partId.includes('led')) return terminalId === 'anode' ? [-0.07, 0.39, 0] : [0.07, 0.39, 0];
   return null;
+}
+
+function transformPoint(point: Vec3, pose: VisualPose): Vec3 {
+  const angle = (pose.rotationY * Math.PI) / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return [
+    pose.x + point[0] * cos + point[2] * sin,
+    point[1],
+    pose.z - point[0] * sin + point[2] * cos,
+  ];
 }
 
 function endpointPoint(
@@ -145,7 +180,11 @@ function endpointPoint(
       entry.terminal.catalogTerminalId === ref.catalogTerminalId,
   );
   if (placement) return pointForHole(placement.hole.holeId);
-  return terminalPoint(partById.get(ref.componentInstanceId) ?? '', ref.catalogTerminalId);
+  const catalogPartId = partById.get(ref.componentInstanceId) ?? '';
+  const point = terminalPoint(catalogPartId, ref.catalogTerminalId);
+  return point
+    ? transformPoint(point, poseFor(graph, ref.componentInstanceId, catalogPartId))
+    : null;
 }
 
 function Wire({
@@ -239,11 +278,13 @@ function BoardScene({
   selected,
   onSelect,
   onRemoveWire,
+  onSelectComponent,
 }: {
   graph: CircuitWorkbenchGraph;
   selected: TerminalRef | null;
   onSelect: (terminal: TerminalRef) => void;
   onRemoveWire: (wireId: string) => void;
+  onSelectComponent: (componentId: string) => void;
 }) {
   const parts = useMemo(
     () => new Map(graph.components.map((entry) => [entry.id, entry.catalogPartId])),
@@ -298,9 +339,20 @@ function BoardScene({
           <boxGeometry args={[7.8, 0.015, 0.08]} />
           <meshStandardMaterial color="#d0d9dd" />
         </mesh>
-        {graph.components.map((component) =>
-          component.catalogPartId.includes('esp32-devkitc') ? (
-            <group key={component.id} position={[0, 0.34, 0.63]}>
+        {graph.components.map((component) => {
+          const pose = poseFor(graph, component.id, component.catalogPartId);
+          const rotation: [number, number, number] = [0, (pose.rotationY * Math.PI) / 180, 0];
+          const selectPart = (event: { stopPropagation: () => void }) => {
+            event.stopPropagation();
+            onSelectComponent(component.id);
+          };
+          return component.catalogPartId.includes('esp32-devkitc') ? (
+            <group
+              key={component.id}
+              position={[pose.x, 0.34, pose.z]}
+              rotation={rotation}
+              onClick={selectPart}
+            >
               <mesh castShadow>
                 <boxGeometry args={[1.65, 0.12, 0.8]} />
                 <meshStandardMaterial color="#136a6b" roughness={0.48} />
@@ -323,7 +375,12 @@ function BoardScene({
               </mesh>
             </group>
           ) : component.catalogPartId.includes('resistor') ? (
-            <group key={component.id} position={[0, 0.36, 0.12]}>
+            <group
+              key={component.id}
+              position={[pose.x, 0.36, pose.z]}
+              rotation={rotation}
+              onClick={selectPart}
+            >
               <mesh rotation={[0, 0, Math.PI / 2]}>
                 <cylinderGeometry args={[0.09, 0.09, 0.6, 16]} />
                 <meshStandardMaterial color="#c9a775" />
@@ -342,7 +399,12 @@ function BoardScene({
               ))}
             </group>
           ) : component.catalogPartId.includes('led') ? (
-            <group key={component.id} position={[0.95, 0.39, -0.05]}>
+            <group
+              key={component.id}
+              position={[pose.x, 0.39, pose.z]}
+              rotation={rotation}
+              onClick={selectPart}
+            >
               <mesh>
                 <sphereGeometry args={[0.13, 20, 16]} />
                 <meshStandardMaterial color="#d3423c" roughness={0.22} metalness={0.04} />
@@ -354,8 +416,8 @@ function BoardScene({
                 </mesh>
               ))}
             </group>
-          ) : null,
-        )}
+          ) : null;
+        })}
         {graph.components.flatMap((component) => {
           const supported = terminalNames[component.catalogPartId];
           if (!supported) return [];
@@ -440,6 +502,7 @@ export function CircuitScene({
   const [webgl, setWebgl] = useState<boolean | null>(null);
   const [resetKey, setResetKey] = useState(0);
   const [selected, setSelected] = useState<TerminalRef | null>(null);
+  const [selectedComponentId, setSelectedComponentId] = useState<string | null>(null);
   const [editMessage, setEditMessage] = useState('Choose a terminal to start a wire.');
   useEffect(() => {
     setWebgl(isWebGLAvailable());
@@ -455,6 +518,12 @@ export function CircuitScene({
       part: partNames[component.catalogPartId] ?? component.catalogPartId,
     })),
   );
+  const arrangedComponent = graph.components.find(
+    (component) => component.id === selectedComponentId,
+  );
+  const arrangedPose = arrangedComponent
+    ? poseFor(graph, arrangedComponent.id, arrangedComponent.catalogPartId)
+    : null;
   function selectTerminal(terminal: TerminalRef) {
     if (!selected) {
       setSelected(terminal);
@@ -507,6 +576,33 @@ export function CircuitScene({
     onGraphChange({ ...graph, wires: graph.wires.filter((wire) => wire.id !== wireId) });
     setEditMessage('Wire removed.');
   }
+  function moveSelectedComponent(dx: number, dz: number, rotationDelta = 0) {
+    if (!selectedComponentId) return;
+    const component = graph.components.find((item) => item.id === selectedComponentId);
+    if (!component) return;
+    const pose = poseFor(graph, component.id, component.catalogPartId);
+    const placements = graph.visualLayout?.componentPlacements ?? [];
+    const rotationY = (pose.rotationY + rotationDelta + 360) % 360;
+    const nextPlacement = {
+      componentInstanceId: component.id,
+      x: dx === 0 ? pose.x : Math.max(-4.5, Math.min(4.5, Math.round((pose.x + dx) * 4) / 4)),
+      z: dz === 0 ? pose.z : Math.max(-3, Math.min(3, Math.round((pose.z + dz) * 4) / 4)),
+      rotationY,
+    };
+    onGraphChange({
+      ...graph,
+      visualLayout: {
+        schemaVersion: 1,
+        componentPlacements: [
+          ...placements.filter((item) => item.componentInstanceId !== component.id),
+          nextPlacement,
+        ],
+      },
+    });
+    setEditMessage(
+      `${partNames[component.catalogPartId] ?? component.catalogPartId} moved in the illustrative scene.`,
+    );
+  }
   return (
     <section className={`${styles.root} ${className ?? ''}`} aria-labelledby="cw3d-title">
       <header className={styles.header}>
@@ -550,6 +646,74 @@ export function CircuitScene({
             );
           })}
         </ul>
+        <h3>Arrange components</h3>
+        <p>
+          Select a component, then move it by one workbench grid step or rotate it by 90 degrees.
+        </p>
+        <ul aria-label="Components to arrange">
+          {graph.components.map((component) => (
+            <li key={`arrange-${component.id}`}>
+              <button
+                type="button"
+                aria-pressed={selectedComponentId === component.id}
+                onClick={() => setSelectedComponentId(component.id)}
+              >
+                {partNames[component.catalogPartId] ?? component.catalogPartId}
+              </button>
+            </li>
+          ))}
+        </ul>
+        {arrangedComponent && arrangedPose && (
+          <p className={styles.editStatus}>
+            Selected:{' '}
+            {partNames[arrangedComponent.catalogPartId] ?? arrangedComponent.catalogPartId} · X{' '}
+            {arrangedPose.x} · Z {arrangedPose.z} · rotation {arrangedPose.rotationY}°
+          </p>
+        )}
+        <div className={styles.arrangeButtons} aria-label="Move or rotate selected component">
+          <button
+            type="button"
+            disabled={!selectedComponentId}
+            onClick={() => moveSelectedComponent(-0.25, 0)}
+          >
+            Move left
+          </button>
+          <button
+            type="button"
+            disabled={!selectedComponentId}
+            onClick={() => moveSelectedComponent(0.25, 0)}
+          >
+            Move right
+          </button>
+          <button
+            type="button"
+            disabled={!selectedComponentId}
+            onClick={() => moveSelectedComponent(0, -0.25)}
+          >
+            Move forward
+          </button>
+          <button
+            type="button"
+            disabled={!selectedComponentId}
+            onClick={() => moveSelectedComponent(0, 0.25)}
+          >
+            Move backward
+          </button>
+          <button
+            type="button"
+            disabled={!selectedComponentId}
+            onClick={() => moveSelectedComponent(0, 0, -90)}
+          >
+            Rotate left
+          </button>
+          <button
+            type="button"
+            disabled={!selectedComponentId}
+            onClick={() => moveSelectedComponent(0, 0, 90)}
+          >
+            Rotate right
+          </button>
+        </div>
       </div>
       <div
         className={styles.viewport}
@@ -578,6 +742,7 @@ export function CircuitScene({
                   selected={selected}
                   onSelect={selectTerminal}
                   onRemoveWire={removeWire}
+                  onSelectComponent={setSelectedComponentId}
                 />
               </Suspense>
             </Canvas>

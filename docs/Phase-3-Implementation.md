@@ -1,6 +1,6 @@
 # Schemora Phase 3 — Interactive 3D Workbench Implementation Plan
 
-- **Status:** In progress — graph-derived 3D visualization shipped; scene-based circuit editing remains open
+- **Status:** In progress — graph-derived scene, wire editing, component arrangement, persistence, and undo/redo are implemented; physical placement and fit evidence remain open
 - **Product phase:** Phase 3 — Interactive 3D Workbench
 - **Baseline:** Phase 1 conversation intelligence and Phase 2 hardware knowledge/circuit validation are implemented on `dev`; Phase 3 is the work described here.
 - **Primary user:** A desktop or laptop user who has a reviewed hardware design and wants to see and edit its physical arrangement without editing graph JSON.
@@ -28,9 +28,9 @@ The current circuit page is a semantic graph editor: it provides catalog termina
 
 ### 2.3 Implemented first slice
 
-The first Phase 3 increment adds a client-side React Three Fiber scene to the circuit workspace. The scene renders the saved graph's breadboard topology, supported board and component silhouettes, and wires derived from graph endpoints. It supports camera orbit, zoom, and reset; terminal selection to add graph edges; wire removal in the scene and semantic list; a semantic component and terminal list; and visible WebGL/render failure fallback. Existing terminal selectors and hole-placement controls remain available.
+The first Phase 3 increment adds a client-side React Three Fiber scene to the circuit workspace. The scene renders the saved graph's breadboard topology, supported board and component silhouettes, and wires derived from graph endpoints. It supports camera orbit, zoom, and reset; terminal selection to add graph edges; wire removal in the scene and semantic list; selecting, moving and rotating components with keyboard-accessible workbench-step controls; versioned layout persistence in the graph snapshot; undo/redo; and visible WebGL/render failure fallback. Existing terminal selectors and hole-placement controls remain available.
 
-This increment does **not** yet allow users to drag/rotate parts, assign terminal placements by dragging parts to holes, undo/redo scene edits, or persist a 3D layout. The current graph schema has no spatial-pose fields. The view uses illustrative procedural geometry; it is not a dimension-accurate assembly or fit guarantee. These limits are reflected in the UI and README. Firmware simulation is Phase 6 in the product roadmap and is not part of this Phase 3 delivery.
+This increment does **not** yet allow users to drag parts or assign terminal-to-hole placements through the scene. The layout contract stores only bounded scene X/Z coordinates and quarter-turn rotation; it carries no physical scale, fit, height, or electrical meaning. The view uses illustrative procedural geometry; it is not a dimension-accurate assembly or fit guarantee. These limits are reflected in the UI and README. Firmware simulation is Phase 6 in the product roadmap and is not part of this Phase 3 delivery.
 
 ### 2.2 Phase 3 included
 
@@ -182,28 +182,23 @@ The current graph schema includes `schemaVersion`, graph/project identity and re
 
 ### 5.4 Layout data boundary
 
-The current canonical graph has no world transform fields. Phase 3 must not add presentation transforms to electrical graph entities by accident. Implement a versioned layout object, conceptually:
+The first implementation stores presentation placement in an optional, strictly validated `visualLayout` member of the immutable graph snapshot. It is deliberately separate from electrical entities and contains only bounded X/Z workbench coordinates and quarter-turn rotation:
 
 ```ts
-type WorkbenchLayout = {
+type VisualLayout = {
   schemaVersion: 1;
-  projectId: string;
-  graphId: string;
-  graphRevision: number;
-  catalogReleaseId: string;
-  assetManifestVersion: string;
-  placements: Array<{
+  componentPlacements: Array<{
     componentInstanceId: string;
-    position: [number, number, number];
-    rotation: [number, number, number];
+    x: number; // bounded illustrative workbench units
+    z: number; // bounded illustrative workbench units
+    rotationY: 0 | 90 | 180 | 270;
   }>;
-  camera?: { position: [number, number, number]; target: [number, number, number] };
 };
 ```
 
-This is a design contract, not an existing API schema. Before durable layout implementation, choose one of these explicit options and document it in code/API: (A) a new owner-scoped, revisioned layout endpoint/table; or (B) layout embedded in a separately versioned graph-adjacent presentation document. Do not place camera state in the canonical graph. Layout writes must be bounded, strictly validated, owner-scoped, and stale when graph identity/revision changes. Camera pose can remain browser-local because it does not alter a design.
+This layout is stored and authorized with the graph snapshot using the existing owner-scoped circuit route and project revision checks. Circuit topology derivation ignores `visualLayout`; the current immutable snapshot identity still changes when layout changes, so the UI conservatively marks a previous validation report stale. Camera pose remains browser-local. The schema must not grow guessed physical dimensions, insertion fit, terminal topology, or electrical semantics.
 
-If storage work cannot be completed in this phase, allow temporary in-session placement only and label it unsaved; do not imply that a refresh preserves it. Electrical graph editing can still be persisted through the existing circuit endpoint.
+If later requirements demand layout revisions that do not affect circuit-report currency, move presentation data to a separately revisioned artifact with an explicit graph identity and stale-layout policy. Do not make that change without preserving immutable history and owner checks.
 
 ## 6. Scene behavior and controls
 
