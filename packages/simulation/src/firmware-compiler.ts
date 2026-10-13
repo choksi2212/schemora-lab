@@ -32,6 +32,30 @@ export interface FirmwareCompileArtifacts {
   artifacts: Record<string, Uint8Array>;
 }
 
+/**
+ * Component Manager manifests can cause ESP-IDF configure to fetch registry or
+ * Git dependencies. The current reviewed profile has no dependency lock or
+ * allowlist, so reject those declarations until a profile-specific resolver
+ * can prove that every dependency is part of its pinned image.
+ */
+export function firmwareBundleMatchesDependencyPolicy(
+  bundle: FirmwareProjectBundle,
+  profile: FirmwareCompilerProfile,
+): boolean {
+  if (profile.dependencyPolicy !== 'builtin-components-only') return false;
+  if (bundle.buildSystem !== 'esp-idf') return true;
+  return bundle.files.every(({ path }) => {
+    const normalized = path.toLowerCase();
+    const basename = normalized.slice(normalized.lastIndexOf('/') + 1);
+    return (
+      basename !== 'idf_component.yml' &&
+      basename !== 'idf_component.yaml' &&
+      basename !== 'dependencies.lock' &&
+      !normalized.split('/').includes('managed_components')
+    );
+  });
+}
+
 async function sha256(bytes: Uint8Array): Promise<string> {
   const input = Uint8Array.from(bytes);
   const digest = await globalThis.crypto.subtle.digest('SHA-256', input.buffer);
@@ -58,6 +82,8 @@ export async function compileFirmwareProject(
     canonicalDigest(source.target) !== canonicalDigest(compilerProfile.target)
   )
     throw new Error('FIRMWARE_COMPILER_PROFILE_MISMATCH');
+  if (!firmwareBundleMatchesDependencyPolicy(source, compilerProfile))
+    throw new Error('FIRMWARE_DEPENDENCY_POLICY_REJECTED');
   if (!(await verifyFirmwareProjectBundleSources(source)))
     throw new Error('FIRMWARE_SOURCE_INTEGRITY_FAILED');
 

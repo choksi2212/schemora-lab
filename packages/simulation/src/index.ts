@@ -31,6 +31,7 @@ export {
 } from './firmware-compiler-profile.js';
 export {
   compileFirmwareProject,
+  firmwareBundleMatchesDependencyPolicy,
   type FirmwareCompileArtifacts,
   type FirmwareCompilerSandbox,
   type FirmwareCompilerSandboxOutput,
