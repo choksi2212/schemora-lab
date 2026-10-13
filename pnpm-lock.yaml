@@ -158,6 +158,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@schemora/assembly-plan':
+        specifier: workspace:*
+        version: link:../../packages/assembly-plan
       '@schemora/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts

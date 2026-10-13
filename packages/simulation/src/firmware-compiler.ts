@@ -1,5 +1,9 @@
 import { canonicalDigest } from '@schemora/assembly-plan';
 import {
+  firmwareBuildAttestationSchema,
+  type FirmwareBuildAttestation,
+} from './firmware-build-attestation.js';
+import {
   firmwareProjectBundleSchema,
   verifyFirmwareProjectBundleSources,
   type FirmwareProjectBundle,
@@ -15,6 +19,8 @@ import {
 export interface FirmwareCompilerSandboxOutput {
   /** Untrusted structured result; verified again against the selected profile below. */
   result: unknown;
+  /** Signed by the isolated compiler runner after it verifies the result and binary outputs. */
+  attestation: unknown;
   /** Binary contents keyed by their normalized output-relative paths. */
   artifacts: Record<string, Uint8Array>;
 }
@@ -29,6 +35,7 @@ export interface FirmwareCompilerSandbox {
 
 export interface FirmwareCompileArtifacts {
   result: FirmwareCompileResult;
+  attestation: FirmwareBuildAttestation;
   artifacts: Record<string, Uint8Array>;
 }
 
@@ -68,8 +75,10 @@ async function sha256(bytes: Uint8Array): Promise<string> {
 
 /**
  * Validate a source bundle, invoke only an injected isolated compiler, then
- * authenticate the bounded result and every returned binary before persistence.
- * This function never starts a subprocess or container itself.
+ * validate the bounded result and every returned binary before persistence.
+ * It checks attestation claim consistency, while worker and persistence layers
+ * perform cryptographic signature verification. It never starts a subprocess
+ * or container itself.
  */
 export async function compileFirmwareProject(
   bundleInput: unknown,
@@ -116,10 +125,23 @@ export async function compileFirmwareProject(
     )
   )
     throw new Error('FIRMWARE_COMPILE_DIAGNOSTIC_PATH_INVALID');
+  const attestation = firmwareBuildAttestationSchema.safeParse(output.attestation);
+  if (!attestation.success) throw new Error('FIRMWARE_COMPILE_ATTESTATION_INVALID');
+  const claims = attestation.data;
+  if (
+    claims.sourceManifestDigest !== source.manifestDigest ||
+    claims.compilerProfileId !== compilerProfile.profileId ||
+    claims.compilerProfileDigest !== canonicalDigest(compilerProfile) ||
+    claims.compilerVersion !== result.compilerVersion ||
+    claims.imageDigest !== result.imageDigest ||
+    claims.resultDigest !== canonicalDigest(result) ||
+    claims.artifactManifestDigest !== canonicalDigest(result.artifacts)
+  )
+    throw new Error('FIRMWARE_COMPILE_ATTESTATION_MISMATCH');
   const returnedFiles = Object.entries(output.artifacts);
   if (result.status !== 'succeeded') {
     if (returnedFiles.length !== 0) throw new Error('FIRMWARE_COMPILE_ARTIFACTS_UNEXPECTED');
-    return { result, artifacts: {} };
+    return { result, attestation: attestation.data, artifacts: {} };
   }
 
   if (returnedFiles.length !== result.artifacts.length)
@@ -137,5 +159,5 @@ export async function compileFirmwareProject(
       throw new Error('FIRMWARE_COMPILE_ARTIFACT_DIGEST_MISMATCH');
     verified[manifest.path] = Uint8Array.from(bytes);
   }
-  return { result, artifacts: verified };
+  return { result, attestation: attestation.data, artifacts: verified };
 }

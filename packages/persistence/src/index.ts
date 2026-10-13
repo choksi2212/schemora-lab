@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomUUID, type KeyObject } from 'node:crypto';
 import { Pool, type PoolClient, type QueryResultRow } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { eq, and, desc, or, ne, lt, sql, getTableColumns } from 'drizzle-orm';
@@ -6,11 +6,28 @@ import type { ConversationBundle, ExtractionResult } from '@schemora/contracts';
 import {
   firmwareCompileResultMatchesProfile,
   firmwareCompileResultSchema,
+  firmwareBuildAttestationDigest,
+  firmwareBuildAttestationSchema,
+  firmwareBuildRequestDigest,
+  firmwareCompilerProfileDigest,
   firmwareCompilerProfileSchema,
   type FirmwareCompileResult,
   type FirmwareCompilerProfile,
 } from '@schemora/simulation';
 import * as schema from './schema.js';
+import {
+  parseFirmwareBuildAttestationPublicKeysJson,
+  verifyFirmwareBuildAttestation,
+  type FirmwareBuildAttestationExpectation,
+} from './firmware-build-attestation.js';
+import { claimRunnerReplayToken } from './runner-replay-store.js';
+export {
+  FIRMWARE_BUILD_ATTESTATION_MAX_AGE_MS,
+  parseFirmwareBuildAttestationPublicKeysJson,
+  verifyFirmwareBuildAttestation,
+  type FirmwareBuildAttestationExpectation,
+  type FirmwareBuildAttestationVerification,
+} from './firmware-build-attestation.js';
 
 export {
   claimRunnerReplayToken,
@@ -144,6 +161,11 @@ export interface FirmwareBuildRow extends QueryResultRow {
   result_digest: string;
   idempotency_key: string;
   request_digest: string;
+  attestation: unknown | null;
+  attestation_digest: string | null;
+  attestation_key_id: string | null;
+  attestation_jti: string | null;
+  attestation_issued_at: Date | null;
   created_at: Date;
 }
 export interface FirmwareBuildArtifactRow extends QueryResultRow {
@@ -168,6 +190,7 @@ export interface PersistFirmwareBuildInput {
   idempotencyKey: string;
   profile: FirmwareCompilerProfile;
   result: FirmwareCompileResult;
+  attestation: unknown;
   artifacts: readonly FirmwareBuildArtifactObject[];
 }
 export class RepositoryError extends Error {
@@ -284,6 +307,23 @@ export function publicFirmwareBuild(build: FirmwareBuildRow) {
     result.imageDigest !== build.image_digest
   )
     throw new RepositoryError('FIRMWARE_BUILD_RECORD_CORRUPT', 500);
+  const attestation =
+    build.attestation === null ? null : firmwareBuildAttestationSchema.safeParse(build.attestation);
+  if (
+    (build.attestation === null &&
+      (build.attestation_digest !== null ||
+        build.attestation_key_id !== null ||
+        build.attestation_jti !== null ||
+        build.attestation_issued_at !== null)) ||
+    (build.attestation !== null &&
+      (!attestation?.success ||
+        !build.attestation_digest ||
+        firmwareBuildAttestationDigest(attestation.data) !== build.attestation_digest ||
+        attestation.data.keyId !== build.attestation_key_id ||
+        attestation.data.jti !== build.attestation_jti ||
+        Date.parse(attestation.data.issuedAt) !== build.attestation_issued_at?.getTime()))
+  )
+    throw new RepositoryError('FIRMWARE_BUILD_RECORD_CORRUPT', 500);
   return {
     id: build.id,
     projectId: build.project_id,
@@ -295,6 +335,14 @@ export function publicFirmwareBuild(build: FirmwareBuildRow) {
     status: build.status,
     result,
     resultDigest: build.result_digest,
+    attestation: attestation?.success
+      ? {
+          keyId: attestation.data.keyId,
+          jti: attestation.data.jti,
+          issuedAt: attestation.data.issuedAt,
+          digest: build.attestation_digest,
+        }
+      : null,
     createdAt: build.created_at.toISOString(),
   };
 }
@@ -302,11 +350,14 @@ export function publicFirmwareBuild(build: FirmwareBuildRow) {
 export class Repository {
   readonly pool: Pool;
   readonly db: ReturnType<typeof drizzle<typeof schema>>;
+  private readonly firmwareBuildAttestationPublicKeys: Readonly<Record<string, string | KeyObject>>;
   constructor(
     connectionString: string,
     max = 10,
     private readonly maxAttempts = 3,
+    firmwareBuildAttestationPublicKeys: Readonly<Record<string, string | KeyObject>> = {},
   ) {
+    this.firmwareBuildAttestationPublicKeys = firmwareBuildAttestationPublicKeys;
     this.pool = new Pool({
       connectionString,
       max,
@@ -316,6 +367,15 @@ export class Repository {
       application_name: 'schemora',
     });
     this.db = drizzle(this.pool, { schema });
+  }
+  verifyFirmwareBuildAttestation(input: {
+    attestation: unknown;
+    expected: FirmwareBuildAttestationExpectation;
+  }) {
+    return verifyFirmwareBuildAttestation({
+      ...input,
+      publicKeys: this.firmwareBuildAttestationPublicKeys,
+    });
   }
   async transaction<T>(action: (client: PoolClient) => Promise<T>) {
     const client = await this.pool.connect();
@@ -612,10 +672,10 @@ export class Repository {
         [projectId, idempotencyKey],
       );
       if (!prior.rows[0]) return null;
-      const expectedRequestDigest = canonicalDigest({
+      const expectedRequestDigest = firmwareBuildRequestDigest({
         sourceArtifactId,
         sourceManifestDigest: sourceDigest,
-        compilerProfileDigest: canonicalDigest(profile.data),
+        compilerProfileDigest: firmwareCompilerProfileDigest(profile.data),
       });
       if (prior.rows[0].request_digest !== expectedRequestDigest)
         throw new RepositoryError('IDEMPOTENCY_CONFLICT', 409);
@@ -689,8 +749,8 @@ export class Repository {
         throw new RepositoryError('FIRMWARE_BUILD_BINDING_MISMATCH', 409);
 
       const resultDigest = canonicalDigest(result.data);
-      const compilerProfileDigest = canonicalDigest(profile.data);
-      const requestDigest = canonicalDigest({
+      const compilerProfileDigest = firmwareCompilerProfileDigest(profile.data);
+      const requestDigest = firmwareBuildRequestDigest({
         sourceArtifactId: input.sourceArtifactId,
         sourceManifestDigest: sourceDigest,
         compilerProfileDigest,
@@ -704,6 +764,34 @@ export class Repository {
           throw new RepositoryError('IDEMPOTENCY_CONFLICT', 409);
         return publicFirmwareBuild(prior.rows[0]);
       }
+
+      const attestationVerification = verifyFirmwareBuildAttestation({
+        attestation: input.attestation,
+        expected: {
+          requestDigest,
+          resultDigest,
+          artifactManifestDigest: canonicalDigest(result.data.artifacts),
+          sourceArtifactId: input.sourceArtifactId,
+          sourceManifestDigest: sourceDigest,
+          compilerProfileId: profile.data.profileId,
+          compilerProfileDigest,
+          compilerVersion: result.data.compilerVersion,
+          imageDigest: profile.data.imageDigest,
+        },
+        publicKeys: this.firmwareBuildAttestationPublicKeys,
+      });
+      if (!attestationVerification.valid)
+        throw new RepositoryError('FIRMWARE_BUILD_ATTESTATION_INVALID', 409);
+      if (
+        !(await claimRunnerReplayToken(client, {
+          tokenClass: 'firmware_build_attestation',
+          issuerNamespace: 'schemora-firmware-compiler',
+          keyId: attestationVerification.attestation.keyId,
+          jti: attestationVerification.attestation.jti,
+          expiresAt: attestationVerification.expiresAt,
+        }))
+      )
+        throw new RepositoryError('FIRMWARE_BUILD_ATTESTATION_REPLAY', 409);
 
       const manifest = new Map(result.data.artifacts.map((item) => [item.role, item]));
       if (
@@ -736,8 +824,9 @@ export class Repository {
       await client.query(
         `INSERT INTO firmware_builds(
           project_id,id,source_artifact_id,source_manifest_digest,compiler_profile_id,
-          compiler_profile_digest,image_digest,status,result,result_digest,idempotency_key,request_digest
-        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+          compiler_profile_digest,image_digest,status,result,result_digest,idempotency_key,request_digest,
+          attestation,attestation_digest,attestation_key_id,attestation_jti,attestation_issued_at
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
         [
           projectId,
           input.id,
@@ -751,6 +840,11 @@ export class Repository {
           resultDigest,
           input.idempotencyKey,
           requestDigest,
+          JSON.stringify(attestationVerification.attestation),
+          firmwareBuildAttestationDigest(attestationVerification.attestation),
+          attestationVerification.attestation.keyId,
+          attestationVerification.attestation.jti,
+          attestationVerification.attestation.issuedAt,
         ],
       );
       for (const artifact of input.artifacts) {

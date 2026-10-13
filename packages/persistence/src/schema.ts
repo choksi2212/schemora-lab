@@ -157,6 +157,11 @@ export const firmwareBuilds = pgTable(
     resultDigest: text('result_digest').notNull(),
     idempotencyKey: text('idempotency_key').notNull(),
     requestDigest: text('request_digest').notNull(),
+    attestation: jsonb('attestation'),
+    attestationDigest: text('attestation_digest'),
+    attestationKeyId: text('attestation_key_id'),
+    attestationJti: text('attestation_jti'),
+    attestationIssuedAt: timestamp('attestation_issued_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
   },
   (table) => [

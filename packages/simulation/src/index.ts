@@ -22,6 +22,7 @@ export {
   firmwareCompileDiagnosticSchema,
   firmwareCompileResultSchema,
   firmwareCompilerProfileDigest,
+  firmwareBuildRequestDigest,
   firmwareCompilerProfileSchema,
   firmwareCompileResultMatchesProfile,
   type FirmwareCompileArtifact,
@@ -36,6 +37,14 @@ export {
   type FirmwareCompilerSandbox,
   type FirmwareCompilerSandboxOutput,
 } from './firmware-compiler.js';
+export {
+  firmwareBuildAttestationClaimsSchema,
+  firmwareBuildAttestationDigest,
+  firmwareBuildAttestationSchema,
+  firmwareBuildAttestationSigningMessage,
+  type FirmwareBuildAttestation,
+  type FirmwareBuildAttestationClaims,
+} from './firmware-build-attestation.js';
 
 export { mapEsp32Gpio19ToLedState } from './adapters/esp32-gpio19-led.js';
 export type { Esp32Gpio19Signal, LedStateMapping } from './adapters/esp32-gpio19-led.js';

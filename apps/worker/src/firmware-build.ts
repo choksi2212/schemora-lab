@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto';
+import { canonicalDigest } from '@schemora/assembly-plan';
 import { RepositoryError, type Repository } from '@schemora/persistence';
 import type { PrivateBuildStorage, PrivateStorage } from '@schemora/storage';
-import { compileFirmwareProject, type FirmwareCompilerSandbox } from '@schemora/simulation';
+import {
+  compileFirmwareProject,
+  firmwareBuildRequestDigest,
+  firmwareCompilerProfileDigest,
+  type FirmwareCompilerSandbox,
+} from '@schemora/simulation';
 import { z } from 'zod';
 import type { FirmwareCompilerProfileRegistry } from './firmware-compiler-profiles.js';
 import { resolveFirmwareCompilerBundle } from './firmware-source.js';
@@ -57,6 +63,26 @@ export async function compileAndPersistFirmwareBuild(
     artifactId: request.sourceArtifactId,
   });
   const compiled = await compileFirmwareProject(bundle, profile, sandbox);
+  const compilerProfileDigest = firmwareCompilerProfileDigest(profile);
+  const attestation = repository.verifyFirmwareBuildAttestation({
+    attestation: compiled.attestation,
+    expected: {
+      requestDigest: firmwareBuildRequestDigest({
+        sourceArtifactId: request.sourceArtifactId,
+        sourceManifestDigest: bundle.manifestDigest,
+        compilerProfileDigest,
+      }),
+      resultDigest: canonicalDigest(compiled.result),
+      artifactManifestDigest: canonicalDigest(compiled.result.artifacts),
+      sourceArtifactId: request.sourceArtifactId,
+      sourceManifestDigest: bundle.manifestDigest,
+      compilerProfileId: profile.profileId,
+      compilerProfileDigest,
+      compilerVersion: compiled.result.compilerVersion,
+      imageDigest: profile.imageDigest,
+    },
+  });
+  if (!attestation.valid) throw new Error('FIRMWARE_BUILD_ATTESTATION_INVALID');
   const buildId = randomUUID();
   const objects = compiled.result.artifacts.map((artifact) => ({
     role: artifact.role,
@@ -88,6 +114,7 @@ export async function compileAndPersistFirmwareBuild(
       idempotencyKey: request.idempotencyKey,
       profile,
       result: compiled.result,
+      attestation: attestation.attestation,
       artifacts: objects.map(({ role, path, objectKey, sha256, byteLength }) => ({
         role,
         path,

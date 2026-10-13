@@ -1,6 +1,6 @@
 import type { QueryResultRow } from 'pg';
 
-export type RunnerReplayTokenClass = 'capability' | 'response';
+export type RunnerReplayTokenClass = 'capability' | 'response' | 'firmware_build_attestation';
 
 export interface RunnerReplayClaim {
   tokenClass: RunnerReplayTokenClass;
@@ -60,7 +60,7 @@ export async function claimRunnerReplayToken(
   claim: RunnerReplayClaim,
 ): Promise<boolean> {
   if (
-    (claim.tokenClass !== 'capability' && claim.tokenClass !== 'response') ||
+    !['capability', 'response', 'firmware_build_attestation'].includes(claim.tokenClass) ||
     !isBoundedString(claim.issuerNamespace, 160) ||
     !isBoundedString(claim.keyId, 160) ||
     !isBoundedString(claim.jti, 200) ||

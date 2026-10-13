@@ -4,6 +4,7 @@ export const MAX_FIRMWARE_COMPILER_PROFILES = 16;
 export const MAX_FIRMWARE_COMPILER_PROFILES_JSON_BYTES = 65_536;
 
 export interface FirmwareCompilerProfileRegistry {
+  readonly size: number;
   resolve(profileId: string): FirmwareCompilerProfile;
 }
 
@@ -31,6 +32,9 @@ export function createFirmwareCompilerProfileRegistry(
     profiles.set(parsed.data.profileId, freezeProfile(parsed.data));
   }
   return Object.freeze({
+    get size() {
+      return profiles.size;
+    },
     resolve(profileId: string) {
       const profile = profiles.get(profileId);
       if (!profile) throw new Error('FIRMWARE_COMPILER_PROFILE_UNAVAILABLE');

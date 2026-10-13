@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Repository } from '@schemora/persistence';
 import { FileStorage, S3Storage } from '@schemora/storage';
+import { parseFirmwareBuildAttestationPublicKeysJson } from '@schemora/persistence';
 import { Worker } from './runner.js';
 import { parseFirmwareCompilerProfileRegistryJson } from './firmware-compiler-profiles.js';
 
@@ -24,6 +25,7 @@ const parsed = z
     WORKER_DELETE_CONCURRENCY: z.coerce.number().int().min(1).max(4).default(1),
     WORKER_SIMULATION_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(1),
     WORKER_FIRMWARE_COMPILER_PROFILES_JSON: z.string().max(65_536).default('[]'),
+    WORKER_FIRMWARE_BUILD_ATTESTATION_PUBLIC_KEYS_JSON: z.string().max(65_536).default('{}'),
     DATABASE_POOL_SIZE: z.coerce.number().int().min(1).max(50).default(10),
     JOB_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
   })
@@ -35,18 +37,28 @@ if (!parsed.success)
   );
 const config = parsed.data;
 let firmwareCompilerProfiles;
+let firmwareBuildAttestationPublicKeys;
 try {
   firmwareCompilerProfiles = parseFirmwareCompilerProfileRegistryJson(
     config.WORKER_FIRMWARE_COMPILER_PROFILES_JSON,
   );
+  firmwareBuildAttestationPublicKeys = parseFirmwareBuildAttestationPublicKeysJson(
+    config.WORKER_FIRMWARE_BUILD_ATTESTATION_PUBLIC_KEYS_JSON,
+  );
 } catch {
-  throw new Error('Invalid worker compiler profile configuration');
+  throw new Error('Invalid worker firmware compiler configuration');
 }
 if (
   config.NODE_ENV === 'production' &&
   new URL(config.DATABASE_URL).searchParams.get('sslmode') !== 'verify-full'
 )
   throw new Error('Production database requires sslmode=verify-full');
+if (
+  config.NODE_ENV === 'production' &&
+  firmwareCompilerProfiles.size > 0 &&
+  Object.keys(firmwareBuildAttestationPublicKeys).length === 0
+)
+  throw new Error('Production compiler profiles require firmware build attestation keys');
 if (config.NODE_ENV === 'production' && config.STORAGE_DRIVER !== 's3')
   throw new Error('Production requires private S3 storage');
 if (config.STORAGE_DRIVER === 's3' && (!config.S3_BUCKET || !config.AWS_REGION))
@@ -63,6 +75,7 @@ const repository = new Repository(
   config.DATABASE_URL,
   config.DATABASE_POOL_SIZE,
   config.JOB_MAX_ATTEMPTS,
+  firmwareBuildAttestationPublicKeys,
 );
 const storage =
   config.STORAGE_DRIVER === 's3'

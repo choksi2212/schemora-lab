@@ -27,6 +27,7 @@ Every canonical mutation includes an integer expectedRevision and a UUID Idempot
 | WORKER_PROCESS_CONCURRENCY                                  | Bounded parser work per replica, default 1                                      |
 | WORKER_DELETE_CONCURRENCY                                   | Independent deletion work per replica, default 1                                |
 | WORKER_FIRMWARE_COMPILER_PROFILES_JSON                      | Worker-owned compiler profile list; defaults to `[]`, maximum 16 profiles       |
+| WORKER_FIRMWARE_BUILD_ATTESTATION_PUBLIC_KEYS_JSON          | Compiler runner Ed25519 SPKI public-key ring; defaults to `{}`                  |
 | JOB_MAX_ATTEMPTS                                            | Automatic retries including initial attempt, default 3                          |
 | EXTRACTION_MODE                                             | rules or provider; rules is the default conservative source assistant           |
 | EXTRACTION_ENDPOINT / EXTRACTION_API_KEY / EXTRACTION_MODEL | Reviewed HTTPS chat completions adapter configuration                           |
@@ -35,6 +36,8 @@ Every canonical mutation includes an integer expectedRevision and a UUID Idempot
 Environment values are validated before listening. Errors name invalid settings without printing their values. API handlers return stable safe errors and do not serialize object keys, source bytes, tokens, database diagnostics or exception stacks. Worker routine logs contain only an event and job type.
 
 `WORKER_FIRMWARE_COMPILER_PROFILES_JSON` is a deployment-owned JSON array parsed at worker startup. Profiles must pass the strict compiler profile schema and have unique IDs; invalid JSON or entries fail startup without logging the value. Missing or empty-array configuration resolves no profiles. This configuration is currently only loaded and validated; no worker job invokes the compiler helper, no compiler sandbox or transport is configured, and setting a profile does not enable compilation.
+
+`WORKER_FIRMWARE_BUILD_ATTESTATION_PUBLIC_KEYS_JSON` is a deployment-owned JSON object keyed by signing key ID. Values must be Ed25519 SubjectPublicKeyInfo PEM public keys; private keys are never accepted by this worker setting. A newly persisted build must have a fresh signed attestation binding the accepted source manifest, profile, image, normalized result, and artifact manifest. Persistence verifies the signature and claims the attestation JTI in the same transaction as the immutable build row. Existing records remain readable without attestations. No production signing keys, compiler runner, or job caller are provisioned, so this contract does not enable builds.
 
 Production deployment requires a documented private bucket policy, public access block, restricted service IAM, encryption and retention behavior. The SDK obtains credentials through its normal provider chain. PutObject uses an immutable generated key, a server computed SHA256 checksum and an if-none-match condition. Reads verify byte count and digest. Deletion enumerates and purges matching object versions and delete markers before completing a project tombstone, so IAM must permit ListBucketVersions and DeleteObjectVersion. Object lock retention that prevents deletion must be reconciled with the product retention policy before enabling it.
 

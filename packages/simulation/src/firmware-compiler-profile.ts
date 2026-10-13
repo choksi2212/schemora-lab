@@ -63,6 +63,14 @@ export function firmwareCompilerProfileDigest(profile: FirmwareCompilerProfile):
   return canonicalDigest(profile);
 }
 
+export function firmwareBuildRequestDigest(input: {
+  sourceArtifactId: string;
+  sourceManifestDigest: string;
+  compilerProfileDigest: string;
+}): string {
+  return canonicalDigest(input);
+}
+
 /** Reject a well-shaped result that is bound to another source or compiler profile. */
 export function firmwareCompileResultMatchesProfile(
   resultInput: unknown,

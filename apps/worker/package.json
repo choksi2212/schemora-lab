@@ -10,13 +10,14 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@schemora/assembly-plan": "workspace:*",
     "@schemora/contracts": "workspace:*",
     "@schemora/intelligence": "workspace:*",
     "@schemora/persistence": "workspace:*",
     "@schemora/sandbox-runner": "workspace:*",
     "@schemora/simulation": "workspace:*",
     "@schemora/storage": "workspace:*",
-    "zod": "4.3.6",
-    "tsx": "4.20.6"
+    "tsx": "4.20.6",
+    "zod": "4.3.6"
   }
 }
