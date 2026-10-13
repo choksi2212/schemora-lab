@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { canonicalDigest } from '@schemora/assembly-plan';
 import { getCatalogRelease } from '@schemora/catalog';
 import { validateCircuit } from '@schemora/validation';
@@ -62,6 +63,15 @@ const graph = {
   ],
 };
 const report = validateCircuit({ graph, catalog });
+const capturedGpio19Trace = readFileSync(
+  new URL('../../../examples/phase6-qemu-gpio-probe/expected-gpio19.jsonl', import.meta.url),
+  'utf8',
+)
+  .trim()
+  .split('\n')
+  .map(
+    (line) => JSON.parse(line) as { sequence: number; type: string; gpio: number; level: 0 | 1 },
+  );
 const firmware = firmwareArtifactRefSchema.parse({
   schemaVersion: 1,
   artifactId: 'firmware_v1',
@@ -100,24 +110,33 @@ const binding = {
 };
 
 describe('simulation contracts', () => {
-  it('maps captured GPIO19 digital output to the exact graph-connected LED', () => {
+  it('replays the captured QEMU callback trace into the exact graph-connected LED state', () => {
+    expect(
+      capturedGpio19Trace.every((event) => event.type === 'gpio_level' && event.gpio === 19),
+    ).toBe(true);
     const mapped = mapEsp32Gpio19ToLedState({
       graph,
       catalog,
-      signals: [
-        { sequence: 0, simulationTimeMs: 0, pin: 19, enabled: true, level: 0 },
-        { sequence: 1, simulationTimeMs: 100, pin: 19, enabled: true, level: 1 },
-        { sequence: 2, simulationTimeMs: 200, pin: 19, enabled: true, level: 0 },
-      ],
+      signals: capturedGpio19Trace.map((event) => ({
+        sequence: event.sequence,
+        // The current QEMU callback ABI exposes levels, not simulated timestamps.
+        simulationTimeMs: 0,
+        pin: 19,
+        enabled: true,
+        level: event.level,
+      })),
     });
 
     expect(mapped).toMatchObject({
       supported: true,
       componentInstanceId: 'led_1',
       events: [
-        { kind: 'led_state', sequence: 0, state: 'off', componentInstanceId: 'led_1' },
-        { kind: 'led_state', sequence: 1, state: 'on', componentInstanceId: 'led_1' },
-        { kind: 'led_state', sequence: 2, state: 'off', componentInstanceId: 'led_1' },
+        { kind: 'led_state', sequence: 1, state: 'off', componentInstanceId: 'led_1' },
+        { kind: 'led_state', sequence: 2, state: 'on', componentInstanceId: 'led_1' },
+        { kind: 'led_state', sequence: 3, state: 'off', componentInstanceId: 'led_1' },
+        { kind: 'led_state', sequence: 4, state: 'on', componentInstanceId: 'led_1' },
+        { kind: 'led_state', sequence: 5, state: 'off', componentInstanceId: 'led_1' },
+        { kind: 'led_state', sequence: 6, state: 'on', componentInstanceId: 'led_1' },
       ],
     });
     if (mapped.supported)

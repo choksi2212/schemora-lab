@@ -1,0 +1,6 @@
+{"sequence":1,"type":"gpio_level","gpio":19,"level":0}
+{"sequence":2,"type":"gpio_level","gpio":19,"level":1}
+{"sequence":3,"type":"gpio_level","gpio":19,"level":0}
+{"sequence":4,"type":"gpio_level","gpio":19,"level":1}
+{"sequence":5,"type":"gpio_level","gpio":19,"level":0}
+{"sequence":6,"type":"gpio_level","gpio":19,"level":1}
