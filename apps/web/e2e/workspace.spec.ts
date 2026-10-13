@@ -151,12 +151,6 @@ test('connects exact terminals in the 3D workbench and persists graph edits', as
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
   await expect(page.getByText(/X 0.25 · Z 0.12 · rotation 0°/)).toBeVisible();
 
-  await page.getByRole('button', { name: /ESP32-DevKitC V4.*GPIO19/ }).click();
-  await page.getByRole('button', { name: /YAGEO 220 Ω resistor: Lead B/ }).click();
-  await expect(
-    page.getByRole('status').filter({ hasText: 'Wire added between the selected terminals.' }),
-  ).toBeVisible();
-  await expect(page.getByText('4 graph wires')).toBeVisible();
   const saveResponse = page.waitForResponse(
     (response) =>
       response.request().method() === 'PUT' &&
@@ -167,12 +161,40 @@ test('connects exact terminals in the 3D workbench and persists graph edits', as
   expect(saved.status(), await saved.text()).toBe(200);
   await expect(page.getByRole('status').filter({ hasText: 'Circuit saved.' })).toBeVisible();
   await page.reload();
-  await expect(page.getByText('4 graph wires')).toBeVisible();
+  await expect(page.getByText('3 graph wires')).toBeVisible();
   await page
     .getByRole('list', { name: 'Components to arrange' })
     .getByRole('button', { name: 'YAGEO 220 Ω resistor' })
     .click();
   await expect(page.getByText(/X 0.25 · Z 0.12 · rotation 0°/)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Validate saved circuit' }).click();
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Validation finished for the saved circuit.' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Generate assembly guide' }).click();
+  await expect(page.getByRole('heading', { name: 'Assembly guide' })).toBeVisible();
+  await expect(page.getByText(/Identify ESP32-DevKitC V4/)).toBeVisible();
+  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await expect(page.getByText(/Step 2 of/)).toBeVisible();
+  await expect(page.getByText(/0 of .* steps confirmed/)).toBeVisible();
+  await page.getByRole('button', { name: 'I completed this step' }).click();
+  await expect(page.getByText(/1 of .* steps confirmed/)).toBeVisible();
+  await page.reload();
+  await page.getByRole('button', { name: 'Generate assembly guide' }).click();
+  await expect(page.getByText(/1 of .* steps confirmed/)).toBeVisible();
+
+  const terminalList = page.getByRole('list', { name: 'Connectable circuit terminals' });
+  await terminalList.getByRole('button', { name: /ESP32-DevKitC V4.*GPIO19/ }).click();
+  await terminalList.getByRole('button', { name: /YAGEO 220 Ω resistor: Lead B/ }).click();
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Wire added between the selected terminals.' }),
+  ).toBeVisible();
+  await expect(page.getByText('4 graph wires')).toBeVisible();
+  await page.getByRole('button', { name: 'Save circuit' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Circuit saved.' })).toBeVisible();
+  await page.reload();
+  await expect(page.getByText('4 graph wires')).toBeVisible();
 
   await page.getByRole('button', { name: 'Remove wire 4' }).click();
   await expect(page.getByText('3 graph wires')).toBeVisible();

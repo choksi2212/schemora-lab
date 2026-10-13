@@ -8,6 +8,7 @@ import { MAX_SOURCE_BYTES, type PrivateStorage } from '@schemora/storage';
 import { circuitGraphSchema, validateCircuitGraph } from '@schemora/circuit-model';
 import { getCatalogRelease } from '@schemora/catalog';
 import { validateCircuit } from '@schemora/validation';
+import { AssemblyPlanBlockedError, generateAssemblyPlan } from '@schemora/assembly-plan';
 import type { ApiConfig } from './config.js';
 
 const uuid = z.string().uuid();
@@ -142,6 +143,9 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
               REVISION_CONFLICT: 'This project changed. Refresh before saving.',
               IDEMPOTENCY_CONFLICT: 'This request identifier was already used for another action.',
               PROJECT_ARCHIVED: 'Archived projects are read only.',
+              VALIDATION_REQUIRED:
+                'Save and validate this exact circuit before creating an assembly guide.',
+              CHECKS_FAILED: 'Resolve failing circuit checks before creating an assembly guide.',
             }[code] ?? 'This action is unavailable in the current state.')
           : invalid
             ? 'Check the submitted fields.'
@@ -288,6 +292,34 @@ export function buildApp(config: ApiConfig, repository: Repository, storage: Pri
   app.get('/v1/projects/:projectId/circuit/validation', async (request) => {
     const { projectId } = scope.parse(request.params);
     return envelope(request, await repository.latestValidationReport(owner(request), projectId));
+  });
+  app.post('/v1/projects/:projectId/assembly-plan', async (request) => {
+    const { projectId } = scope.parse(request.params);
+    const body = mutation.parse(request.body);
+    const principal = owner(request);
+    const latest = await repository.latestCircuitGraph(principal, projectId);
+    if (!latest.graphSnapshot) throw new RepositoryError('GRAPH_SNAPSHOT_NOT_FOUND', 404);
+    if (latest.project.revision !== body.expectedRevision)
+      throw new RepositoryError('REVISION_CONFLICT', 409, latest.project.revision);
+    const validation = await repository.latestValidationReport(principal, projectId);
+    if (!validation.report || !validation.current)
+      throw new RepositoryError('VALIDATION_REQUIRED', 409, latest.project.revision);
+    let plan;
+    try {
+      plan = generateAssemblyPlan({
+        graph: latest.graphSnapshot.graph,
+        catalog: getCatalogRelease(),
+        report: validation.report.report,
+        reportIsCurrent: validation.current,
+        validationReportId: validation.report.id,
+        validationReportDigest: validation.report.reportDigest,
+      });
+    } catch (cause) {
+      if (cause instanceof AssemblyPlanBlockedError)
+        throw new RepositoryError(cause.reason, 409, latest.project.revision);
+      throw cause;
+    }
+    return envelope(request, { plan, current: true });
   });
   app.patch('/v1/projects/:projectId', async (request) => {
     const { projectId } = scope.parse(request.params);

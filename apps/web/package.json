@@ -11,6 +11,7 @@
     "test": "vitest run src/auth.test.ts"
   },
   "dependencies": {
+    "@schemora/assembly-plan": "workspace:*",
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.1",
     "@schemora/contracts": "workspace:*",

@@ -175,6 +175,13 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('project circuit API', () => {
     expect(validated.body.data.report.report.findings).toContainEqual(
       expect.objectContaining({ ruleId: 'POWER_GROUND_SHORT', status: 'fail' }),
     );
+    const blockedAssemblyPlan = await request(
+      'POST',
+      `/v1/projects/${project.id}/assembly-plan`,
+      { expectedRevision: saved.body.data.project.revision },
+      tokenA,
+    );
+    expect(blockedAssemblyPlan.status).toBe(409);
     const validationReplay = await request(
       'POST',
       `/v1/projects/${project.id}/circuit/validate`,

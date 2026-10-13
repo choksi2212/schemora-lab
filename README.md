@@ -24,6 +24,12 @@ The circuit workspace now renders the saved graph in a browser 3D scene with cam
 
 See [Phase 3 implementation status and remaining work](docs/Phase-3-Implementation.md).
 
+## Phase 4 — Automatic assembly generation (in progress)
+
+The circuit workspace can generate a deterministic, versioned guide from the current saved graph, exact catalog release, and current validation report. It presents component identification, explicit terminal placements, exact wire endpoints, a check review, and a pre-power inspection. Step confirmations and skips are distinct; navigation never completes a step. Progress is currently saved in the browser that created it. Unknown validation findings remain visible, and neither the guide nor the illustrative scene certifies physical fit or safety.
+
+See [Phase 4 implementation status and remaining work](docs/Phase-4-Implementation.md).
+
 ## Run locally
 
 Requirements: Node.js 24, pnpm 11.5.2, and Docker with Compose.

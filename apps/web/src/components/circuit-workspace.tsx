@@ -16,6 +16,7 @@ import {
 import { api, friendlyError, type Project } from '@/lib/api';
 import { CircuitScene } from './circuit-scene';
 import styles from './circuit-workspace.module.css';
+import type { AssemblyPlan } from '@schemora/assembly-plan';
 
 type Terminal = { id: string; label: string; electricalRole: string };
 type Part = {
@@ -162,6 +163,11 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
   const [dirty, setDirty] = useState(false);
   const [undoStack, setUndoStack] = useState<Graph[]>([]);
   const [redoStack, setRedoStack] = useState<Graph[]>([]);
+  const [assemblyPlan, setAssemblyPlan] = useState<AssemblyPlan | null>(null);
+  const [assemblyStepIndex, setAssemblyStepIndex] = useState(0);
+  const [completedAssemblySteps, setCompletedAssemblySteps] = useState<string[]>([]);
+  const [skippedAssemblySteps, setSkippedAssemblySteps] = useState<string[]>([]);
+  const [assemblyStale, setAssemblyStale] = useState(false);
   const load = useCallback(async () => {
     setError('');
     try {
@@ -217,6 +223,7 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
     setReport(null);
     setIsCurrent(false);
     setMessage('');
+    setAssemblyStale(Boolean(assemblyPlan));
   }
   function undo() {
     if (!graph || undoStack.length === 0) return;
@@ -265,11 +272,63 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
       setMessage('Circuit saved.');
       setReport(null);
       setIsCurrent(false);
+      setAssemblyStale(Boolean(assemblyPlan));
     } catch (cause) {
       setError(friendlyError(cause));
     } finally {
       setBusy(false);
     }
+  }
+  async function createAssemblyPlan() {
+    if (!project || !report || !isCurrent || dirty || busy) return;
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      const result = await api<{ plan: AssemblyPlan; current: boolean }>(
+        `/projects/${projectId}/assembly-plan`,
+        { method: 'POST', body: { expectedRevision: project.revision } },
+      );
+      if (!result.current) throw new Error('The assembly guide is no longer current.');
+      const storageKey = `schemora-assembly:${projectId}:${result.plan.planDigest}`;
+      let progress: { completed: string[]; skipped: string[] } = { completed: [], skipped: [] };
+      try {
+        const saved = JSON.parse(window.localStorage.getItem(storageKey) ?? 'null');
+        if (
+          saved &&
+          Array.isArray(saved.completed) &&
+          Array.isArray(saved.skipped) &&
+          saved.completed.every((id: unknown) => typeof id === 'string') &&
+          saved.skipped.every((id: unknown) => typeof id === 'string')
+        )
+          progress = saved;
+      } catch {
+        /* Invalid local progress is ignored and replaced below. */
+      }
+      setAssemblyPlan(result.plan);
+      setCompletedAssemblySteps(
+        progress.completed.filter((id) => result.plan.steps.some((step) => step.id === id)),
+      );
+      setSkippedAssemblySteps(
+        progress.skipped.filter((id) => result.plan.steps.some((step) => step.id === id)),
+      );
+      setAssemblyStepIndex(0);
+      setAssemblyStale(false);
+      setMessage('Deterministic assembly guide generated from the current saved circuit.');
+    } catch (cause) {
+      setError(friendlyError(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+  function saveAssemblyProgress(completed: string[], skipped: string[]) {
+    if (!assemblyPlan) return;
+    setCompletedAssemblySteps(completed);
+    setSkippedAssemblySteps(skipped);
+    window.localStorage.setItem(
+      `schemora-assembly:${projectId}:${assemblyPlan.planDigest}`,
+      JSON.stringify({ completed, skipped }),
+    );
   }
   async function validate() {
     if (!project || !graph || dirty || busy) return;
@@ -328,6 +387,11 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
   ];
   const holes = Array.from({ length: 30 }, (_, i) => i + 1).flatMap((column) =>
     'ABCDEFGHIJ'.split('').map((row) => `${row}${column}`),
+  );
+  const activeAssemblyStep = assemblyPlan?.steps[assemblyStepIndex] ?? null;
+  const completedSet = new Set(completedAssemblySteps);
+  const prerequisitesComplete = Boolean(
+    activeAssemblyStep?.prerequisites.every((id) => completedSet.has(id)),
   );
   return (
     <div className={`page ${styles.page}`}>
@@ -575,6 +639,178 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
             </ul>
             <p className="fine-text">
               Unknown means the available model or rule cannot establish the result.
+            </p>
+          </>
+        )}
+      </section>
+      <section className={`panel ${styles.assemblyGuide}`} aria-labelledby="assembly-guide-title">
+        <div className="panel-heading">
+          <div>
+            <h2 id="assembly-guide-title">Assembly guide</h2>
+            <p className="fine-text">
+              Generated in a stable order from this saved graph and its current validation report.
+            </p>
+          </div>
+          <div className="workspace-actions">
+            {assemblyPlan && !assemblyStale && (
+              <button className="button secondary" onClick={() => window.print()}>
+                Print checklist
+              </button>
+            )}
+            <button
+              className="button primary"
+              onClick={() => void createAssemblyPlan()}
+              disabled={
+                busy ||
+                dirty ||
+                !report ||
+                !isCurrent ||
+                report.status === 'fail' ||
+                report.status === 'error'
+              }
+            >
+              {assemblyPlan ? 'Regenerate guide' : 'Generate assembly guide'}
+            </button>
+          </div>
+        </div>
+        {!report || !isCurrent ? (
+          <p className="warning-notice">
+            Save the circuit and run current checks before generating an assembly guide.
+          </p>
+        ) : report.status === 'fail' || report.status === 'error' ? (
+          <p className="warning-notice">
+            Resolve failing circuit checks before generating an assembly guide.
+          </p>
+        ) : null}
+        {assemblyPlan && assemblyStale && (
+          <p className="warning-notice" role="status">
+            The circuit changed after this guide was generated. Its progress remains tied to the old
+            guide on this browser. Regenerate to follow the current circuit.
+          </p>
+        )}
+        {assemblyPlan && !assemblyStale && activeAssemblyStep && (
+          <>
+            <div className={styles.assemblyMeta}>
+              <strong>
+                {completedAssemblySteps.length} of {assemblyPlan.steps.length} steps confirmed
+              </strong>
+              <span>
+                Step {activeAssemblyStep.order} of {assemblyPlan.steps.length}
+              </span>
+              <span>Plan {assemblyPlan.planDigest.slice(0, 12)}</span>
+            </div>
+            <ol className={styles.assemblyList} aria-label="Assembly steps">
+              {assemblyPlan.steps.map((step, index) => {
+                const done = completedSet.has(step.id);
+                const skipped = skippedAssemblySteps.includes(step.id);
+                return (
+                  <li key={step.id}>
+                    <button
+                      type="button"
+                      aria-current={index === assemblyStepIndex ? 'step' : undefined}
+                      onClick={() => setAssemblyStepIndex(index)}
+                    >
+                      <span>
+                        {step.order}. {step.title}
+                      </span>
+                      <small>
+                        {done ? 'Confirmed' : skipped ? 'Skipped · incomplete' : 'Remaining'}
+                      </small>
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+            <article className={styles.activeAssemblyStep} aria-live="polite">
+              <span className="eyebrow">{activeAssemblyStep.action.replaceAll('_', ' ')}</span>
+              <h3>{activeAssemblyStep.title}</h3>
+              <p>{activeAssemblyStep.instruction}</p>
+              <p className="fine-text">{activeAssemblyStep.explanation}</p>
+              {activeAssemblyStep.anchors.length > 0 && (
+                <ul aria-label="Exact targets">
+                  {activeAssemblyStep.anchors.map((anchor, index) => (
+                    <li key={`${anchor.kind}-${index}`}>
+                      {anchor.kind === 'component'
+                        ? `Component ${anchor.componentInstanceId}`
+                        : anchor.kind === 'terminal'
+                          ? `${anchor.componentInstanceId} · ${anchor.catalogTerminalId}`
+                          : `${anchor.breadboardInstanceId} · hole ${anchor.holeId}`}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {activeAssemblyStep.prerequisites.length > 0 && (
+                <p className={prerequisitesComplete ? 'fine-text' : 'warning-notice'}>
+                  {prerequisitesComplete
+                    ? 'Prerequisites complete.'
+                    : 'Complete the prerequisite steps before confirming this step.'}
+                </p>
+              )}
+              {activeAssemblyStep.warnings.map((warning) => (
+                <p className="warning-notice" key={warning}>
+                  {warning}
+                </p>
+              ))}
+              <div className={styles.assemblyActions}>
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={assemblyStepIndex === 0}
+                  onClick={() => setAssemblyStepIndex((index) => Math.max(0, index - 1))}
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  className="button primary"
+                  disabled={!prerequisitesComplete || completedSet.has(activeAssemblyStep.id)}
+                  onClick={() =>
+                    saveAssemblyProgress(
+                      [...completedAssemblySteps, activeAssemblyStep.id],
+                      skippedAssemblySteps.filter((id) => id !== activeAssemblyStep.id),
+                    )
+                  }
+                >
+                  I completed this step
+                </button>
+                <button
+                  type="button"
+                  className="button secondary"
+                  onClick={() =>
+                    saveAssemblyProgress(
+                      completedAssemblySteps.filter((id) => id !== activeAssemblyStep.id),
+                      [...new Set([...skippedAssemblySteps, activeAssemblyStep.id])],
+                    )
+                  }
+                >
+                  Skip for now
+                </button>
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={assemblyStepIndex >= assemblyPlan.steps.length - 1}
+                  onClick={() =>
+                    setAssemblyStepIndex((index) =>
+                      Math.min(assemblyPlan.steps.length - 1, index + 1),
+                    )
+                  }
+                >
+                  Next
+                </button>
+              </div>
+              <p className="fine-text">
+                Next only changes the selected step. Completion and skip status are separate.
+                Progress is saved in this browser and is not a physical verification.
+              </p>
+            </article>
+            {assemblyPlan.warnings.map((warning) => (
+              <p className="warning-notice" key={warning}>
+                {warning}
+              </p>
+            ))}
+            <p className="fine-text">
+              Planner {assemblyPlan.plannerVersion} · graph {assemblyPlan.graphDigest.slice(0, 12)}{' '}
+              · catalog {assemblyPlan.catalogReleaseId}
             </p>
           </>
         )}

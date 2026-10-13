@@ -1,0 +1,21 @@
+{
+  "name": "@schemora/assembly-plan",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@schemora/catalog": "workspace:*",
+    "@schemora/circuit-model": "workspace:*",
+    "@schemora/validation": "workspace:*",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

@@ -71,6 +71,88 @@
   margin: 0.25rem 0.8rem 0.1rem 0;
   font-size: 0.84rem;
 }
+.assemblyGuide {
+  display: grid;
+  gap: 1rem;
+}
+.assemblyMeta,
+.assemblyActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.7rem;
+}
+.assemblyMeta {
+  justify-content: space-between;
+  color: var(--muted, #687386);
+  font-size: 0.88rem;
+}
+.assemblyList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.5rem;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.assemblyList button {
+  display: grid;
+  gap: 0.3rem;
+  width: 100%;
+  height: 100%;
+  padding: 0.75rem;
+  text-align: left;
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 0.65rem;
+  background: var(--surface, #fff);
+  color: inherit;
+  cursor: pointer;
+}
+.assemblyList button[aria-current='step'] {
+  border-color: #327c8b;
+  box-shadow: 0 0 0 2px rgb(50 124 139 / 14%);
+}
+.assemblyList small {
+  color: var(--muted, #687386);
+}
+.activeAssemblyStep {
+  padding: 1rem;
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 0.75rem;
+}
+.activeAssemblyStep h3 {
+  margin: 0.4rem 0;
+}
+.activeAssemblyStep > ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  padding-left: 1.25rem;
+}
+.assemblyActions {
+  margin-top: 1rem;
+}
+@media print {
+  .page > :not(.assemblyGuide) {
+    display: none !important;
+  }
+  .assemblyGuide {
+    display: block;
+    border: 0;
+    box-shadow: none;
+  }
+  .assemblyGuide button {
+    display: none !important;
+  }
+  .assemblyList button {
+    display: grid !important;
+    border: 0;
+    padding: 0.25rem;
+  }
+  .activeAssemblyStep {
+    break-inside: avoid;
+  }
+}
 @media (max-width: 850px) {
   .grid {
     grid-template-columns: 1fr;
