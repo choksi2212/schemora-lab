@@ -1,0 +1,89 @@
+.page {
+  display: grid;
+  gap: 1.25rem;
+}
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+.connection {
+  display: grid;
+  gap: 0.65rem;
+  padding: 1rem 0;
+  border-top: 1px solid var(--line, #e5e7eb);
+}
+.connection select,
+.placement select {
+  width: 100%;
+}
+.placement {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(8rem, 0.7fr);
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0;
+  border-top: 1px solid var(--line, #e5e7eb);
+}
+.placement span {
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+.placement small {
+  display: block;
+  color: var(--muted, #687386);
+  font-weight: 400;
+  margin-top: 0.15rem;
+}
+.validation {
+  display: grid;
+  gap: 1rem;
+}
+.summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 0.7rem;
+}
+.findings {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+.findings li {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 0.8rem;
+  padding: 0.85rem;
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 0.7rem;
+}
+.findings p {
+  margin: 0.35rem 0;
+}
+.findings a {
+  display: inline-block;
+  margin: 0.25rem 0.8rem 0.1rem 0;
+  font-size: 0.84rem;
+}
+@media (max-width: 850px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 560px) {
+  .placement {
+    grid-template-columns: 1fr;
+  }
+  .findings li {
+    grid-template-columns: 1fr;
+  }
+  .summary {
+    flex-direction: column;
+  }
+}

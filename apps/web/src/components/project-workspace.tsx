@@ -412,6 +412,19 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
           04 Hardware & build <span>Coming later</span>
         </span>
       </div>
+      <section className="panel" aria-labelledby="circuit-workspace-title">
+        <div className="panel-heading">
+          <div>
+            <h2 id="circuit-workspace-title">Hardware knowledge & validation</h2>
+            <p className="fine-text">
+              Model a source-backed starter circuit and review deterministic checks.
+            </p>
+          </div>
+          <Link className="button secondary" href={`/projects/${projectId}/circuit`}>
+            Open circuit workspace <ArrowRight size={15} />
+          </Link>
+        </div>
+      </section>
       <ErrorNotice
         error={error}
         onRetry={() => {

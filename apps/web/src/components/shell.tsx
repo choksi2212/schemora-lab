@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Boxes, FileText, ArrowUpRight, Layers3, CircleHelp, Cpu } from 'lucide-react';
+import { Boxes, FileText, ArrowUpRight, Layers3, CircleHelp, Cpu, BookOpen } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 export function Shell({ children }: { children: React.ReactNode }) {
@@ -42,6 +42,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
         >
           <Boxes size={18} /> Projects <span className="nav-key">01</span>
         </Link>
+        <Link
+          className={`nav-item ${pathname.startsWith('/catalog') ? 'active' : ''}`}
+          href="/catalog"
+        >
+          <BookOpen size={18} /> Hardware catalog <span className="nav-key">02</span>
+        </Link>
         <div className="nav-item muted">
           <Cpu size={18} /> Workbench <span className="tiny-tag">Soon</span>
         </div>
@@ -64,7 +70,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <a className="nav-item" href="/api/auth/signin">
             <FileText size={18} /> Account <ArrowUpRight size={15} />
           </a>
-          <span className="sidebar-version">SCHEMORA · PHASE 01</span>
+          <span className="sidebar-version">SCHEMORA · PHASE 02</span>
         </div>
       </aside>
       <div className="content-shell">

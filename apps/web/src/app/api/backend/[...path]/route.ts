@@ -18,9 +18,14 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
         { status: 403 },
       );
     const { path } = await context.params;
+    const validCatalogRead =
+      path[0] === 'v1' &&
+      path[1] === 'catalog' &&
+      ['GET', 'HEAD'].includes(request.method) &&
+      (path.length === 2 || path.length === 3);
+    const validProjectOperation = path[0] === 'v1' && path[1] === 'projects';
     if (
-      path[0] !== 'v1' ||
-      path[1] !== 'projects' ||
+      (!validCatalogRead && !validProjectOperation) ||
       path.some((part) => part === '..' || part.includes('/') || part.includes('\\'))
     )
       return NextResponse.json(

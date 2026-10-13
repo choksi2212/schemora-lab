@@ -6,11 +6,17 @@ Schemora turns an existing hardware conversation into a reviewable design and, f
 
 Active development lives on the `dev` branch. `main` contains the project introduction only.
 
-## Phase 1
+## Phase 1 — Conversation to reviewed design
 
 Import a supported hardware conversation, choose its thread, inspect the normalized transcript, and review sourced board, component, connection, and firmware proposals. Unknown details, conflicting claims, and superseded instructions remain visible. Corrections and review actions are saved as project revisions.
 
-Supported inputs: UTF-8 TXT/Markdown, static HTML, recognized JSON exports, text PDFs, and restricted ZIP bundles. Maximum upload: 10 MiB. Image-only PDF OCR, universal export compatibility, catalog verification, 3D assembly, and electrical simulation are later capabilities.
+Supported inputs: UTF-8 TXT/Markdown, static HTML, recognized JSON exports, text PDFs, and restricted ZIP bundles. Maximum upload: 10 MiB. Image-only PDF OCR and universal export compatibility remain unsupported.
+
+## Phase 2 — Hardware knowledge and circuit validation
+
+The catalog exposes an exact ESP32-DevKitC V4 / WROOM-32E / male-header configuration, a Kingbright WP7113ID LED, a YAGEO 220 Ω resistor, and a source-backed BusBoard BB400/BB400T connectivity topology. Circuits are represented by versioned terminal/hole graphs, persisted as immutable project revisions, and checked with deterministic structural and limited electrical rules. Reports preserve unknown electrical limits; a pass is not a safety certification. Photo recognition, 3D workbench, firmware execution, and general circuit simulation are not included.
+
+See [Phase 2 implementation details and limits](docs/Phase-2-Implementation.md) for catalog sources, graph contracts, rules, APIs, persistence, and verification.
 
 ## Run locally
 
@@ -58,15 +64,18 @@ Parser child processes have time and memory limits. Public production deployment
 
 ## Repository guide
 
-| Path                    | Responsibility                                                             |
-| ----------------------- | -------------------------------------------------------------------------- |
-| `apps/web`              | Desktop UI, GitHub session, server-only API proxy                          |
-| `apps/api`              | Authenticated project/import/review HTTP API                               |
-| `apps/worker`           | Durable import/extraction and deletion processing                          |
-| `packages/contracts`    | Strict versioned conversation and candidate schemas                        |
-| `packages/intelligence` | Safe parsers, conservative extraction, provider adapter, benchmark         |
-| `packages/persistence`  | PostgreSQL/Drizzle, immutable artifacts/revisions, outbox/jobs, migrations |
-| `packages/storage`      | Private development filesystem and S3 adapters                             |
-| `docs`                  | PRD, TRD, delivery plans, system design, Phase 1 evidence                  |
+| Path                        | Responsibility                                                                |
+| --------------------------- | ----------------------------------------------------------------------------- |
+| `apps/web`                  | Desktop UI, GitHub session, server-only API proxy                             |
+| `apps/api`                  | Authenticated project/import/review/catalog/circuit HTTP API                  |
+| `apps/worker`               | Durable import/extraction and deletion processing                             |
+| `packages/contracts`        | Strict versioned conversation and candidate schemas                           |
+| `packages/intelligence`     | Safe parsers, conservative extraction, provider adapter, benchmark            |
+| `packages/persistence`      | PostgreSQL/Drizzle, immutable artifacts/revisions/graphs/reports, outbox/jobs |
+| `packages/storage`          | Private development filesystem and S3 adapters                                |
+| `packages/hardware-catalog` | Versioned source-linked component and breadboard catalog                      |
+| `packages/circuit-model`    | Strict circuit graph, structural checks, deterministic breadboard nets        |
+| `packages/validation`       | Versioned deterministic Phase 2 findings and report contracts                 |
+| `docs`                      | PRD, TRD, delivery plans, system design, phase implementation evidence        |
 
-See [Phase 1 scope and research](docs/Phase-1-Implementation.md), [parser research](packages/intelligence/RESEARCH.md), and [synthetic benchmark results](packages/intelligence/BENCHMARK.md).
+See [Phase 1 scope and research](docs/Phase-1-Implementation.md), [Phase 2 implementation](docs/Phase-2-Implementation.md), [parser research](packages/intelligence/RESEARCH.md), and [synthetic benchmark results](packages/intelligence/BENCHMARK.md).
