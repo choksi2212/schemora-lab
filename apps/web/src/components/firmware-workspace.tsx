@@ -72,6 +72,29 @@ type StoredRun = {
 };
 type RunSummary = { id: string; status: string; binding: StoredRun['binding']; createdAt: string };
 type BoundArtifact = { graphDigest: string; graphRevision: number };
+type BuildDiagnostic = {
+  severity: 'error' | 'warning' | 'info';
+  code: string;
+  message: string;
+  sourcePath: string | null;
+  line: number | null;
+  column: number | null;
+};
+type FirmwareBuild = {
+  id: string;
+  status: 'succeeded' | 'failed' | 'timed_out' | 'rejected';
+  result: {
+    compilerVersion: string;
+    durationMs: number;
+    diagnostics: BuildDiagnostic[];
+    artifacts: {
+      role: 'application' | 'bootloader' | 'partition_table';
+      path: string;
+      byteLength: number;
+    }[];
+  };
+  createdAt: string;
+};
 
 const languageDefaults: Record<FirmwareLanguage, { entrypoint: string; label: string }> = {
   'arduino-cpp': { entrypoint: 'src/main.cpp', label: 'Arduino C++' },
@@ -143,6 +166,8 @@ export function FirmwareWorkspace({
   const [reason, setReason] = useState('');
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [run, setRun] = useState<StoredRun | null>(null);
+  const [builds, setBuilds] = useState<FirmwareBuild[]>([]);
+  const [buildError, setBuildError] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -204,6 +229,28 @@ export function FirmwareWorkspace({
     );
     if (requestId === runRequestId.current) setRun(detail.run);
   }, [projectId]);
+
+  useEffect(() => {
+    let active = true;
+    setBuilds([]);
+    setBuildError('');
+    if (!currentArtifact)
+      return () => {
+        active = false;
+      };
+    void api<{ items: FirmwareBuild[] }>(
+      `/projects/${encodeURIComponent(projectId)}/firmware-artifacts/${encodeURIComponent(currentArtifact.id)}/builds`,
+    )
+      .then((result) => {
+        if (active) setBuilds(result.items);
+      })
+      .catch((cause: unknown) => {
+        if (active) setBuildError(friendlyError(cause));
+      });
+    return () => {
+      active = false;
+    };
+  }, [projectId, currentArtifact?.id]);
 
   useEffect(() => {
     let active = true;
@@ -925,6 +972,68 @@ export function FirmwareWorkspace({
           graph association is derived from the immutable project revision snapshot; firmware
           artifacts do not carry a separate graph association field.
         </p>
+      )}
+      {currentArtifact && (
+        <section className={styles.runRecord} aria-labelledby="firmware-build-heading">
+          <h3 id="firmware-build-heading">Compiler history</h3>
+          <p className="fine-text">
+            Build records are immutable and tied to this source digest. Compiler diagnostics report
+            source locations when the compiler supplies them; a build result does not mean the
+            firmware was executed.
+          </p>
+          {buildError && <p className="warning-notice">{buildError}</p>}
+          {!buildError && builds.length === 0 && (
+            <p className="fine-text">No compiler result is stored for this source version.</p>
+          )}
+          {builds.map((build) => (
+            <article key={build.id} className={styles.runRecord}>
+              <div className={styles.firmwareActions}>
+                <strong>Build {build.status.replaceAll('_', ' ')}</strong>
+                <span className="fine-text">
+                  {build.result.compilerVersion} · {build.result.durationMs} ms ·{' '}
+                  {new Date(build.createdAt).toLocaleString()}
+                </span>
+              </div>
+              {build.result.diagnostics.length > 0 ? (
+                <ul className={styles.buildDiagnostics}>
+                  {build.result.diagnostics.map((diagnostic, index) => (
+                    <li key={`${diagnostic.code}-${index}`}>
+                      <strong>
+                        {diagnostic.severity.toUpperCase()} · {diagnostic.code}
+                      </strong>
+                      {diagnostic.sourcePath && (
+                        <code>
+                          {diagnostic.sourcePath}
+                          {diagnostic.line !== null && `:${diagnostic.line}`}
+                          {diagnostic.column !== null && `:${diagnostic.column}`}
+                        </code>
+                      )}
+                      <span>{diagnostic.message}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="fine-text">No compiler diagnostics were recorded.</p>
+              )}
+              {build.result.artifacts.length > 0 && (
+                <ul className={styles.buildArtifacts}>
+                  {build.result.artifacts.map((output) => (
+                    <li key={output.role}>
+                      <a
+                        href={`/api/backend/v1/projects/${encodeURIComponent(projectId)}/firmware-artifacts/${encodeURIComponent(currentArtifact.id)}/builds/${encodeURIComponent(build.id)}/artifacts/${encodeURIComponent(output.role)}`}
+                      >
+                        Download {output.role.replaceAll('_', ' ')}
+                      </a>
+                      <span className="fine-text">
+                        {output.path} · {output.byteLength.toLocaleString()} bytes
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </article>
+          ))}
+        </section>
       )}
       {currentArtifact && (
         <div className={styles.runControls}>

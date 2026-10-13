@@ -155,6 +155,27 @@
 .runRecord h3 {
   margin-top: 0.35rem;
 }
+.buildDiagnostics,
+.buildArtifacts {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding-left: 1.25rem;
+}
+.buildDiagnostics li,
+.buildArtifacts li {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.buildDiagnostics code {
+  color: var(--muted, #65716f);
+  font-size: 0.82rem;
+}
+.buildArtifacts a {
+  width: fit-content;
+}
 .serialOutput {
   max-height: 18rem;
   overflow: auto;
