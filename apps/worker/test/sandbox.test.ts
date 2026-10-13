@@ -1,8 +1,8 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { lstat, mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, mkdir, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DockerSandbox, type SandboxLimits } from '../src/sandbox.js';
 
@@ -24,6 +24,36 @@ afterEach(async () => {
   noSpawn.mockClear();
 });
 
+function tarArchive(entries: Array<{ name: string; data: Buffer; type?: number; size?: number }>) {
+  const blocks: Buffer[] = [];
+  for (const entry of entries) {
+    const header = Buffer.alloc(512);
+    header.write(entry.name, 0, 100, 'utf8');
+    header.write('0000644\0', 100, 8, 'ascii');
+    header.write('0000000\0', 108, 8, 'ascii');
+    header.write('0000000\0', 116, 8, 'ascii');
+    header.write(
+      (entry.size ?? entry.data.length).toString(8).padStart(11, '0') + '\0',
+      124,
+      12,
+      'ascii',
+    );
+    header.write('00000000000\0', 136, 12, 'ascii');
+    header.fill(32, 148, 156);
+    header[156] = entry.type ?? 48;
+    header.write('ustar\0', 257, 6, 'ascii');
+    header.write('00', 263, 2, 'ascii');
+    let checksum = 0;
+    for (const byte of header) checksum += byte;
+    header.write(checksum.toString(8).padStart(6, '0') + '\0 ', 148, 8, 'ascii');
+    blocks.push(header, entry.data);
+    const padding = (512 - (entry.data.length % 512)) % 512;
+    if (padding) blocks.push(Buffer.alloc(padding));
+  }
+  blocks.push(Buffer.alloc(1024));
+  return Buffer.concat(blocks);
+}
+
 function fakeDocker(
   info: Record<string, unknown>,
   calls: Array<{ args: string[]; options: unknown }>,
@@ -38,6 +68,8 @@ function fakeDocker(
     hostConfig?: Record<string, unknown>;
     mounts?: Array<{ Type: string; Destination: string; RW: boolean }>;
   },
+  outputTypes?: number[],
+  malformedArchive = false,
 ) {
   return ((_: string, args: string[], options: unknown) => {
     calls.push({ args, options });
@@ -101,23 +133,28 @@ function fakeDocker(
         );
       } else if (subcommand === 'start') child.stdout.write('simulator output');
       else if (subcommand === 'cp') {
-        const output = args[2]!;
-        await mkdir(output, { recursive: true });
+        const entries: Array<{ name: string; data: Buffer; type?: number; size?: number }> = [
+          { name: '.', data: Buffer.alloc(0), type: 53 },
+        ];
         for (let index = 0; index < fileCount; index += 1) {
-          const outputFile = join(
-            output,
-            outputNames?.[index] ?? (fileCount === 1 ? 'trace.json' : `empty-${index}.bin`),
-          );
-          await mkdir(dirname(outputFile), { recursive: true });
-          await writeFile(
-            outputFile,
-            outputSize === 11
-              ? fileCount === 1
-                ? '{"ok":true}'
-                : Buffer.alloc(0)
-              : Buffer.alloc(outputSize, 120),
-          );
+          const name =
+            outputNames?.[index] ?? (fileCount === 1 ? 'trace.json' : `empty-${index}.bin`);
+          const parent = name.includes('/') ? name.slice(0, name.lastIndexOf('/')) : '';
+          if (parent && !entries.some((entry) => entry.name === `${parent}/`)) {
+            entries.push({ name: `${parent}/`, data: Buffer.alloc(0), type: 53 });
+          }
+          entries.push({
+            name,
+            type: outputTypes?.[index],
+            data:
+              outputSize === 11
+                ? Buffer.from(fileCount === 1 ? '{"ok":true}' : '')
+                : Buffer.alloc(outputSize, 120),
+          });
         }
+        const archive = tarArchive(entries);
+        if (malformedArchive) archive[0] ^= 1;
+        child.stdout.write(archive);
       }
       child.emit('close', failedCommands.includes(subcommand ?? '') ? 1 : 0);
     });
@@ -360,6 +397,101 @@ describe('DockerSandbox fail-closed preflight', () => {
     );
     expect(leakedPath).not.toBe('');
     await rm(leakedPath, { recursive: true, force: true });
+  });
+
+  it('attempts forced cleanup even when Docker create reports failure', async () => {
+    const calls: Array<{ args: string[]; options: unknown }> = [];
+    const sandbox = new DockerSandbox({
+      platform: 'linux',
+      uid: 1000,
+      spawn: fakeDocker(
+        {
+          OSType: 'linux',
+          ServerVersion: '27.0',
+          CgroupVersion: '2',
+          SecurityOptions: ['name=rootless'],
+        },
+        calls,
+        11,
+        limits,
+        ['create'],
+      ),
+    });
+    await expect(sandbox.run({ image, firmware: new Uint8Array([1]), limits })).rejects.toThrow(
+      'SANDBOX_CREATE_FAILED',
+    );
+    const generatedName = calls.find((call) => call.args[0] === 'create')?.args[
+      calls.find((call) => call.args[0] === 'create')!.args.indexOf('--name') + 1
+    ];
+    expect(generatedName).toMatch(/^schemora-/);
+    expect(calls.find((call) => call.args[0] === 'rm')?.args.at(-1)).toBe(generatedName);
+  });
+
+  it('rejects symlink tar entries and a corrupt tar header', async () => {
+    for (const [outputTypes, malformedArchive] of [
+      [[50], false],
+      [undefined, true],
+    ] as const) {
+      const calls: Array<{ args: string[]; options: unknown }> = [];
+      const sandbox = new DockerSandbox({
+        platform: 'linux',
+        uid: 1000,
+        spawn: fakeDocker(
+          {
+            OSType: 'linux',
+            ServerVersion: '27.0',
+            CgroupVersion: '2',
+            SecurityOptions: ['name=rootless'],
+          },
+          calls,
+          11,
+          limits,
+          [],
+          undefined,
+          1,
+          null,
+          undefined,
+          undefined,
+          outputTypes ? [...outputTypes] : undefined,
+          malformedArchive,
+        ),
+      });
+      await expect(sandbox.run({ image, firmware: new Uint8Array([1]), limits })).rejects.toThrow(
+        'SANDBOX_OUTPUT_INVALID',
+      );
+    }
+  });
+
+  it('accepts the root directory entry and nested file paths from Docker tar output', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sandbox-nested-tar-test-'));
+    tempRoots.push(root);
+    const workRoot = join(root, 'work');
+    await mkdir(workRoot);
+    const calls: Array<{ args: string[]; options: unknown }> = [];
+    const sandbox = new DockerSandbox({
+      platform: 'linux',
+      uid: 1000,
+      tempRoot: workRoot,
+      spawn: fakeDocker(
+        {
+          OSType: 'linux',
+          ServerVersion: '27.0',
+          CgroupVersion: '2',
+          SecurityOptions: ['name=rootless'],
+        },
+        calls,
+        11,
+        limits,
+        [],
+        undefined,
+        1,
+        null,
+        ['folder/trace.json'],
+      ),
+    });
+    const result = await sandbox.run({ image, firmware: new Uint8Array([1]), limits });
+    expect(Buffer.from(result.files['folder/trace.json']!).toString()).toBe('{"ok":true}');
+    expect(calls.find((call) => call.args[0] === 'cp')?.args.at(-1)).toBe('-');
   });
 
   it('caps output file count', async () => {

@@ -1,5 +1,5 @@
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, readdir, rm, lstat, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -72,6 +72,143 @@ class BoundedBuffer {
   text() {
     return Buffer.concat(this.chunks).toString('utf8');
   }
+}
+
+function parseOutputTar(archive: Buffer, maxBytes: number): Record<string, Uint8Array> {
+  const files: Record<string, Uint8Array> = Object.create(null) as Record<string, Uint8Array>;
+  const seen = new Set<string>();
+  const regularFiles = new Set<string>();
+  let offset = 0;
+  let total = 0;
+  let entries = 0;
+  let ended = false;
+  const field = (header: Buffer, start: number, length: number) =>
+    header
+      .subarray(start, start + length)
+      .toString('utf8')
+      .replace(/\0.*$/s, '')
+      .trimEnd();
+  while (offset + 512 <= archive.length) {
+    const header = archive.subarray(offset, offset + 512);
+    if (header.every((byte) => byte === 0)) {
+      if (
+        offset + 1024 > archive.length ||
+        !archive.subarray(offset + 512, offset + 1024).every((byte) => byte === 0)
+      )
+        throw new Error('SANDBOX_OUTPUT_INVALID');
+      const trailing = archive.subarray(offset);
+      if (trailing.length % 512 !== 0 || !trailing.every((byte) => byte === 0))
+        throw new Error('SANDBOX_OUTPUT_INVALID');
+      ended = true;
+      offset = archive.length;
+      break;
+    }
+    const checksumText = field(header, 148, 8).trim();
+    if (!/^[0-7]+$/.test(checksumText)) throw new Error('SANDBOX_OUTPUT_INVALID');
+    const storedChecksum = Number.parseInt(checksumText, 8);
+    let checksum = 0;
+    for (let index = 0; index < 512; index += 1)
+      checksum += index >= 148 && index < 156 ? 32 : header[index]!;
+    if (
+      !Number.isFinite(storedChecksum) ||
+      checksum !== storedChecksum ||
+      field(header, 257, 6) !== 'ustar'
+    )
+      throw new Error('SANDBOX_OUTPUT_INVALID');
+    const name = field(header, 0, 100);
+    const prefix = field(header, 345, 155);
+    const type = header[156];
+    const rawPath = prefix ? `${prefix}/${name}` : name;
+    const path =
+      type === 53 && (rawPath === '.' || rawPath === './')
+        ? ''
+        : type === 53 && rawPath.endsWith('/')
+          ? rawPath.slice(0, -1)
+          : rawPath;
+    const sizeText = field(header, 124, 12).trim();
+    if (!/^[0-7]+$/.test(sizeText)) throw new Error('SANDBOX_OUTPUT_INVALID');
+    const size = Number.parseInt(sizeText, 8);
+    const isRootDirectory = type === 53 && path === '';
+    if ((!isRootDirectory && !safeFile(path)) || (path && seen.has(path)))
+      throw new Error('SANDBOX_OUTPUT_INVALID');
+    if (++entries > 256) throw new Error('SANDBOX_OUTPUT_LIMIT');
+    if (path) seen.add(path);
+    if (type === 53) {
+      if (size !== 0) throw new Error('SANDBOX_OUTPUT_INVALID');
+    } else if (type === 0 || type === 48) {
+      if (size > maxBytes || total + size > maxBytes) throw new Error('SANDBOX_OUTPUT_LIMIT');
+      const segments = path.split('/');
+      for (let index = 1; index < segments.length; index += 1) {
+        if (regularFiles.has(segments.slice(0, index).join('/')))
+          throw new Error('SANDBOX_OUTPUT_INVALID');
+      }
+      if ([...seen].some((candidate) => candidate.startsWith(`${path}/`)))
+        throw new Error('SANDBOX_OUTPUT_INVALID');
+      const dataStart = offset + 512;
+      const dataEnd = dataStart + size;
+      if (dataEnd > archive.length) throw new Error('SANDBOX_OUTPUT_INVALID');
+      files[path] = Uint8Array.from(archive.subarray(dataStart, dataEnd));
+      regularFiles.add(path);
+      total += size;
+    } else throw new Error('SANDBOX_OUTPUT_INVALID');
+    offset += 512 + Math.ceil(size / 512) * 512;
+  }
+  if (!ended || offset !== archive.length) throw new Error('SANDBOX_OUTPUT_INVALID');
+  return files;
+}
+
+function invokeBinary(
+  spawn: typeof nodeSpawn,
+  binary: string,
+  args: string[],
+  timeoutMs: number,
+  maxStdout: number,
+): Promise<{ code: number; stdout: Buffer; stderr: string }> {
+  return new Promise((resolvePromise, reject) => {
+    let done = false;
+    let child: ChildProcess;
+    const chunks: Buffer[] = [];
+    let size = 0;
+    const stderr = new BoundedBuffer(64 * 1024, () => stopAndFail('SANDBOX_OUTPUT_LIMIT'));
+    const stop = () => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        /* process already exited */
+      }
+    };
+    const finish = (error?: Error, code = 0) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolvePromise({ code, stdout: Buffer.concat(chunks), stderr: stderr.text() });
+    };
+    const stopAndFail = (message: string) => {
+      stop();
+      finish(new Error(message));
+    };
+    const timer = setTimeout(() => stopAndFail('SANDBOX_COMMAND_TIMEOUT'), timeoutMs);
+    try {
+      child = spawn(binary, args, {
+        shell: false,
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { PATH: process.env.PATH, SYSTEMROOT: process.env.SYSTEMROOT },
+      });
+    } catch {
+      finish(new Error('SANDBOX_DOCKER_UNAVAILABLE'));
+      return;
+    }
+    child.stdout?.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > maxStdout) stopAndFail('SANDBOX_OUTPUT_LIMIT');
+      else chunks.push(Buffer.from(chunk));
+    });
+    child.stderr?.on('data', (chunk: Buffer) => stderr.push(chunk));
+    child.once('error', () => finish(new Error('SANDBOX_DOCKER_UNAVAILABLE')));
+    child.once('close', (code) => finish(undefined, code ?? 1));
+  });
 }
 
 function invoke(
@@ -189,12 +326,11 @@ export class DockerSandbox {
     await this.preflight(request.image);
     const work = await mkdtemp(join(this.tempRoot, 'schemora-sandbox-'));
     const inputDir = join(work, 'input');
-    const outputDir = join(work, 'output');
     const inputPath = join(inputDir, 'firmware.bin');
     const id = `schemora-${randomUUID()}`;
-    let created = false;
+    let createAttempted = false;
     try {
-      await Promise.all([mkdir(inputDir, { mode: 0o700 }), mkdir(outputDir, { mode: 0o700 })]);
+      await mkdir(inputDir, { mode: 0o700 });
       await writeFile(inputPath, request.firmware, { mode: 0o444, flag: 'wx' });
       const args = [
         'create',
@@ -227,9 +363,9 @@ export class DockerSandbox {
         request.image,
         ...fixedCommand,
       ];
+      createAttempted = true;
       const create = await invoke(this.spawn, this.docker, args, 10_000);
       if (create.code !== 0) throw new Error('SANDBOX_CREATE_FAILED');
-      created = true;
       const configured = await invoke(
         this.spawn,
         this.docker,
@@ -248,25 +384,27 @@ export class DockerSandbox {
       let result = start;
       if (start.code === 125 || start.code === 126 || start.code === 127)
         throw new Error('SANDBOX_START_FAILED');
-      const copy = await invoke(
+      const archiveCap = request.limits.outputBytes + 384 * 1024;
+      const copy = await invokeBinary(
         this.spawn,
         this.docker,
-        ['cp', `${id}:/output/.`, outputDir],
+        ['cp', `${id}:/output/.`, '-'],
         10_000,
-        4096,
+        archiveCap,
       );
       if (copy.code !== 0) throw new Error('SANDBOX_OUTPUT_UNAVAILABLE');
-      const files = await this.readOutputs(outputDir, request.limits.outputBytes);
+      const files = parseOutputTar(copy.stdout, request.limits.outputBytes);
       return { exitCode: result.code, stdout: result.stdout, stderr: result.stderr, files };
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('SANDBOX_')) throw error;
       throw new Error('SANDBOX_EXECUTION_FAILED');
     } finally {
       let cleanupFailed = false;
-      if (created) {
+      if (createAttempted) {
         try {
           const removed = await invoke(this.spawn, this.docker, ['rm', '--force', id], 5000);
-          if (removed.code !== 0) cleanupFailed = true;
+          if (removed.code !== 0 && !/no such (object|container)/i.test(removed.stderr))
+            cleanupFailed = true;
         } catch {
           cleanupFailed = true;
         }
@@ -376,31 +514,5 @@ export class DockerSandbox {
       inspected.Config?.Cmd?.join('\0') === fixedCommand.join('\0') &&
       expectedMounts;
     if (!verified) throw new Error('SANDBOX_CONTROLS_UNAVAILABLE');
-  }
-
-  private async readOutputs(directory: string, maxBytes: number) {
-    const files: Record<string, Uint8Array> = Object.create(null) as Record<string, Uint8Array>;
-    let total = 0;
-    let fileCount = 0;
-    const visit = async (current: string, prefix: string): Promise<void> => {
-      for (const entry of await readdir(current, { withFileTypes: true })) {
-        const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
-        if (!safeFile(relative)) throw new Error('SANDBOX_OUTPUT_INVALID');
-        const path = join(current, entry.name);
-        const meta = await lstat(path);
-        if (meta.isSymbolicLink() || entry.isSymbolicLink())
-          throw new Error('SANDBOX_OUTPUT_INVALID');
-        if (entry.isDirectory()) await visit(path, relative);
-        else if (entry.isFile()) {
-          fileCount += 1;
-          if (fileCount > 256) throw new Error('SANDBOX_OUTPUT_LIMIT');
-          total += meta.size;
-          if (total > maxBytes) throw new Error('SANDBOX_OUTPUT_LIMIT');
-          files[relative] = await readFile(path);
-        } else throw new Error('SANDBOX_OUTPUT_INVALID');
-      }
-    };
-    await visit(directory, '');
-    return files;
   }
 }
