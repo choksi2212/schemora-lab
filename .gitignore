@@ -13,4 +13,5 @@ next-env.d.ts
 .DS_Store
 /examples/phase6-qemu-uart/build/
 /examples/phase6-qemu-uart/sdkconfig
+/examples/phase6-qemu-uart/sdkconfig.old
 /examples/phase6-qemu-uart/managed_components/

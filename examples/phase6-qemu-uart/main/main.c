@@ -12,7 +12,7 @@ void app_main(void) {
     esp_err_t write = gpio_set_level(GPIO_NUM_19, level);
     printf("SCHEMORA_GPIO19_REQUESTED=%d,RESULT=%s,TICK=%lu\n", level,
            write == ESP_OK ? "OK" : "ERROR", tick);
-    vTaskDelay(pdMS_TO_TICKS(250));
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
   printf("SCHEMORA_QEMU_REFERENCE_COMPLETE\n");
   while (1) {
