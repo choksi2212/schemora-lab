@@ -610,6 +610,47 @@ export type RunnerExecutionResponse = z.infer<typeof runnerExecutionResponseSche
 export type RunnerExecutionProfile = z.infer<typeof runnerExecutionProfileSchema>;
 export type RunnerCapability = RunnerExecutionRequest['capability'];
 
+export const RUNNER_RESPONSE_AUTH_VERSION = '1.0.0' as const;
+export const runnerAuthenticatedResponseSchema = z
+  .object({
+    protocolVersion: z.literal(RUNNER_RESPONSE_AUTH_VERSION),
+    keyId: z.string().min(1).max(100),
+    requestJti: z.string().uuid(),
+    responseJti: z.string().uuid(),
+    issuedAt: z.iso.datetime(),
+    responseDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    response: runnerExecutionResponseSchema,
+    signature: z
+      .string()
+      .length(86)
+      .regex(/^[A-Za-z0-9_-]{86}$/),
+  })
+  .strict();
+export type RunnerAuthenticatedResponse = z.infer<typeof runnerAuthenticatedResponseSchema>;
+
+export function runnerResponseDigest(response: RunnerExecutionResponse): string {
+  return canonicalDigest(response);
+}
+
+export function runnerSimulationBindingDigest(binding: SimulationBinding): string {
+  return canonicalDigest(binding);
+}
+
+/** Fixed-order, domain-separated UTF-8 message for signing an exact response digest. */
+export function runnerResponseSigningMessage(
+  response: Omit<RunnerAuthenticatedResponse, 'signature'>,
+): string {
+  return JSON.stringify({
+    domain: 'schemora.runner.response.v1',
+    protocolVersion: response.protocolVersion,
+    keyId: response.keyId,
+    requestJti: response.requestJti,
+    responseJti: response.responseJti,
+    issuedAt: response.issuedAt,
+    responseDigest: response.responseDigest,
+  });
+}
+
 export function validateRunnerExecutionResponseForRequest(
   responseInput: unknown,
   requestInput: unknown,

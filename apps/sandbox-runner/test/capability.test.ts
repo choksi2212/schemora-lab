@@ -3,9 +3,12 @@ import { describe, expect, it } from 'vitest';
 import {
   runnerCapabilitySchema,
   runnerCapabilitySigningMessage,
+  runnerAuthenticatedResponseSchema,
+  runnerResponseDigest,
+  runnerResponseSigningMessage,
   type RunnerCapability,
 } from '@schemora/simulation';
-import { verifyRunnerCapability } from '../src/capability.js';
+import { verifyRunnerCapability, verifyRunnerExecutionResponse } from '../src/capability.js';
 
 const now = Date.parse('2026-10-14T10:00:00.000Z');
 const runId = '6fb8f60e-ec9a-4d29-9122-4d2bf13e9c43';
@@ -46,6 +49,45 @@ function replayGuard() {
       return true;
     },
   };
+}
+
+function createAuthenticatedResponse(overrides: Record<string, unknown> = {}) {
+  const response = {
+    protocolVersion: '1.0.0',
+    runId,
+    attemptId,
+    payloadDigest,
+    executionProfileId: 'profile-test-v1',
+    imageDigest: `sha256:${'c'.repeat(64)}`,
+    status: 'accepted',
+    startedAt: null,
+    finishedAt: null,
+    terminationReason: null,
+    run: null,
+    outputManifest: [],
+    totalOutputBytes: 0,
+    cleanupReceipt: null,
+  };
+  const unsigned = runnerAuthenticatedResponseSchema.parse({
+    protocolVersion: '1.0.0',
+    keyId: 'worker-test',
+    requestJti: '8a748297-16b7-4451-9f4f-813d1ee86c31',
+    responseJti: 'f6e4915d-3b5d-44e9-bd2e-2b5d6e41cbbb',
+    issuedAt: new Date(now).toISOString(),
+    responseDigest: runnerResponseDigest(response as never),
+    response,
+    signature: 'A'.repeat(86),
+    ...overrides,
+  });
+  const { signature: _signature, ...signingInput } = unsigned;
+  return runnerAuthenticatedResponseSchema.parse({
+    ...unsigned,
+    signature: sign(
+      null,
+      Buffer.from(runnerResponseSigningMessage(signingInput)),
+      privateKey,
+    ).toString('base64url'),
+  });
 }
 
 describe('runner execution capability', () => {
@@ -100,6 +142,73 @@ describe('runner execution capability', () => {
     });
     expect(
       await verifyRunnerCapability({ ...base, capability: expired, payloadDigest }),
+    ).toMatchObject({ valid: false, reason: 'expired' });
+  });
+});
+
+describe('authenticated runner responses', () => {
+  it('verifies signed response integrity, request binding, key identity, and one-use response IDs', async () => {
+    const authenticatedResponse = createAuthenticatedResponse();
+    const guard = replayGuard();
+    const expected = {
+      requestJti: authenticatedResponse.requestJti,
+      runId,
+      attemptId,
+      payloadDigest,
+      executionProfileId: authenticatedResponse.response.executionProfileId,
+      imageDigest: authenticatedResponse.response.imageDigest,
+      bindingDigest: 'b'.repeat(64),
+      notBefore: new Date(now - 1_000).toISOString(),
+      deadlineAt,
+    };
+    const input = {
+      authenticatedResponse,
+      expected,
+      publicKeys,
+      replayGuard: guard,
+      now,
+    };
+    expect(await verifyRunnerExecutionResponse(input)).toMatchObject({ valid: true });
+    expect(await verifyRunnerExecutionResponse(input)).toMatchObject({
+      valid: false,
+      reason: 'replayed',
+    });
+    expect(
+      await verifyRunnerExecutionResponse({
+        ...input,
+        authenticatedResponse: {
+          ...authenticatedResponse,
+          response: { ...authenticatedResponse.response, imageDigest: `sha256:${'d'.repeat(64)}` },
+        },
+        replayGuard: replayGuard(),
+      }),
+    ).toMatchObject({ valid: false, reason: 'response_mismatch' });
+    expect(
+      await verifyRunnerExecutionResponse({
+        ...input,
+        expected: { ...expected, requestJti: '8a748297-16b7-4451-9f4f-813d1ee86c32' },
+        replayGuard: replayGuard(),
+      }),
+    ).toMatchObject({ valid: false, reason: 'response_mismatch' });
+    expect(
+      await verifyRunnerExecutionResponse({
+        ...input,
+        authenticatedResponse: {
+          ...authenticatedResponse,
+          signature: 'B'.repeat(86),
+        },
+        replayGuard: replayGuard(),
+      }),
+    ).toMatchObject({ valid: false, reason: 'invalid_signature' });
+    expect(
+      await verifyRunnerExecutionResponse({
+        ...input,
+        authenticatedResponse: {
+          ...authenticatedResponse,
+          issuedAt: new Date(now + 200_000).toISOString(),
+        },
+        replayGuard: replayGuard(),
+      }),
     ).toMatchObject({ valid: false, reason: 'expired' });
   });
 });

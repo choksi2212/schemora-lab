@@ -6,16 +6,29 @@ import {
   runnerExecutionRequestSchema,
   runnerRequestMatchesProfile,
   runnerExecutionProfileSchema,
+  runnerAuthenticatedResponseSchema,
+  runnerResponseSigningMessage,
+  runnerResponseDigest,
+  runnerSimulationBindingDigest,
   verifyRunnerFirmwareDigest,
   type RunnerExecutionProfile,
   type RunnerExecutionRequest,
   type RunnerCapability,
+  type RunnerAuthenticatedResponse,
 } from '@schemora/simulation';
 
 export interface RunnerCapabilityReplayGuard {
   /** Atomically claim keyId+jti until expiresAt; return false if it was already claimed. */
   claim(keyId: string, jti: string, expiresAt: number): Promise<boolean>;
 }
+
+export interface RunnerResponseReplayGuard {
+  /** Atomically claim keyId+responseJti through the response and clock-skew grace window. */
+  claim(keyId: string, responseJti: string, expiresAt: number): Promise<boolean>;
+}
+
+export const MAX_RUNNER_RESPONSE_GRACE_MS = 120_000;
+const RUNNER_EXECUTION_CLOCK_SKEW_MS = 15_000;
 
 export type CapabilityVerification =
   | { valid: true; capability: RunnerCapability }
@@ -133,4 +146,118 @@ export async function admitRunnerExecutionRequest(input: {
   });
   if (!capability.valid) return { admitted: false, reason: capability.reason };
   return { admitted: true, request: parsed.data, profile: profile.data };
+}
+
+export type RunnerResponseVerification =
+  | { valid: true; authenticated: RunnerAuthenticatedResponse }
+  | {
+      valid: false;
+      reason:
+        | 'invalid_response'
+        | 'unknown_key'
+        | 'invalid_signature'
+        | 'expired'
+        | 'replayed'
+        | 'response_mismatch';
+    };
+
+/** Authenticate a response before trusting runner-reported image, output, or cleanup claims. */
+export async function verifyRunnerExecutionResponse(input: {
+  authenticatedResponse: unknown;
+  expected: {
+    requestJti: string;
+    runId: string;
+    attemptId: string;
+    payloadDigest: string;
+    executionProfileId: string;
+    imageDigest: string;
+    bindingDigest: string;
+    notBefore: string;
+    deadlineAt: string;
+  };
+  publicKeys: Readonly<Record<string, string | KeyObject>>;
+  replayGuard: RunnerResponseReplayGuard;
+  now?: number;
+}): Promise<RunnerResponseVerification> {
+  const parsed = runnerAuthenticatedResponseSchema.safeParse(input.authenticatedResponse);
+  if (!parsed.success) return { valid: false, reason: 'invalid_response' };
+
+  const authenticated = parsed.data;
+  const response = authenticated.response;
+  if (
+    authenticated.requestJti !== input.expected.requestJti ||
+    response.runId !== input.expected.runId ||
+    response.attemptId !== input.expected.attemptId ||
+    response.payloadDigest !== input.expected.payloadDigest ||
+    response.executionProfileId !== input.expected.executionProfileId ||
+    response.imageDigest !== input.expected.imageDigest ||
+    (response.run !== null &&
+      runnerSimulationBindingDigest(response.run.binding) !== input.expected.bindingDigest) ||
+    runnerResponseDigest(response) !== authenticated.responseDigest
+  )
+    return { valid: false, reason: 'response_mismatch' };
+
+  const now = input.now ?? Date.now();
+  const issuedAt = Date.parse(authenticated.issuedAt);
+  const requestNotBefore = Date.parse(input.expected.notBefore);
+  const deadlineAt = Date.parse(input.expected.deadlineAt);
+  const startedAt = response.startedAt ? Date.parse(response.startedAt) : null;
+  const finishedAt = response.finishedAt ? Date.parse(response.finishedAt) : null;
+  const cleanupAt = response.cleanupReceipt
+    ? Date.parse(response.cleanupReceipt.completedAt)
+    : null;
+  if (
+    !Number.isFinite(issuedAt) ||
+    !Number.isFinite(requestNotBefore) ||
+    !Number.isFinite(deadlineAt) ||
+    issuedAt < requestNotBefore - 15_000 ||
+    issuedAt > deadlineAt + MAX_RUNNER_RESPONSE_GRACE_MS ||
+    (finishedAt === null && issuedAt > deadlineAt + RUNNER_EXECUTION_CLOCK_SKEW_MS) ||
+    issuedAt > now + 15_000 ||
+    now > deadlineAt + MAX_RUNNER_RESPONSE_GRACE_MS + RUNNER_EXECUTION_CLOCK_SKEW_MS ||
+    (startedAt !== null && (!Number.isFinite(startedAt) || startedAt > deadlineAt)) ||
+    (finishedAt !== null &&
+      (!Number.isFinite(finishedAt) ||
+        finishedAt > deadlineAt + RUNNER_EXECUTION_CLOCK_SKEW_MS ||
+        (startedAt !== null && startedAt > finishedAt))) ||
+    (cleanupAt !== null &&
+      (!Number.isFinite(cleanupAt) ||
+        cleanupAt < (finishedAt ?? Number.POSITIVE_INFINITY) ||
+        cleanupAt > issuedAt))
+  )
+    return { valid: false, reason: 'expired' };
+
+  const key = input.publicKeys[authenticated.keyId];
+  if (!key) return { valid: false, reason: 'unknown_key' };
+  let publicKey: KeyObject;
+  try {
+    publicKey = typeof key === 'string' ? createPublicKey(key) : key;
+    if (publicKey.asymmetricKeyType !== 'ed25519') return { valid: false, reason: 'unknown_key' };
+  } catch {
+    return { valid: false, reason: 'unknown_key' };
+  }
+
+  const signature = Buffer.from(authenticated.signature, 'base64url');
+  const { signature: _signature, ...unsigned } = authenticated;
+  if (
+    signature.length !== 64 ||
+    signature.toString('base64url') !== authenticated.signature ||
+    !verifySignature(
+      null,
+      Buffer.from(runnerResponseSigningMessage(unsigned), 'utf8'),
+      publicKey,
+      signature,
+    )
+  )
+    return { valid: false, reason: 'invalid_signature' };
+
+  if (
+    !(await input.replayGuard.claim(
+      authenticated.keyId,
+      authenticated.responseJti,
+      deadlineAt + MAX_RUNNER_RESPONSE_GRACE_MS + RUNNER_EXECUTION_CLOCK_SKEW_MS,
+    ))
+  )
+    return { valid: false, reason: 'replayed' };
+  return { valid: true, authenticated };
 }
