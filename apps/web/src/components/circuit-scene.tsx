@@ -13,6 +13,7 @@ import {
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
+import { resolveSimulationLedStates, type SceneSimulationRun } from './simulation-scene-state';
 import styles from './circuit-scene.module.css';
 
 type Endpoint =
@@ -52,6 +53,9 @@ type TerminalRef = { componentInstanceId: string; catalogTerminalId: string };
 type Props = {
   graph: CircuitWorkbenchGraph;
   onGraphChange: (graph: CircuitWorkbenchGraph) => void;
+  simulationRun?: SceneSimulationRun | null;
+  currentGraphDigest?: string | null;
+  currentFirmwareDigest?: string | null;
   className?: string;
   title?: string;
 };
@@ -275,12 +279,14 @@ function InstancedHoles({
 
 function BoardScene({
   graph,
+  ledStates,
   selected,
   onSelect,
   onRemoveWire,
   onSelectComponent,
 }: {
   graph: CircuitWorkbenchGraph;
+  ledStates: Readonly<Record<string, 'on' | 'off'>>;
   selected: TerminalRef | null;
   onSelect: (terminal: TerminalRef) => void;
   onRemoveWire: (wireId: string) => void;
@@ -407,7 +413,13 @@ function BoardScene({
             >
               <mesh>
                 <sphereGeometry args={[0.13, 20, 16]} />
-                <meshStandardMaterial color="#d3423c" roughness={0.22} metalness={0.04} />
+                <meshStandardMaterial
+                  color={ledStates[component.id] === 'on' ? '#ff625b' : '#d3423c'}
+                  emissive={ledStates[component.id] === 'on' ? '#c51c16' : '#210605'}
+                  emissiveIntensity={ledStates[component.id] === 'on' ? 1.25 : 0.04}
+                  roughness={0.22}
+                  metalness={0.04}
+                />
               </mesh>
               {[-0.07, 0.07].map((x) => (
                 <mesh key={x} position={[x, -0.2, 0]}>
@@ -496,6 +508,9 @@ function AccessibleFallback({ message }: { message: string }) {
 export function CircuitScene({
   graph,
   onGraphChange,
+  simulationRun = null,
+  currentGraphDigest = null,
+  currentFirmwareDigest = null,
   className,
   title = 'Circuit workbench 3D view',
 }: Props) {
@@ -504,6 +519,12 @@ export function CircuitScene({
   const [selected, setSelected] = useState<TerminalRef | null>(null);
   const [selectedComponentId, setSelectedComponentId] = useState<string | null>(null);
   const [editMessage, setEditMessage] = useState('Choose a terminal to start a wire.');
+  const ledStates = resolveSimulationLedStates({
+    graph,
+    run: simulationRun,
+    currentGraphDigest,
+    currentFirmwareDigest,
+  });
   useEffect(() => {
     setWebgl(isWebGLAvailable());
   }, []);
@@ -739,6 +760,7 @@ export function CircuitScene({
               <Suspense fallback={null}>
                 <BoardScene
                   graph={graph}
+                  ledStates={ledStates}
                   selected={selected}
                   onSelect={selectTerminal}
                   onRemoveWire={removeWire}
@@ -755,9 +777,16 @@ export function CircuitScene({
           {graph.components.map((part) => (
             <li key={part.id}>
               {partNames[part.catalogPartId] ?? part.catalogPartId} <span>({part.id})</span>
+              {ledStates[part.id] && <span> · Digital simulation state: {ledStates[part.id]}</span>}
             </li>
           ))}
         </ul>
+        {Object.keys(ledStates).length > 0 && (
+          <p role="status" aria-live="polite">
+            LED state is an ideal digital indication. It does not report current, voltage, or
+            electrical safety.
+          </p>
+        )}
         <p>
           {graph.wires.length} graph wire{graph.wires.length === 1 ? '' : 's'} ·{' '}
           {graph.breadboards.length} breadboard{graph.breadboards.length === 1 ? '' : 's'}

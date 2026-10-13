@@ -8,7 +8,7 @@
     "start": "next start --hostname 0.0.0.0",
     "typecheck": "next typegen && tsc --noEmit",
     "test:e2e": "playwright test",
-    "test": "vitest run src/auth.test.ts"
+    "test": "vitest run src/auth.test.ts src/components/simulation-scene-state.test.ts"
   },
   "dependencies": {
     "@schemora/assembly-plan": "workspace:*",

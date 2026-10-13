@@ -504,7 +504,11 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
           {catalog.parts.find((p) => p.id === starterParts.board)?.limitations[0]}
         </p>
       </section>
-      <CircuitScene graph={graph} onGraphChange={edit} />
+      <CircuitScene
+        graph={graph}
+        onGraphChange={edit}
+        currentGraphDigest={report && isCurrent && !dirty ? report.graphDigest : null}
+      />
       <div className={styles.grid}>
         <section className="panel">
           <div className="panel-heading">
