@@ -42,10 +42,12 @@ COPY examples/phase6-qemu-gpio-probe/worker.c /opt/probe/worker.c
 COPY examples/phase6-qemu-gpio-probe/build-worker.sh /opt/probe/build-worker.sh
 COPY examples/phase6-qemu-gpio-probe/prepare-qemu-flash.sh /opt/probe/prepare-qemu-flash.sh
 COPY examples/phase6-qemu-gpio-probe/expected-gpio19.jsonl /opt/probe/expected-gpio19.jsonl
+COPY examples/phase6-qemu-gpio-probe/filter-event-trace.py /opt/probe/filter-event-trace.py
 COPY examples/phase6-qemu-gpio-probe/run-poc.sh /opt/probe/run-poc.sh
 COPY examples/phase6-qemu-uart/CMakeLists.txt /opt/fixture/CMakeLists.txt
 COPY examples/phase6-qemu-uart/main/ /opt/fixture/main/
 COPY examples/phase6-qemu-uart/sdkconfig.defaults /opt/fixture/sdkconfig.defaults
+COPY examples/phase6-qemu-gpio-probe/expected-events.jsonl /opt/probe/expected-events.jsonl
 
 RUN bash -lc 'source "$IDF_PATH/export.sh" && idf.py -C /opt/fixture build && bash /opt/probe/prepare-qemu-flash.sh' \
     && bash /opt/probe/build-worker.sh

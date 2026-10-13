@@ -9,7 +9,8 @@ if ($LASTEXITCODE -ne 0) {
   exit $LASTEXITCODE
 }
 
-docker run --rm --network none --platform linux/amd64 $image
+$captureEvents = if ($env:SCHEMORA_CAPTURE_EVENTS -eq '1') { '1' } else { '0' }
+docker run --rm --network none --platform linux/amd64 --env "SCHEMORA_CAPTURE_EVENTS=$captureEvents" $image
 if ($LASTEXITCODE -ne 0) {
   exit $LASTEXITCODE
 }

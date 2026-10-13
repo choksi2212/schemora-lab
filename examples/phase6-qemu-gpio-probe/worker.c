@@ -6,6 +6,7 @@
  * reviewed again whenever that revision changes.
  */
 #include <stdint.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -27,7 +28,10 @@ extern int qemu_main_loop(void);
 extern void qemu_cleanup(int status);
 
 static FILE *trace_file;
+static FILE *event_file;
 static unsigned int trace_sequence;
+static unsigned int event_sequence;
+static pthread_mutex_t event_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* pinmap slot 20 represents ESP32 GPIO19: slot N maps to GPIO N - 1. */
 static const short int pinmap[41] = {
@@ -40,11 +44,21 @@ static void record_gpio_output(int slot, int level) {
     return;
   }
 
-  if (fprintf(trace_file,
+  if (pthread_mutex_lock(&event_lock) != 0) {
+    _Exit(74);
+  }
+  if (fprintf(event_file,
+              "{\"sequence\":%u,\"type\":\"gpio_level\",\"gpio\":19,\"level\":%d}\n",
+              ++event_sequence, level ? 1 : 0) < 0 ||
+      fflush(event_file) != 0 ||
+      fprintf(trace_file,
               "{\"sequence\":%u,\"type\":\"gpio_level\",\"gpio\":19,\"level\":%d}\n",
               ++trace_sequence, level ? 1 : 0) < 0 ||
       fflush(trace_file) != 0) {
-    perror("write GPIO trace");
+    perror("write GPIO callback traces");
+    _Exit(74);
+  }
+  if (pthread_mutex_unlock(&event_lock) != 0) {
     _Exit(74);
   }
 }
@@ -68,9 +82,24 @@ static uint8_t ignore_spi(uint8_t id, uint16_t event) {
 }
 
 static void record_uart(uint8_t id, uint8_t value) {
-  if (id == 0 && (fputc(value, stdout) == EOF || fflush(stdout) != 0)) {
-    perror("write UART0 transcript");
-    _Exit(74);
+  if (id == 0) {
+    if (pthread_mutex_lock(&event_lock) != 0) {
+      _Exit(74);
+    }
+    if (fprintf(event_file,
+               "{\"sequence\":%u,\"type\":\"uart_byte\",\"uart\":0,\"value\":%u}\n",
+               ++event_sequence, (unsigned int)value) < 0 ||
+        fflush(event_file) != 0) {
+      perror("write combined event trace");
+      _Exit(74);
+    }
+    if (pthread_mutex_unlock(&event_lock) != 0) {
+      _Exit(74);
+    }
+    if (fputc(value, stdout) == EOF || fflush(stdout) != 0) {
+      perror("write UART0 transcript");
+      _Exit(74);
+    }
   }
 }
 
@@ -82,14 +111,22 @@ static void ignore_rmt(uint8_t channel, uint32_t config0, uint32_t value) {
 
 int main(int argc, char **argv) {
   const char *trace_path = getenv("SCHEMORA_GPIO_TRACE");
-  if (argc != 2 || trace_path == NULL || trace_path[0] == '\0') {
-    fprintf(stderr, "Usage: SCHEMORA_GPIO_TRACE=FILE %s FLASH_IMAGE\n", argv[0]);
+  const char *event_path = getenv("SCHEMORA_EVENT_TRACE");
+  if (argc != 2 || trace_path == NULL || trace_path[0] == '\0' ||
+      event_path == NULL || event_path[0] == '\0') {
+    fprintf(stderr, "Usage: SCHEMORA_GPIO_TRACE=FILE SCHEMORA_EVENT_TRACE=FILE %s FLASH_IMAGE\n", argv[0]);
     return 64;
   }
 
   trace_file = fopen(trace_path, "w");
   if (trace_file == NULL) {
     perror("open GPIO trace");
+    return 73;
+  }
+  event_file = fopen(event_path, "w");
+  if (event_file == NULL) {
+    perror("open combined event trace");
+    fclose(trace_file);
     return 73;
   }
 
@@ -121,6 +158,8 @@ int main(int argc, char **argv) {
   if (snprintf(drive_arg, sizeof(drive_arg), "file=%s,if=mtd,format=raw", argv[1]) >=
       (int)sizeof(drive_arg)) {
     fprintf(stderr, "Flash image path is too long.\n");
+    fclose(event_file);
+    fclose(trace_file);
     return 64;
   }
   qemu_argv[4] = drive_arg;
@@ -130,6 +169,11 @@ int main(int argc, char **argv) {
   qemu_cleanup(status);
   if (fclose(trace_file) != 0) {
     perror("close GPIO trace");
+    fclose(event_file);
+    return 74;
+  }
+  if (fclose(event_file) != 0) {
+    perror("close combined event trace");
     return 74;
   }
   return status;
