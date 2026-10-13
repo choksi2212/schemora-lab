@@ -161,8 +161,7 @@ export type RunnerResponseVerification =
         | 'response_mismatch';
     };
 
-/** Authenticate a response before trusting runner-reported image, output, or cleanup claims. */
-export async function verifyRunnerExecutionResponse(input: {
+export type RunnerResponseVerificationInput = {
   authenticatedResponse: unknown;
   expected: {
     requestJti: string;
@@ -176,9 +175,13 @@ export async function verifyRunnerExecutionResponse(input: {
     deadlineAt: string;
   };
   publicKeys: Readonly<Record<string, string | KeyObject>>;
-  replayGuard: RunnerResponseReplayGuard;
   now?: number;
-}): Promise<RunnerResponseVerification> {
+};
+
+/** Validate the signed protocol envelope without consuming its one-use response ID. */
+export async function verifyRunnerExecutionResponsePure(
+  input: RunnerResponseVerificationInput,
+): Promise<RunnerResponseVerification> {
   const parsed = runnerAuthenticatedResponseSchema.safeParse(input.authenticatedResponse);
   if (!parsed.success) return { valid: false, reason: 'invalid_response' };
 
@@ -251,13 +254,24 @@ export async function verifyRunnerExecutionResponse(input: {
   )
     return { valid: false, reason: 'invalid_signature' };
 
+  return { valid: true, authenticated };
+}
+
+/** Authenticate a response and atomically consume its response ID before accepting it. */
+export async function verifyRunnerExecutionResponse(
+  input: RunnerResponseVerificationInput & { replayGuard: RunnerResponseReplayGuard },
+): Promise<RunnerResponseVerification> {
+  const verification = await verifyRunnerExecutionResponsePure(input);
+  if (!verification.valid) return verification;
+
+  const deadlineAt = Date.parse(input.expected.deadlineAt);
   if (
     !(await input.replayGuard.claim(
-      authenticated.keyId,
-      authenticated.responseJti,
+      verification.authenticated.keyId,
+      verification.authenticated.responseJti,
       deadlineAt + MAX_RUNNER_RESPONSE_GRACE_MS + RUNNER_EXECUTION_CLOCK_SKEW_MS,
     ))
   )
     return { valid: false, reason: 'replayed' };
-  return { valid: true, authenticated };
+  return verification;
 }

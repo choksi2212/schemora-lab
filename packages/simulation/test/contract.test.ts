@@ -206,9 +206,11 @@ describe('simulation contracts', () => {
     expect(runnerResponseTransitionAllowed('preparing', 'running')).toBe(true);
     expect(runnerResponseTransitionAllowed('running', 'running')).toBe(true);
     expect(runnerResponseTransitionAllowed('stopping', 'cancelled')).toBe(true);
-    expect(runnerResponseTransitionAllowed('stopping', 'completed')).toBe(true);
+    expect(runnerResponseTransitionAllowed('running', 'completed')).toBe(true);
     expect(runnerResponseTransitionAllowed('running', 'accepted')).toBe(false);
     expect(runnerResponseTransitionAllowed('stopping', 'running')).toBe(false);
+    expect(runnerResponseTransitionAllowed('stopping', 'completed')).toBe(false);
+    expect(runnerResponseTransitionAllowed('queued', 'completed')).toBe(false);
     expect(runnerResponseTransitionAllowed('completed', 'failed')).toBe(false);
     expect(runnerResponseTransitionAllowed('cancelled', 'cancelled')).toBe(false);
   });

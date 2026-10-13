@@ -162,3 +162,37 @@ export const simulationRuns = pgTable(
       .where(sql`${table.status} IN ('queued','preparing','running','stopping')`),
   ],
 );
+export const simulationRunAttempts = pgTable(
+  'simulation_run_attempts',
+  {
+    projectId: uuid('project_id').notNull(),
+    runId: uuid('run_id').notNull(),
+    jobId: uuid('job_id').notNull(),
+    attemptNumber: integer('attempt_number').notNull(),
+    attemptId: uuid('attempt_id').notNull(),
+    payloadDigest: text('payload_digest').notNull(),
+    executionProfileId: text('execution_profile_id').notNull(),
+    imageDigest: text('image_digest').notNull(),
+    bindingDigest: text('binding_digest').notNull(),
+    requestJti: uuid('request_jti').notNull(),
+    requestedAt: timestamp('requested_at', { withTimezone: true }).notNull(),
+    notBefore: timestamp('not_before', { withTimezone: true }).notNull(),
+    deadlineAt: timestamp('deadline_at', { withTimezone: true }).notNull(),
+    state: text('state').notNull(),
+    responseJti: uuid('response_jti'),
+    responseDigest: text('response_digest'),
+    responseIssuedAt: timestamp('response_issued_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projectId, table.runId, table.attemptNumber] }),
+    uniqueIndex('simulation_run_attempts_attempt_id').on(table.attemptId),
+    index('simulation_run_attempts_job_current').on(
+      table.projectId,
+      table.jobId,
+      table.attemptNumber,
+    ),
+    index('simulation_run_attempts_response_jti').on(table.responseJti),
+  ],
+);

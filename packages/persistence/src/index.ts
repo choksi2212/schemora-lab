@@ -12,6 +12,16 @@ export {
   type RunnerReplayQueryable,
   type RunnerReplayTokenClass,
 } from './runner-replay-store.js';
+export {
+  acceptVerifiedRunnerResponse,
+  createSimulationRunAttempt,
+  loadCurrentSimulationRunAttempt,
+  type CurrentSimulationRunAttempt,
+  type RunnerResponseAcceptance,
+  type SimulationAttemptIdentity,
+  type SimulationRunLease,
+  type VerifiedRunnerResponseEnvelope,
+} from './simulation-attempt-store.js';
 
 export interface Project extends QueryResultRow {
   id: string;

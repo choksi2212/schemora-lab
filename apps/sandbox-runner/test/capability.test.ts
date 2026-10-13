@@ -1,5 +1,5 @@
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   runnerCapabilitySchema,
   runnerCapabilitySigningMessage,
@@ -8,7 +8,11 @@ import {
   runnerResponseSigningMessage,
   type RunnerCapability,
 } from '@schemora/simulation';
-import { verifyRunnerCapability, verifyRunnerExecutionResponse } from '../src/capability.js';
+import {
+  verifyRunnerCapability,
+  verifyRunnerExecutionResponse,
+  verifyRunnerExecutionResponsePure,
+} from '../src/capability.js';
 
 const now = Date.parse('2026-10-14T10:00:00.000Z');
 const runId = '6fb8f60e-ec9a-4d29-9122-4d2bf13e9c43';
@@ -147,6 +151,36 @@ describe('runner execution capability', () => {
 });
 
 describe('authenticated runner responses', () => {
+  it('pure verification does not consume response replay claims', async () => {
+    const authenticatedResponse = createAuthenticatedResponse();
+    const expected = {
+      requestJti: authenticatedResponse.requestJti,
+      runId,
+      attemptId,
+      payloadDigest,
+      executionProfileId: authenticatedResponse.response.executionProfileId,
+      imageDigest: authenticatedResponse.response.imageDigest,
+      bindingDigest: 'b'.repeat(64),
+      notBefore: new Date(now - 1_000).toISOString(),
+      deadlineAt,
+    };
+    const claim = replayGuard().claim;
+    const replayGuardSpy = { claim: vi.fn(claim) };
+    const pureInput = { authenticatedResponse, expected, publicKeys, now };
+    const guardedInput = { ...pureInput, replayGuard: replayGuardSpy };
+
+    expect(await verifyRunnerExecutionResponsePure(guardedInput)).toMatchObject({ valid: true });
+    expect(await verifyRunnerExecutionResponsePure(guardedInput)).toMatchObject({ valid: true });
+    expect(replayGuardSpy.claim).not.toHaveBeenCalled();
+
+    expect(await verifyRunnerExecutionResponse(guardedInput)).toMatchObject({ valid: true });
+    expect(await verifyRunnerExecutionResponse(guardedInput)).toMatchObject({
+      valid: false,
+      reason: 'replayed',
+    });
+    expect(replayGuardSpy.claim).toHaveBeenCalledTimes(2);
+  });
+
   it('verifies signed response integrity, request binding, key identity, and one-use response IDs', async () => {
     const authenticatedResponse = createAuthenticatedResponse();
     const guard = replayGuard();

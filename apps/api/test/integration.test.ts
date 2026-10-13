@@ -1,15 +1,28 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { SignJWT } from 'jose';
-import { randomUUID } from 'node:crypto';
+import { generateKeyPairSync, randomUUID, sign as signSignature } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Repository, type Job } from '@schemora/persistence';
+import {
+  acceptVerifiedRunnerResponse,
+  createSimulationRunAttempt,
+  type SimulationAttemptIdentity,
+} from '@schemora/persistence';
 import { FileStorage } from '@schemora/storage';
 import { Worker } from '../../worker/src/runner.js';
 import { getCatalogRelease } from '@schemora/catalog';
 import { readConfig } from '../src/config.js';
 import { buildApp } from '../src/app.js';
+import {
+  RUNNER_RESPONSE_AUTH_VERSION,
+  RUNNER_PROTOCOL_VERSION,
+  runnerResponseDigest,
+  runnerResponseSigningMessage,
+  runnerSimulationBindingDigest,
+} from '@schemora/simulation';
+import { verifyRunnerExecutionResponsePure } from '../../sandbox-runner/src/capability.js';
 
 describe.skipIf(!process.env.TEST_DATABASE_URL)(
   'real PostgreSQL and private storage integration',
@@ -19,7 +32,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
     const userB = 'test:' + randomUUID();
     const config = readConfig({
       NODE_ENV: 'test',
-      DATABASE_URL: process.env.TEST_DATABASE_URL!,
+      DATABASE_URL:
+        process.env.TEST_DATABASE_URL ?? 'postgres://test:test@127.0.0.1:5432/schemora_test',
       SESSION_SECRET: secret,
     });
     const repository = new Repository(config.DATABASE_URL);
@@ -80,6 +94,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       await app.close();
       await repository.transaction(async (client) => {
         for (const table of [
+          'simulation_run_attempts',
           'simulation_runs',
           'upload_intents',
           'firmware_reviews',
@@ -557,6 +572,147 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       expect(unavailableRun.data.run.status).toBe('unsupported');
       expect(unavailableRun.data.run.failure.code).toBe('SIMULATOR_UNAVAILABLE');
       expect(unavailableRun.data.run.events).toEqual([]);
+
+      // Exercise the Phase 6 persistence boundary using a real claimed job and
+      // database transaction. This creates no runner process and does not make
+      // the unavailable worker dispatch an execution.
+      const responseRun = await request('POST', runUrl, payload, tokenA, randomUUID());
+      expect(responseRun.status).toBe(202);
+      await repository.dispatch();
+      const responseJob = await repository.claim('simulate_run', 120);
+      expect(responseJob?.payload.runId).toBe(responseRun.data.run.runId);
+      const keyPair = generateKeyPairSync('ed25519');
+      const keyId = 'integration-runner-key';
+      const requestJti = randomUUID();
+      const attemptId = randomUUID();
+      const payloadDigest = 'a'.repeat(64);
+      const imageDigest = `sha256:${'b'.repeat(64)}`;
+      const issuedMs = Date.now();
+      const notBefore = new Date(issuedMs - 5_000).toISOString();
+      const deadlineAt = new Date(issuedMs + 120_000).toISOString();
+      const attempt: SimulationAttemptIdentity = {
+        projectId: project.id,
+        runId: responseRun.data.run.runId,
+        jobId: responseJob!.id,
+        attemptNumber: responseJob!.attempts,
+        attemptId,
+        payloadDigest,
+        executionProfileId: 'integration-profile-v1',
+        imageDigest,
+        bindingDigest: runnerSimulationBindingDigest(responseRun.data.run.binding),
+        requestJti,
+        requestedAt: new Date(issuedMs).toISOString(),
+        notBefore,
+        deadlineAt,
+      };
+      const lease = {
+        projectId: project.id,
+        jobId: responseJob!.id,
+        leaseToken: responseJob!.lease_token,
+      };
+      await repository.transaction(async (client) => {
+        expect(await createSimulationRunAttempt(client, lease, attempt)).toBe(true);
+      });
+
+      const response = {
+        protocolVersion: RUNNER_PROTOCOL_VERSION as typeof RUNNER_PROTOCOL_VERSION,
+        runId: attempt.runId,
+        attemptId,
+        payloadDigest,
+        executionProfileId: attempt.executionProfileId,
+        imageDigest,
+        status: 'running' as const,
+        startedAt: new Date(issuedMs - 1_000).toISOString(),
+        finishedAt: null,
+        terminationReason: null,
+        run: null,
+        outputManifest: [],
+        totalOutputBytes: 0,
+        cleanupReceipt: null,
+      };
+      const unsigned = {
+        protocolVersion: RUNNER_RESPONSE_AUTH_VERSION as typeof RUNNER_RESPONSE_AUTH_VERSION,
+        keyId,
+        requestJti,
+        responseJti: randomUUID(),
+        issuedAt: new Date(issuedMs).toISOString(),
+        responseDigest: runnerResponseDigest(response),
+        response,
+      };
+      const authenticated = {
+        ...unsigned,
+        signature: signSignature(
+          null,
+          Buffer.from(runnerResponseSigningMessage(unsigned), 'utf8'),
+          keyPair.privateKey,
+        ).toString('base64url'),
+      };
+      const verified = await verifyRunnerExecutionResponsePure({
+        authenticatedResponse: authenticated,
+        expected: {
+          requestJti,
+          runId: attempt.runId,
+          attemptId,
+          payloadDigest,
+          executionProfileId: attempt.executionProfileId,
+          imageDigest,
+          bindingDigest: attempt.bindingDigest,
+          notBefore,
+          deadlineAt,
+        },
+        publicKeys: { [keyId]: keyPair.publicKey },
+        now: issuedMs,
+      });
+      expect(verified.valid).toBe(true);
+      if (!verified.valid)
+        throw new Error('Integration runner response signature failed verification');
+
+      await expect(
+        repository.transaction((client) =>
+          acceptVerifiedRunnerResponse(client, lease, attempt, verified.authenticated),
+        ),
+      ).resolves.toEqual({ accepted: true, runStatus: 'running', attemptState: 'running' });
+      const persistedRun = await repository.pool.query<{ status: string; run: { status: string } }>(
+        'SELECT status,run FROM simulation_runs WHERE project_id=$1 AND id=$2',
+        [project.id, attempt.runId],
+      );
+      expect(persistedRun.rows[0]).toMatchObject({ status: 'running', run: { status: 'running' } });
+      await expect(
+        repository.transaction((client) =>
+          acceptVerifiedRunnerResponse(client, lease, attempt, verified.authenticated),
+        ),
+      ).resolves.toEqual({ accepted: false, reason: 'replayed' });
+
+      // Reclaim after expiration and persist the new attempt. The old signed
+      // response must now fail on its former lease before any state update.
+      await repository.pool.query(
+        "UPDATE jobs SET lease_until=clock_timestamp()-interval '1 second' WHERE id=$1",
+        [responseJob!.id],
+      );
+      const reclaimedJob = await repository.claim('simulate_run', 120);
+      expect(reclaimedJob?.id).toBe(responseJob!.id);
+      expect(reclaimedJob?.attempts).toBe(responseJob!.attempts + 1);
+      const reclaimedAttempt = {
+        ...attempt,
+        attemptNumber: reclaimedJob!.attempts,
+        attemptId: randomUUID(),
+        requestJti: randomUUID(),
+        requestedAt: new Date().toISOString(),
+      };
+      const reclaimedLease = {
+        ...lease,
+        leaseToken: reclaimedJob!.lease_token,
+      };
+      await repository.transaction(async (client) => {
+        expect(await createSimulationRunAttempt(client, reclaimedLease, reclaimedAttempt)).toBe(
+          true,
+        );
+      });
+      await expect(
+        repository.transaction((client) =>
+          acceptVerifiedRunnerResponse(client, lease, attempt, verified.authenticated),
+        ),
+      ).resolves.toEqual({ accepted: false, reason: 'stale_lease' });
 
       const queuedBeforeArchive = await request('POST', runUrl, payload, tokenA, randomUUID());
       expect(queuedBeforeArchive.status).toBe(202);
