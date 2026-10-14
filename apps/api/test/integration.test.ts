@@ -93,6 +93,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
     afterAll(async () => {
       await app.close();
       await repository.transaction(async (client) => {
+        // Artifact-file triggers only permit cascade removal during the same
+        // deleting state used by the production project purge worker.
+        await client.query("UPDATE projects SET status='deleting' WHERE owner_id=ANY($1)", [
+          [userA, userB],
+        ]);
         for (const table of [
           'simulation_run_attempts',
           'simulation_runs',
@@ -566,8 +571,18 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
 
       const workerRun = await request('POST', runUrl, payload, tokenA, randomUUID());
       expect(workerRun.status).toBe(202);
-      expect(await worker.tick('simulate_run')).toBe(true);
-      const unavailableRun = await request('GET', runUrl + '/' + workerRun.data.run.runId);
+      let unavailableRun = await request('GET', runUrl + '/' + workerRun.data.run.runId);
+      // A worker tick claims the oldest available simulation job, which can
+      // belong to another fixture. Keep draining until this specific run has
+      // been observed as settled instead of assuming one tick maps to one run.
+      for (
+        let attempt = 0;
+        attempt < 20 && unavailableRun.data.run.status === 'queued';
+        attempt += 1
+      ) {
+        expect(await worker.tick('simulate_run')).toBe(true);
+        unavailableRun = await request('GET', runUrl + '/' + workerRun.data.run.runId);
+      }
       expect(unavailableRun.status).toBe(200);
       expect(unavailableRun.data.run.status).toBe('unsupported');
       expect(unavailableRun.data.run.failure.code).toBe('SIMULATOR_UNAVAILABLE');

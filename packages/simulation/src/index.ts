@@ -387,7 +387,13 @@ export const runnerExecutionProfileSchema = z
           .int()
           .min(64 * 1024 * 1024)
           .max(2 * 1024 ** 3),
-        cpuCount: z.number().positive().max(2),
+        // Docker's NanoCpus field is an integer. Reject values that round to
+        // zero so a profile cannot pass verification with an unlimited CPU cap.
+        cpuCount: z
+          .number()
+          .positive()
+          .max(2)
+          .refine((value) => Math.round(value * 1e9) >= 1),
         pids: z.number().int().min(16).max(256),
         outputBytes: z.number().int().min(1024).max(MAX_SIMULATION_RESULT_BYTES),
         stdoutBytes: z.number().int().min(1024).max(1_000_000),

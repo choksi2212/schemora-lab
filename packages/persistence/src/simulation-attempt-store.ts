@@ -92,7 +92,16 @@ export async function createSimulationRunAttempt(
     [attempt.projectId, attempt.runId],
   );
   const run = runs.rows[0];
-  if (!run || !isActiveRunStatus(run.status)) return false;
+  // Stopping is active for response verification, but never a dispatchable
+  // state. A retry must not replace an attempt after its stop intent exists.
+  if (!run || !['queued', 'preparing', 'running'].includes(run.status)) return false;
+  const stopRequest = await client.query(
+    `SELECT 1 FROM simulation_run_attempts
+      WHERE project_id=$1 AND run_id=$2 AND stop_requested_at IS NOT NULL
+      LIMIT 1 FOR UPDATE`,
+    [attempt.projectId, attempt.runId],
+  );
+  if (stopRequest.rowCount) return false;
 
   // A lease reclaim makes every prior attempt ineligible before a replacement
   // is inserted. Terminal attempts retain their audit state.

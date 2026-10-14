@@ -176,6 +176,7 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
   const [completedAssemblySteps, setCompletedAssemblySteps] = useState<string[]>([]);
   const [skippedAssemblySteps, setSkippedAssemblySteps] = useState<string[]>([]);
   const [assemblyStale, setAssemblyStale] = useState(false);
+  const [activeDesignPanel, setActiveDesignPanel] = useState<'wiring' | 'placement'>('wiring');
   const [explanationLevel, setExplanationLevel] = useState<ExplanationLevel>('beginner');
   const [teaching, setTeaching] = useState<TeachingExplanation | null>(null);
   const load = useCallback(async () => {
@@ -246,6 +247,7 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
     setReport(null);
     setIsCurrent(false);
     setMessage('Last circuit edit undone. Save to record this revision.');
+    setAssemblyStale(Boolean(assemblyPlan));
   }
   function redo() {
     if (!graph || redoStack.length === 0) return;
@@ -257,6 +259,7 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
     setReport(null);
     setIsCurrent(false);
     setMessage('Circuit edit restored. Save to record this revision.');
+    setAssemblyStale(Boolean(assemblyPlan));
   }
   function refresh() {
     if (
@@ -537,7 +540,27 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
         onProjectChange={setProject}
       />
       <div className={styles.grid}>
-        <section className="panel">
+        <div className={styles.responsivePanelNav} role="group" aria-label="Circuit design panels">
+          <button
+            type="button"
+            aria-pressed={activeDesignPanel === 'wiring'}
+            onClick={() => setActiveDesignPanel('wiring')}
+          >
+            Wiring
+          </button>
+          <button
+            type="button"
+            aria-pressed={activeDesignPanel === 'placement'}
+            onClick={() => setActiveDesignPanel('placement')}
+          >
+            Terminal placement
+          </button>
+        </div>
+        <section
+          className={`panel ${styles.designPanel}`}
+          data-visible={activeDesignPanel === 'wiring'}
+          aria-label="Wiring"
+        >
           <div className="panel-heading">
             <h2>
               <Cable size={18} /> Wiring
@@ -603,7 +626,11 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
             );
           })}
         </section>
-        <section className="panel">
+        <section
+          className={`panel ${styles.designPanel}`}
+          data-visible={activeDesignPanel === 'placement'}
+          aria-label="Terminal placement"
+        >
           <div className="panel-heading">
             <h2>Terminal placement</h2>
             <span className="fine-text">Optional BB400 hole map</span>

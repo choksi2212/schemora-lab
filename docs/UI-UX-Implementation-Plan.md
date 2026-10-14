@@ -417,7 +417,7 @@ Avoid declaring “correct,” “safe,” “verified,” or “complete” wit
 
 ## 13. Responsive behavior and browser fallback
 
-The initial supported experience targets laptop and desktop widths. At wide widths, the workbench shows scene and two side panels. At narrower supported desktop widths, the inspector and design panel can collapse into tabbed drawers, while stage, save state, and issue count remain visible. The exact minimum viewport is a release decision tied to browser support and usability evidence.
+The initial supported experience targets laptop and desktop widths. At wide widths, the circuit page shows the scene and both circuit-design panels together. At widths of 850 CSS pixels or less, wiring and terminal-placement panels switch to a two-tab control; the scene, project heading, save actions, validation state, and firmware workspace remain available in normal page flow. This responsive behavior does not yet provide movable inspector drawers. The exact minimum viewport remains a release decision tied to browser support and usability evidence.
 
 If WebGL or asset loading fails, preserve the project shell and switch the central region to the semantic connection view. Explain the condition and provide retry. Do not block import review, fact correction, validation reading, or assembly steps merely because the 3D canvas is unavailable. Browser compatibility guidance is limited to the supported browser matrix in the PRD/TRD.
 

@@ -345,7 +345,7 @@ export class DockerSandbox {
         '--security-opt=no-new-privileges:true',
         '--security-opt=seccomp=builtin',
         '--cpus',
-        String(request.limits.cpuCount),
+        (Math.round(request.limits.cpuCount * 1_000_000_000) / 1_000_000_000).toFixed(9),
         '--memory',
         String(request.limits.memoryBytes),
         '--memory-swap',
@@ -429,6 +429,8 @@ export class DockerSandbox {
       !Number.isFinite(limits.cpuCount) ||
       limits.cpuCount <= 0 ||
       limits.cpuCount > 2 ||
+      !Number.isSafeInteger(Math.round(limits.cpuCount * 1_000_000_000)) ||
+      Math.round(limits.cpuCount * 1_000_000_000) < 1 ||
       !Number.isSafeInteger(limits.pids) ||
       limits.pids < 16 ||
       limits.pids > 256 ||

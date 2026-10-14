@@ -34,7 +34,7 @@ The generator runs on the API server. It parses the strict graph, catalog-releas
 
 The deterministic generator lives in [`packages/assembly-plan/src/index.ts`](../packages/assembly-plan/src/index.ts). The route in [`apps/api/src/app.ts`](../apps/api/src/app.ts) exposes `POST /v1/projects/:projectId/assembly-plan`. Generation is read-only and does not increment the project revision. The plan includes a schema version, planner ID/version, graph/report provenance, ordered steps, and a canonical SHA-256 digest.
 
-Step progress is currently browser-local and keyed by project ID and plan digest. `Next` only changes the selected step. `Skip for now` records a distinct incomplete state. `I completed this step` records an explicit user confirmation and is enabled only after the plan's prerequisite steps are confirmed. A graph edit marks the displayed plan stale; the user must regenerate from a current validation report. Server-side immutable plan history and append-only progress events are a later persistence increment.
+Step progress is currently browser-local and keyed by project ID and plan digest. `Next` only changes the selected step. `Skip for now` records a distinct incomplete state. `I completed this step` records an explicit user confirmation and is enabled only after the plan's prerequisite steps are confirmed. Every graph edit, including undo and redo, marks the displayed plan stale; the user must regenerate from a current validation report. Server-side immutable plan history and append-only progress events are a later persistence increment.
 
 ## 3. Deterministic planner contract
 

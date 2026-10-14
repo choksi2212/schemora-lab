@@ -178,6 +178,18 @@ function fakeDocker(
 }
 
 describe('DockerSandbox fail-closed preflight', () => {
+  it('rejects a CPU limit that rounds to zero before contacting Docker', async () => {
+    const sandbox = new DockerSandbox({ platform: 'linux', uid: 1000, spawn: noSpawn });
+    await expect(
+      sandbox.run({
+        image,
+        firmware: new Uint8Array([1]),
+        limits: { ...limits, cpuCount: 0.0000000004 },
+      }),
+    ).rejects.toThrow('SANDBOX_LIMITS_INVALID');
+    expect(noSpawn).not.toHaveBeenCalled();
+  });
+
   it('rejects non-Linux hosts before invoking Docker', async () => {
     const sandbox = new DockerSandbox({ platform: 'win32', uid: 1000, spawn: noSpawn as never });
     await expect(sandbox.preflight(image)).rejects.toThrow('SANDBOX_HOST_UNSUPPORTED');

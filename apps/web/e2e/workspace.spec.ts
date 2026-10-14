@@ -140,6 +140,12 @@ test('connects exact terminals in the 3D workbench and persists graph edits', as
   await page.getByRole('link', { name: /Open circuit workspace/ }).click();
   await expect(page.getByRole('heading', { name: 'Circuit workbench 3D view' })).toBeVisible();
   await expect(page.getByRole('region', { name: /Illustrative circuit workbench/ })).toBeVisible();
+  await page.setViewportSize({ width: 800, height: 900 });
+  await page.getByRole('button', { name: 'Terminal placement', exact: true }).click();
+  await expect(page.getByText(/Assign a lead to a labeled hole/)).toBeVisible();
+  await page.getByRole('button', { name: 'Wiring', exact: true }).click();
+  await expect(page.getByText(/Choose the two exact catalog terminals/)).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 900 });
 
   const arrangeList = page.getByRole('list', { name: 'Components to arrange' });
   await arrangeList.getByRole('button', { name: 'YAGEO 220 Ω resistor' }).click();
@@ -162,6 +168,7 @@ test('connects exact terminals in the 3D workbench and persists graph edits', as
   await expect(page.getByRole('status').filter({ hasText: 'Circuit saved.' })).toBeVisible();
   await page.reload();
   await expect(page.getByText('3 graph wires')).toBeVisible();
+  await expect(page.getByText(/Wire 1:.*GPIO19.*Lead A/)).toBeVisible();
   await page
     .getByRole('list', { name: 'Components to arrange' })
     .getByRole('button', { name: 'YAGEO 220 Ω resistor' })
@@ -202,9 +209,18 @@ test('connects exact terminals in the 3D workbench and persists graph edits', as
 
   const terminalList = page.getByRole('list', { name: 'Connectable circuit terminals' });
   await terminalList.getByRole('button', { name: /ESP32-DevKitC V4.*GPIO19/ }).click();
+  await expect(page.getByText(/Selected endpoint:.*catalog terminal ID gpio19/)).toBeVisible();
   await terminalList.getByRole('button', { name: /YAGEO 220 Ω resistor: Lead B/ }).click();
+  await expect(page.getByRole('button', { name: 'Confirm wire' })).toBeVisible();
+  await expect(page.getByText(/Proposed connection:.*GPIO19.*Lead B/)).toBeVisible();
+  await page.getByRole('button', { name: 'Confirm wire' }).click();
   await expect(
     page.getByRole('status').filter({ hasText: 'Wire added between the selected terminals.' }),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: 'The circuit changed after this guide was generated.' }),
   ).toBeVisible();
   await expect(page.getByText('4 graph wires')).toBeVisible();
   await page.getByRole('button', { name: 'Save circuit' }).click();
@@ -212,7 +228,7 @@ test('connects exact terminals in the 3D workbench and persists graph edits', as
   await page.reload();
   await expect(page.getByText('4 graph wires')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Remove wire 4' }).click();
+  await page.getByRole('button', { name: /Remove wire 4 from/ }).click();
   await expect(page.getByText('3 graph wires')).toBeVisible();
   await page.getByRole('button', { name: 'Save circuit' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Circuit saved.' })).toBeVisible();

@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { createRequire } from 'node:module';
 
@@ -6,6 +6,10 @@ process.env.STORAGE_DIRECTORY = resolve(process.env.STORAGE_DIRECTORY ?? '.schem
 process.env.PORT = new URL(process.env.WEB_ORIGIN ?? 'http://localhost:3010').port || '3010';
 
 const require = createRequire(import.meta.url);
+const monacoAssets = spawnSync(process.execPath, [resolve('scripts/copy-monaco.mjs')], {
+  stdio: 'inherit',
+});
+if (monacoAssets.status !== 0) process.exit(monacoAssets.status ?? 1);
 const watch = process.env.SCHEMORA_WATCH !== 'false';
 const runnerArgs = (file) =>
   watch ? ['watch', '--exclude', '**/.schemora/**', '--exclude', '**/.next/**', file] : [file];

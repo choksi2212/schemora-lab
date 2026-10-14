@@ -815,7 +815,7 @@ export function buildApp(
              FROM simulation_runs r
              LEFT JOIN LATERAL (
                SELECT stop_requested_at FROM simulation_run_attempts
-                WHERE project_id=r.project_id AND run_id=r.id
+                WHERE project_id=r.project_id AND run_id=r.id AND stop_requested_at IS NOT NULL
                 ORDER BY attempt_number DESC LIMIT 1
              ) a ON true
             WHERE r.project_id=$1 AND r.id=$2`,
@@ -845,15 +845,28 @@ export function buildApp(
         idempotencyKey,
         fingerprint,
       );
-      if (replay) return replay as { run: unknown };
-      const selected = await client.query<{ run: unknown; status: string }>(
-        'SELECT run,status FROM simulation_runs WHERE project_id=$1 AND id=$2 FOR UPDATE',
+      if (replay) return replay as { run: unknown; stopRequestedAt: string | null };
+      const selected = await client.query<{
+        run: unknown;
+        status: string;
+        stop_requested_at: Date | null;
+      }>(
+        `SELECT r.run,r.status,a.stop_requested_at FROM simulation_runs r
+          LEFT JOIN LATERAL (
+            SELECT stop_requested_at FROM simulation_run_attempts
+             WHERE project_id=r.project_id AND run_id=r.id AND stop_requested_at IS NOT NULL
+             ORDER BY attempt_number DESC LIMIT 1
+          ) a ON true
+         WHERE r.project_id=$1 AND r.id=$2 FOR UPDATE OF r`,
         [projectId, runId],
       );
       const stored = selected.rows[0];
       if (!stored) throw new RepositoryError('NOT_FOUND', 404);
       if (stored.status === 'cancelled' || stored.status === 'stopped') {
-        const response = { run: simulationRunSchema.parse(stored.run), stopRequestedAt: null };
+        const response = {
+          run: simulationRunSchema.parse(stored.run),
+          stopRequestedAt: stored.stop_requested_at?.toISOString() ?? null,
+        };
         await repository.remember(
           client,
           principal,

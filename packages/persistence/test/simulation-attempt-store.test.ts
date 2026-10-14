@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { PoolClient, QueryResultRow } from 'pg';
 import {
   acceptVerifiedRunnerResponse,
+  createSimulationRunAttempt,
   type SimulationAttemptIdentity,
   type VerifiedRunnerResponseEnvelope,
 } from '../src/simulation-attempt-store.js';
@@ -130,6 +131,56 @@ function client(
 }
 
 describe('atomic runner response persistence', () => {
+  it.each([
+    { runStatus: 'stopping', hasStopRequest: false },
+    { runStatus: 'running', hasStopRequest: true },
+  ])(
+    'does not replace or dispatch an attempt after stop intent: $runStatus/$hasStopRequest',
+    async ({ runStatus, hasStopRequest }) => {
+      const calls: string[] = [];
+      const fake = {
+        async query<Row extends QueryResultRow = QueryResultRow>(sql: string) {
+          calls.push(sql);
+          if (sql.includes('FROM projects'))
+            return { rows: [{ id: expected.projectId, status: 'active' }] as Row[], rowCount: 1 };
+          if (sql.includes('FROM jobs'))
+            return {
+              rows: [
+                {
+                  id: expected.jobId,
+                  project_id: expected.projectId,
+                  payload: { runId: expected.runId },
+                  attempts: 2,
+                },
+              ] as Row[],
+              rowCount: 1,
+            };
+          if (sql.includes('FROM simulation_runs'))
+            return {
+              rows: [{ status: runStatus, run: {}, binding: {} }] as Row[],
+              rowCount: 1,
+            };
+          if (sql.includes('SELECT 1 FROM simulation_run_attempts'))
+            return {
+              rows: hasStopRequest ? ([{ '?column?': 1 }] as Row[]) : [],
+              rowCount: Number(hasStopRequest),
+            };
+          return { rows: [], rowCount: 0 };
+        },
+      } as unknown as PoolClient;
+
+      await expect(
+        createSimulationRunAttempt(
+          fake,
+          { projectId: expected.projectId, jobId: expected.jobId, leaseToken: 'lease-token' },
+          { ...expected, attemptNumber: 2 },
+        ),
+      ).resolves.toBe(false);
+      expect(calls.some((sql) => sql.includes('INSERT INTO simulation_run_attempts'))).toBe(false);
+      expect(calls.some((sql) => sql.includes("SET state='superseded'"))).toBe(false);
+    },
+  );
+
   it('claims the response replay ID on the caller transaction client before updating run and attempt', async () => {
     const { fake, calls } = client();
     await expect(

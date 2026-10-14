@@ -1,8 +1,7 @@
 'use client';
 
 import Editor, { loader } from '@monaco-editor/react';
-import * as monaco from 'monaco-editor';
 
-loader.config({ monaco });
+loader.config({ paths: { vs: '/monaco/vs' } });
 
 export default Editor;

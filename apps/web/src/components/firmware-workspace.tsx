@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import type { editor as MonacoEditorApi } from 'monaco-editor';
-import { Uri } from 'monaco-editor';
 import { api, friendlyError, type Project } from '@/lib/api';
 import {
   canCancelQueuedRun,
@@ -125,7 +124,10 @@ function encodeBase64(value: string) {
 }
 
 function firmwareEditorModelPath(projectId: string, artifactId: string, filePath: string) {
-  return Uri.file(`/schemora/${projectId}/${artifactId}/${filePath}`).toString();
+  return (
+    'file:///schemora/' +
+    [projectId, artifactId, ...filePath.split('/')].map(encodeURIComponent).join('/')
+  );
 }
 
 function encodeBase64Bytes(bytes: Uint8Array) {

@@ -966,6 +966,11 @@ function FactCard({
 }) {
   const [value, setValue] = useState(review?.value ?? candidate.value);
   const [reason, setReason] = useState('');
+  useEffect(() => {
+    if (!editing) return;
+    setValue(review?.decision === 'correct' ? (review.value ?? candidate.value) : candidate.value);
+    setReason(review?.reason ?? '');
+  }, [candidate.id, candidate.value, editing, review?.decision, review?.reason, review?.value]);
   const status = review
     ? (
         {
@@ -1028,6 +1033,11 @@ function FactCard({
           <label className="field-label" htmlFor={`correct-${candidate.id}`}>
             Your corrected value
           </label>
+          <p className="fine-text">
+            This correction updates the reviewed display text. The structured fields below remain
+            the original extraction and are not rewritten by this form; confirm exact hardware facts
+            separately before using them for a design decision.
+          </p>
           <textarea
             id={`correct-${candidate.id}`}
             value={value}

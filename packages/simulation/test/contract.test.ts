@@ -201,6 +201,22 @@ function makeRunnerProfile() {
 }
 
 describe('simulation contracts', () => {
+  it('rejects CPU limits that quantize to zero NanoCPUs', () => {
+    const profile = makeRunnerProfile();
+    expect(
+      runnerExecutionProfileSchema.safeParse({
+        ...profile,
+        limits: { ...profile.limits, cpuCount: 0.0000000004 },
+      }).success,
+    ).toBe(false);
+    expect(
+      runnerExecutionProfileSchema.safeParse({
+        ...profile,
+        limits: { ...profile.limits, cpuCount: 0.000000001 },
+      }).success,
+    ).toBe(true);
+  });
+
   it('allows only forward runner response transitions from the locked run state', () => {
     expect(runnerResponseTransitionAllowed('queued', 'accepted')).toBe(true);
     expect(runnerResponseTransitionAllowed('preparing', 'running')).toBe(true);
@@ -209,7 +225,7 @@ describe('simulation contracts', () => {
     expect(runnerResponseTransitionAllowed('running', 'completed')).toBe(true);
     expect(runnerResponseTransitionAllowed('running', 'accepted')).toBe(false);
     expect(runnerResponseTransitionAllowed('stopping', 'running')).toBe(false);
-    expect(runnerResponseTransitionAllowed('stopping', 'completed')).toBe(false);
+    expect(runnerResponseTransitionAllowed('stopping', 'completed')).toBe(true);
     expect(runnerResponseTransitionAllowed('queued', 'completed')).toBe(false);
     expect(runnerResponseTransitionAllowed('completed', 'failed')).toBe(false);
     expect(runnerResponseTransitionAllowed('cancelled', 'cancelled')).toBe(false);
@@ -535,6 +551,7 @@ describe('simulation contracts', () => {
         catalogDigest: canonicalDigest(catalog),
         firmwareArtifactId: firmware.artifactId,
         firmwareDigest: firmware.sha256,
+        firmwareByteLength: firmware.byteLength,
         adapterId: capability.providerId,
         adapterVersion: capability.providerVersion,
         engineId: capability.engineId,

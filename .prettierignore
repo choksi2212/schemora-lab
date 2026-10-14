@@ -1,6 +1,7 @@
 pnpm-lock.yaml
 node_modules
 .next
+apps/web/public/monaco
 .schemora
 coverage
 playwright-report

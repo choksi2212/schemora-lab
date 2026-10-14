@@ -58,6 +58,21 @@
   color: #245b71;
   font-weight: 600;
 }
+.pendingWire {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line, #dfe5de);
+  border-radius: 0.6rem;
+  background: var(--surface, #fff);
+}
+.pendingWire p {
+  flex: 1 1 100%;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
 .arrangeButtons {
   display: flex;
   flex-wrap: wrap;

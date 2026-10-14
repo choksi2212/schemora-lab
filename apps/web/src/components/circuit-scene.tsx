@@ -191,6 +191,29 @@ function endpointPoint(
     : null;
 }
 
+function endpointLabel(endpoint: Endpoint, graph: CircuitWorkbenchGraph) {
+  if (endpoint.kind === 'terminal') {
+    const component = graph.components.find(
+      (item) => item.id === endpoint.terminal.componentInstanceId,
+    );
+    const part = component
+      ? (partNames[component.catalogPartId] ?? component.catalogPartId)
+      : `Unknown component ${endpoint.terminal.componentInstanceId}`;
+    const terminal = component
+      ? (terminalNames[component.catalogPartId]?.[endpoint.terminal.catalogTerminalId] ??
+        endpoint.terminal.catalogTerminalId)
+      : endpoint.terminal.catalogTerminalId;
+    return `${part} (${endpoint.terminal.componentInstanceId}) · ${terminal}`;
+  }
+  const breadboard = graph.breadboards.find(
+    (item) => item.id === endpoint.hole.breadboardInstanceId,
+  );
+  const board = breadboard
+    ? `Breadboard ${breadboard.id}`
+    : `Unknown breadboard ${endpoint.hole.breadboardInstanceId}`;
+  return `${board} · hole ${endpoint.hole.holeId}`;
+}
+
 function Wire({
   start,
   end,
@@ -495,11 +518,24 @@ function BoardScene({
   );
 }
 
-function AccessibleFallback({ message }: { message: string }) {
+function AccessibleFallback({
+  message,
+  onRetry,
+  retryLabel,
+}: {
+  message: string;
+  onRetry?: () => void;
+  retryLabel?: string;
+}) {
   return (
-    <div className={styles.fallback} role="status">
+    <div className={styles.fallback}>
       <strong>3D view unavailable</strong>
-      <span>{message}</span>
+      <span role="status">{message}</span>
+      {onRetry && retryLabel && (
+        <button type="button" onClick={onRetry}>
+          {retryLabel}
+        </button>
+      )}
     </div>
   );
 }
@@ -517,6 +553,10 @@ export function CircuitScene({
   const [webgl, setWebgl] = useState<boolean | null>(null);
   const [resetKey, setResetKey] = useState(0);
   const [selected, setSelected] = useState<TerminalRef | null>(null);
+  const [pendingWire, setPendingWire] = useState<{
+    source: TerminalRef;
+    target: TerminalRef;
+  } | null>(null);
   const [selectedComponentId, setSelectedComponentId] = useState<string | null>(null);
   const [editMessage, setEditMessage] = useState('Choose a terminal to start a wire.');
   const ledStates = resolveSimulationLedStates({
@@ -528,6 +568,10 @@ export function CircuitScene({
   useEffect(() => {
     setWebgl(isWebGLAvailable());
   }, []);
+  function retryRenderer() {
+    setWebgl(isWebGLAvailable());
+    setResetKey((value) => value + 1);
+  }
   const aria =
     graph.components
       .map((part) => `${partNames[part.catalogPartId] ?? part.catalogPartId} (${part.id})`)
@@ -546,9 +590,10 @@ export function CircuitScene({
     ? poseFor(graph, arrangedComponent.id, arrangedComponent.catalogPartId)
     : null;
   function selectTerminal(terminal: TerminalRef) {
+    if (pendingWire) return;
     if (!selected) {
       setSelected(terminal);
-      setEditMessage('Now choose a different terminal to add a wire.');
+      setEditMessage('Start terminal selected. Choose a destination, then confirm the wire.');
       return;
     }
     if (
@@ -575,6 +620,12 @@ export function CircuitScene({
       setEditMessage('Those terminals already have a wire.');
       return;
     }
+    setPendingWire({ source: selected, target: terminal });
+    setSelected(null);
+    setEditMessage('Review the proposed connection and confirm or cancel it.');
+  }
+  function confirmWire() {
+    if (!pendingWire) return;
     const id =
       typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID()
@@ -585,13 +636,18 @@ export function CircuitScene({
         ...graph.wires,
         {
           id,
-          source: { kind: 'terminal', terminal: selected },
-          target: { kind: 'terminal', terminal },
+          source: { kind: 'terminal', terminal: pendingWire.source },
+          target: { kind: 'terminal', terminal: pendingWire.target },
         },
       ],
     });
-    setSelected(null);
+    setPendingWire(null);
     setEditMessage('Wire added between the selected terminals.');
+  }
+  function cancelPendingWire() {
+    setPendingWire(null);
+    setSelected(null);
+    setEditMessage('Proposed wire cancelled. Choose a terminal to start another connection.');
   }
   function removeWire(wireId: string) {
     onGraphChange({ ...graph, wires: graph.wires.filter((wire) => wire.id !== wireId) });
@@ -647,8 +703,8 @@ export function CircuitScene({
       </p>
       <div className={styles.editTools}>
         <p>
-          Connect terminals: select two terminal buttons or markers. Click an existing wire to
-          remove it. Drag to orbit; scroll or pinch to zoom.
+          Connect terminals: choose a start and destination, review the proposed connection, then
+          confirm it. Click an existing wire to remove it. Drag to orbit; scroll or pinch to zoom.
         </p>
         <p className={styles.editStatus} role="status" aria-live="polite">
           {editMessage}
@@ -656,17 +712,49 @@ export function CircuitScene({
         <ul aria-label="Connectable circuit terminals">
           {terminals.map(({ ref, label, part }) => {
             const isSelected =
-              selected?.componentInstanceId === ref.componentInstanceId &&
-              selected.catalogTerminalId === ref.catalogTerminalId;
+              (selected?.componentInstanceId === ref.componentInstanceId &&
+                selected.catalogTerminalId === ref.catalogTerminalId) ||
+              (pendingWire?.source.componentInstanceId === ref.componentInstanceId &&
+                pendingWire.source.catalogTerminalId === ref.catalogTerminalId) ||
+              (pendingWire?.target.componentInstanceId === ref.componentInstanceId &&
+                pendingWire.target.catalogTerminalId === ref.catalogTerminalId);
             return (
               <li key={`${ref.componentInstanceId}:${ref.catalogTerminalId}`}>
-                <button type="button" aria-pressed={isSelected} onClick={() => selectTerminal(ref)}>
+                <button
+                  type="button"
+                  aria-pressed={isSelected}
+                  disabled={Boolean(pendingWire)}
+                  aria-label={`${part}: ${label}; component instance ${ref.componentInstanceId}; catalog terminal ${ref.catalogTerminalId}`}
+                  onClick={() => selectTerminal(ref)}
+                >
                   {part}: {label}
                 </button>
               </li>
             );
           })}
         </ul>
+        {selected && (
+          <p className={styles.editStatus} aria-live="polite">
+            Selected endpoint: {endpointLabel({ kind: 'terminal', terminal: selected }, graph)} ·
+            component ID {selected.componentInstanceId} · catalog terminal ID{' '}
+            {selected.catalogTerminalId}
+          </p>
+        )}
+        {pendingWire && (
+          <div className={styles.pendingWire} role="group" aria-label="Confirm proposed wire">
+            <p>
+              Proposed connection:{' '}
+              {endpointLabel({ kind: 'terminal', terminal: pendingWire.source }, graph)} →{' '}
+              {endpointLabel({ kind: 'terminal', terminal: pendingWire.target }, graph)}
+            </p>
+            <button type="button" className="button primary small" onClick={confirmWire}>
+              Confirm wire
+            </button>
+            <button type="button" className="button secondary small" onClick={cancelPendingWire}>
+              Cancel
+            </button>
+          </div>
+        )}
         <h3>Arrange components</h3>
         <p>
           Select a component, then move it by one workbench grid step or rotate it by 90 degrees.
@@ -744,11 +832,20 @@ export function CircuitScene({
         {webgl === null ? (
           <AccessibleFallback message="Checking graphics support…" />
         ) : !webgl ? (
-          <AccessibleFallback message="This browser or device does not provide WebGL. The graph and circuit details remain available in the workspace." />
+          <AccessibleFallback
+            message="This browser or device does not currently provide WebGL. The graph and circuit details remain available in the workspace."
+            onRetry={retryRenderer}
+            retryLabel="Check graphics again"
+          />
         ) : (
           <SceneBoundary
+            key={resetKey}
             fallback={
-              <AccessibleFallback message="The 3D renderer encountered a graphics error. Reload the workspace to try again." />
+              <AccessibleFallback
+                message="The 3D renderer encountered a graphics error. The semantic circuit workspace remains available."
+                onRetry={retryRenderer}
+                retryLabel="Retry 3D view"
+              />
             }
           >
             <Canvas
@@ -795,12 +892,16 @@ export function CircuitScene({
           <ul className={styles.wireList} aria-label="Existing circuit wires">
             {graph.wires.map((wire, index) => (
               <li key={wire.id}>
+                <span>
+                  Wire {index + 1}: {endpointLabel(wire.source, graph)} →{' '}
+                  {endpointLabel(wire.target, graph)}
+                </span>
                 <button
                   type="button"
                   onClick={() => removeWire(wire.id)}
-                  aria-label={`Remove wire ${index + 1}`}
+                  aria-label={`Remove wire ${index + 1} from ${endpointLabel(wire.source, graph)} to ${endpointLabel(wire.target, graph)}`}
                 >
-                  Remove wire {index + 1}
+                  Remove connection
                 </button>
               </li>
             ))}
