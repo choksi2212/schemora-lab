@@ -196,7 +196,23 @@ async function cancelQueuedSimulationRuns(
     "SELECT id,run FROM simulation_runs WHERE project_id=$1 AND status='queued' FOR UPDATE",
     [projectId],
   );
+  const cancelledRunIds: string[] = [];
   for (const queuedRun of queuedRuns.rows) {
+    // A run may still be marked queued in the small interval after its job was
+    // claimed and a runner attempt was created. Preserve that execution as
+    // active and request a stop instead of falsely recording cancellation.
+    const stopRequestedAt = await requestSimulationRunStop(client, projectId, queuedRun.id);
+    if (stopRequestedAt) {
+      const stoppingRun = simulationRunSchema.parse({
+        ...(queuedRun.run as object),
+        status: 'stopping',
+      });
+      await client.query(
+        "UPDATE simulation_runs SET status='stopping',run=$3 WHERE project_id=$1 AND id=$2 AND status='queued'",
+        [projectId, queuedRun.id, JSON.stringify(stoppingRun)],
+      );
+      continue;
+    }
     const run = simulationRunSchema.parse({
       ...(queuedRun.run as object),
       status: 'cancelled',
@@ -207,17 +223,74 @@ async function cancelQueuedSimulationRuns(
       "UPDATE simulation_runs SET status='cancelled',run=$3 WHERE project_id=$1 AND id=$2 AND status='queued'",
       [projectId, queuedRun.id, JSON.stringify(run)],
     );
+    cancelledRunIds.push(queuedRun.id);
   }
-  const cancelledRunIds = queuedRuns.rows.map((item) => item.id);
   if (!cancelledRunIds.length) return;
   await client.query(
-    "UPDATE jobs SET status='cancelled',lease_token=NULL,lease_until=NULL WHERE project_id=$1 AND kind='simulate_run' AND payload->>'runId'=ANY($2::text[]) AND status='queued'",
+    "UPDATE jobs SET status='cancelled',lease_token=NULL,lease_until=NULL WHERE project_id=$1 AND kind='simulate_run' AND payload->>'runId'=ANY($2::text[]) AND status IN ('queued','running')",
     [projectId, cancelledRunIds],
   );
   await client.query(
     "UPDATE outbox SET delivered_at=COALESCE(delivered_at,now()) WHERE project_id=$1 AND kind='simulate_run' AND payload->>'runId'=ANY($2::text[]) AND delivered_at IS NULL",
     [projectId, cancelledRunIds],
   );
+}
+
+/**
+ * Prevent new simulation work after a project lifecycle transition. Queued
+ * runs are cancelled; runs with a live runner attempt receive a durable stop
+ * request and remain `stopping` until a runner reports a terminal response.
+ * Recording this intent does not itself prove that an execution was stopped.
+ */
+async function stopProjectSimulationRuns(
+  client: RepositoryClient,
+  projectId: string,
+  reason: string,
+) {
+  await cancelQueuedSimulationRuns(client, projectId, reason);
+  const activeRuns = await client.query<{ id: string; status: string; run: unknown }>(
+    `SELECT id,status,run FROM simulation_runs
+      WHERE project_id=$1 AND status IN ('preparing','running','stopping')
+      ORDER BY id FOR UPDATE`,
+    [projectId],
+  );
+  for (const item of activeRuns.rows) {
+    const stopRequestedAt = await requestSimulationRunStop(client, projectId, item.id);
+    if (stopRequestedAt) {
+      if (item.status !== 'stopping') {
+        const run = simulationRunSchema.parse({ ...(item.run as object), status: 'stopping' });
+        await client.query(
+          "UPDATE simulation_runs SET status='stopping',run=$3 WHERE project_id=$1 AND id=$2 AND status=$4",
+          [projectId, item.id, JSON.stringify(run), item.status],
+        );
+      }
+      continue;
+    }
+
+    // A preparing run without an active runner attempt has no execution whose
+    // termination can be awaited. Fence its queued/running job so it cannot
+    // progress after the lifecycle mutation commits.
+    if (item.status === 'preparing') {
+      const run = simulationRunSchema.parse({
+        ...(item.run as object),
+        status: 'cancelled',
+        failure: { code: 'CANCELLED', message: reason },
+        simulatedDurationMs: 0,
+      });
+      await client.query(
+        "UPDATE simulation_runs SET status='cancelled',run=$3 WHERE project_id=$1 AND id=$2 AND status='preparing'",
+        [projectId, item.id, JSON.stringify(run)],
+      );
+      await client.query(
+        "UPDATE jobs SET status='cancelled',lease_token=NULL,lease_until=NULL WHERE project_id=$1 AND kind='simulate_run' AND payload->>'runId'=$2 AND status IN ('queued','running')",
+        [projectId, item.id],
+      );
+      await client.query(
+        "UPDATE outbox SET delivered_at=COALESCE(delivered_at,now()) WHERE project_id=$1 AND kind='simulate_run' AND payload->>'runId'=$2 AND delivered_at IS NULL",
+        [projectId, item.id],
+      );
+    }
+  }
 }
 
 export function buildApp(
@@ -967,7 +1040,7 @@ export function buildApp(
             "UPDATE jobs SET status='cancelled' WHERE project_id=$1 AND kind='process_import' AND status IN ('queued','running')",
             [projectId],
           );
-          await cancelQueuedSimulationRuns(
+          await stopProjectSimulationRuns(
             client,
             projectId,
             'Project archived before simulation began.',
@@ -995,7 +1068,7 @@ export function buildApp(
             "UPDATE jobs SET status='cancelled' WHERE project_id=$1 AND kind='process_import' AND status IN ('queued','running')",
             [projectId],
           );
-          await cancelQueuedSimulationRuns(
+          await stopProjectSimulationRuns(
             client,
             projectId,
             'Project deletion began before simulation.',

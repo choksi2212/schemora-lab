@@ -21,6 +21,7 @@ import {
   runnerResponseDigest,
   runnerResponseSigningMessage,
   runnerSimulationBindingDigest,
+  simulationRunSchema,
 } from '@schemora/simulation';
 import { verifyRunnerExecutionResponsePure } from '../../sandbox-runner/src/capability.js';
 
@@ -437,7 +438,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
         ).status,
       ).toBe(409);
     });
-    it('creates an immutable, idempotent simulation request and cancels it while queued', async () => {
+    it('fences simulation runs across archive and deletion until active stop is acknowledged', async () => {
       const project = await create();
       const catalog = getCatalogRelease();
       const graph = {
@@ -731,12 +732,213 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
 
       const queuedBeforeArchive = await request('POST', runUrl, payload, tokenA, randomUUID());
       expect(queuedBeforeArchive.status).toBe(202);
+      await repository.dispatch();
+      const queuedRunJob = await repository.claim('simulate_run', 120);
+      expect(queuedRunJob?.payload.runId).toBe(queuedBeforeArchive.data.run.runId);
+      const queuedAttemptTime = Date.now();
+      const queuedAttempt: SimulationAttemptIdentity = {
+        projectId: project.id,
+        runId: queuedBeforeArchive.data.run.runId,
+        jobId: queuedRunJob!.id,
+        attemptNumber: queuedRunJob!.attempts,
+        attemptId: randomUUID(),
+        payloadDigest: 'c'.repeat(64),
+        executionProfileId: 'integration-profile-v1',
+        imageDigest: `sha256:${'d'.repeat(64)}`,
+        bindingDigest: runnerSimulationBindingDigest(queuedBeforeArchive.data.run.binding),
+        requestJti: randomUUID(),
+        requestedAt: new Date(queuedAttemptTime).toISOString(),
+        notBefore: new Date(queuedAttemptTime - 5_000).toISOString(),
+        deadlineAt: new Date(queuedAttemptTime + 120_000).toISOString(),
+      };
+      await repository.transaction(async (client) => {
+        expect(
+          await createSimulationRunAttempt(
+            client,
+            {
+              projectId: project.id,
+              jobId: queuedRunJob!.id,
+              leaseToken: queuedRunJob!.lease_token,
+            },
+            queuedAttempt,
+          ),
+        ).toBe(true);
+      });
+      const queuedWithoutAttempt = await request('POST', runUrl, payload, tokenA, randomUUID());
+      expect(queuedWithoutAttempt.status).toBe(202);
       const archived = await request('POST', '/v1/projects/' + project.id + '/archive', {
         expectedRevision: accepted.data.project.revision,
       });
       expect(archived.status).toBe(200);
-      const archivedRun = await request('GET', runUrl + '/' + queuedBeforeArchive.data.run.runId);
+      const archivedRun = await request('GET', runUrl + '/' + queuedWithoutAttempt.data.run.runId);
       expect(archivedRun.data.run.status).toBe('cancelled');
+      const dispatchedQueuedRun = await request(
+        'GET',
+        runUrl + '/' + queuedBeforeArchive.data.run.runId,
+      );
+      expect(dispatchedQueuedRun.data.run.status).toBe('stopping');
+      const stopRequestedRun = await repository.pool.query<{
+        status: string;
+        run: { status: string };
+        stop_requested_at: Date | null;
+      }>(
+        `SELECT r.status,r.run,a.stop_requested_at
+           FROM simulation_runs r
+           LEFT JOIN LATERAL (
+             SELECT stop_requested_at FROM simulation_run_attempts
+              WHERE project_id=r.project_id AND run_id=r.id
+                AND stop_requested_at IS NOT NULL
+              ORDER BY attempt_number DESC LIMIT 1
+           ) a ON true
+          WHERE r.project_id=$1 AND r.id=$2`,
+        [project.id, responseRun.data.run.runId],
+      );
+      expect(stopRequestedRun.rows[0]).toMatchObject({
+        status: 'stopping',
+        run: { status: 'stopping' },
+      });
+      expect(stopRequestedRun.rows[0]?.stop_requested_at).toBeInstanceOf(Date);
+
+      const deletion = await request('DELETE', '/v1/projects/' + project.id, {
+        expectedRevision: archived.data.project.revision,
+      });
+      expect(deletion.data.project.status).toBe('deleting');
+      await repository.dispatch();
+      const purgeJob = (
+        await repository.pool.query<Job>(
+          `UPDATE jobs
+              SET status='running',attempts=attempts+1,lease_token=$2,
+                  lease_until=clock_timestamp()+interval '120 seconds'
+            WHERE project_id=$1 AND kind='delete_project' AND status='queued'
+            RETURNING *`,
+          [project.id, randomUUID()],
+        )
+      ).rows[0]!;
+      await worker.deleteProject(purgeJob);
+      const deferredPurge = await repository.pool.query<{
+        status: string;
+        attempts: number;
+      }>('SELECT status,attempts FROM jobs WHERE id=$1', [purgeJob.id]);
+      expect(deferredPurge.rows[0]).toMatchObject({ status: 'queued', attempts: 0 });
+      expect(
+        (await repository.pool.query('SELECT status FROM projects WHERE id=$1', [project.id]))
+          .rows[0].status,
+      ).toBe('deleting');
+      expect(
+        (
+          await repository.pool.query(
+            'SELECT count(*)::int AS count FROM simulation_runs WHERE project_id=$1 AND id=$2',
+            [project.id, responseRun.data.run.runId],
+          )
+        ).rows[0].count,
+      ).toBe(1);
+
+      const stopTargets = [
+        [reclaimedAttempt, reclaimedLease, responseRun.data.run],
+        [
+          queuedAttempt,
+          {
+            projectId: project.id,
+            jobId: queuedRunJob!.id,
+            leaseToken: queuedRunJob!.lease_token,
+          },
+          dispatchedQueuedRun.data.run,
+        ],
+      ] as const;
+      for (const [stopAttempt, stopLease, runBeforeStop] of stopTargets) {
+        const finishedAt = new Date().toISOString();
+        const cancelledRun = simulationRunSchema.parse({
+          ...runBeforeStop,
+          status: 'cancelled',
+          failure: {
+            code: 'CANCELLED',
+            message: 'Runner confirmed stop during project deletion.',
+          },
+          simulatedDurationMs: 0,
+        });
+        const cancelledResponse = {
+          protocolVersion: RUNNER_PROTOCOL_VERSION as typeof RUNNER_PROTOCOL_VERSION,
+          runId: stopAttempt.runId,
+          attemptId: stopAttempt.attemptId,
+          payloadDigest: stopAttempt.payloadDigest,
+          executionProfileId: stopAttempt.executionProfileId,
+          imageDigest: stopAttempt.imageDigest,
+          status: 'cancelled' as const,
+          startedAt: new Date(issuedMs - 1_000).toISOString(),
+          finishedAt,
+          terminationReason: 'cancelled' as const,
+          run: cancelledRun,
+          outputManifest: [],
+          totalOutputBytes: 0,
+          cleanupReceipt: {
+            operationId: randomUUID(),
+            completedAt: finishedAt,
+            executionStopped: true as const,
+            runtimeObjectAbsent: true as const,
+            workspaceRemoved: true as const,
+          },
+        };
+        const stopEnvelope = {
+          protocolVersion: RUNNER_RESPONSE_AUTH_VERSION as typeof RUNNER_RESPONSE_AUTH_VERSION,
+          keyId,
+          requestJti: stopAttempt.requestJti,
+          responseJti: randomUUID(),
+          issuedAt: finishedAt,
+          responseDigest: runnerResponseDigest(cancelledResponse),
+          response: cancelledResponse,
+        };
+        const authenticatedStop = {
+          ...stopEnvelope,
+          signature: signSignature(
+            null,
+            Buffer.from(runnerResponseSigningMessage(stopEnvelope), 'utf8'),
+            keyPair.privateKey,
+          ).toString('base64url'),
+        };
+        const verifiedStop = await verifyRunnerExecutionResponsePure({
+          authenticatedResponse: authenticatedStop,
+          expected: {
+            requestJti: stopAttempt.requestJti,
+            runId: stopAttempt.runId,
+            attemptId: stopAttempt.attemptId,
+            payloadDigest: stopAttempt.payloadDigest,
+            executionProfileId: stopAttempt.executionProfileId,
+            imageDigest: stopAttempt.imageDigest,
+            bindingDigest: stopAttempt.bindingDigest,
+            notBefore: new Date(stopAttempt.notBefore).toISOString(),
+            deadlineAt: new Date(stopAttempt.deadlineAt).toISOString(),
+          },
+          publicKeys: { [keyId]: keyPair.publicKey },
+        });
+        expect(verifiedStop.valid).toBe(true);
+        if (!verifiedStop.valid) throw new Error('Integration stop response signature failed');
+        await expect(
+          repository.transaction((client) =>
+            acceptVerifiedRunnerResponse(
+              client,
+              stopLease,
+              stopAttempt,
+              verifiedStop.authenticated,
+            ),
+          ),
+        ).resolves.toEqual({ accepted: true, runStatus: 'cancelled', attemptState: 'cancelled' });
+      }
+
+      const readyPurge = (
+        await repository.pool.query<Job>(
+          `UPDATE jobs
+              SET status='running',attempts=attempts+1,lease_token=$2,
+                  lease_until=clock_timestamp()+interval '120 seconds'
+            WHERE id=$1 AND status='queued'
+            RETURNING *`,
+          [purgeJob.id, randomUUID()],
+        )
+      ).rows[0]!;
+      await worker.deleteProject(readyPurge);
+      expect(
+        (await repository.pool.query('SELECT status FROM projects WHERE id=$1', [project.id]))
+          .rows[0].status,
+      ).toBe('deleted');
     });
     it('revokes access before purge, replays deletion and removes private content', async () => {
       const project = await create();

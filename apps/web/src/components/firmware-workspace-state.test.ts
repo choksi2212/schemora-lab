@@ -3,6 +3,7 @@ import {
   canCancelQueuedRun,
   firmwareEntrypointError,
   firmwareGraphState,
+  resolveFirmwareDiagnosticLocation,
   serialOutput,
 } from './firmware-workspace-state';
 
@@ -42,6 +43,57 @@ describe('firmware workspace state', () => {
     expect(firmwareEntrypointError('arduino-cpp', 'src/main.cpp')).toBeNull();
     expect(firmwareEntrypointError('esp-idf-c', 'src/main.cpp')).toContain('extension');
     expect(firmwareEntrypointError('cpp', '../main.cpp')).toContain('relative');
+  });
+
+  it('resolves compiler locations only to exact artifact paths and never invents component attribution', () => {
+    const files = [
+      { path: 'main/main.c', source: 'void app_main(void) {}' },
+      { path: 'components/led/led.c', source: 'void led_on(void) {}' },
+    ];
+    expect(
+      resolveFirmwareDiagnosticLocation(
+        {
+          sourcePath: 'components/led/led.c',
+          line: 8,
+          column: 3,
+          endLine: 8,
+          endColumn: 12,
+        },
+        files,
+      ),
+    ).toEqual({
+      file: files[1],
+      location: {
+        path: 'components/led/led.c',
+        line: 8,
+        column: 3,
+        endLine: 8,
+        endColumn: 12,
+      },
+      sourceLocationAvailable: true,
+      sourceFileAvailable: true,
+      componentAttributionAvailable: false,
+    });
+    expect(
+      resolveFirmwareDiagnosticLocation(
+        { sourcePath: 'main/../private.c', line: 1, column: 1 },
+        files,
+      ),
+    ).toMatchObject({
+      file: null,
+      sourceLocationAvailable: true,
+      sourceFileAvailable: false,
+      componentAttributionAvailable: false,
+    });
+    expect(
+      resolveFirmwareDiagnosticLocation({ sourcePath: null, line: null, column: null }, files),
+    ).toMatchObject({
+      file: null,
+      location: null,
+      sourceLocationAvailable: false,
+      sourceFileAvailable: false,
+      componentAttributionAvailable: false,
+    });
   });
 
   it('offers cancellation only while a run remains queued', () => {

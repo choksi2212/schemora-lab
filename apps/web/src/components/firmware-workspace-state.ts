@@ -1,6 +1,52 @@
 export type FirmwareBinding = { graphDigest: string; graphRevision: number };
 export type FirmwareLanguage = 'c' | 'cpp' | 'arduino-cpp' | 'esp-idf-c';
 
+export type FirmwareDiagnosticLocation = {
+  sourcePath: string | null;
+  line: number | null;
+  column: number | null;
+  endLine?: number | null;
+  endColumn?: number | null;
+};
+
+/**
+ * Resolve compiler-provided locations only against the exact source paths in
+ * the selected immutable artifact. A compiler location identifies source text;
+ * the current result contract does not identify schematic components.
+ */
+export function resolveFirmwareDiagnosticLocation<T extends { path: string }>(
+  diagnostic: FirmwareDiagnosticLocation,
+  sourceFiles: readonly T[],
+) {
+  const hasPosition =
+    typeof diagnostic.sourcePath === 'string' &&
+    Number.isInteger(diagnostic.line) &&
+    diagnostic.line !== null &&
+    diagnostic.line > 0 &&
+    Number.isInteger(diagnostic.column) &&
+    diagnostic.column !== null &&
+    diagnostic.column > 0;
+  const file = hasPosition
+    ? (sourceFiles.find((sourceFile) => sourceFile.path === diagnostic.sourcePath) ?? null)
+    : null;
+
+  return {
+    file,
+    location: hasPosition
+      ? {
+          path: diagnostic.sourcePath!,
+          line: diagnostic.line!,
+          column: diagnostic.column!,
+          endLine: diagnostic.endLine ?? null,
+          endColumn: diagnostic.endColumn ?? null,
+        }
+      : null,
+    sourceLocationAvailable: hasPosition,
+    sourceFileAvailable: file !== null,
+    componentAttributionAvailable: false as const,
+  };
+}
+
 export function firmwareEntrypointError(language: FirmwareLanguage, entrypoint: string) {
   if (!/^(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*\.(c|cc|cpp)$/.test(entrypoint))
     return 'Use a relative .c, .cc, or .cpp entrypoint path with no spaces.';

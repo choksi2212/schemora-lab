@@ -342,6 +342,32 @@ export class Worker {
     const sources = await this.repository.transaction(async (client) => {
       const project = await this.repository.jobScope(client, job);
       if (!project || project.status !== 'deleting') return null;
+      const activeExecution = await client.query(
+        `SELECT 1
+           FROM simulation_runs
+          WHERE project_id=$1 AND status IN ('preparing','running','stopping')
+         UNION ALL
+         SELECT 1
+           FROM simulation_run_attempts
+          WHERE project_id=$1 AND state IN ('dispatched','accepted','running')
+          LIMIT 1`,
+        [job.project_id],
+      );
+      if (activeExecution.rowCount) {
+        // A project purge must not remove the attempt ledger or run inputs
+        // while an isolated process may still be using them. Return the purge
+        // job to the queue without consuming its retry budget; it will be
+        // reclaimed after the authenticated runner response settles the run.
+        await client.query(
+          `UPDATE jobs
+              SET status='queued',attempts=GREATEST(attempts-1,0),
+                  available_at=clock_timestamp()+interval '5 seconds',
+                  lease_until=NULL,lease_token=NULL,error_code=NULL
+            WHERE id=$1 AND project_id=$2 AND lease_token=$3 AND status='running'`,
+          [job.id, job.project_id, job.lease_token],
+        );
+        return null;
+      }
       return (
         await client.query<{ object_key: string }>(
           'SELECT object_key FROM imports WHERE project_id=$1 UNION SELECT object_key FROM firmware_artifacts WHERE project_id=$1 UNION SELECT object_key FROM firmware_artifact_files WHERE project_id=$1 UNION SELECT object_key FROM firmware_build_artifacts WHERE project_id=$1 UNION SELECT object_key FROM upload_intents WHERE project_id=$1',

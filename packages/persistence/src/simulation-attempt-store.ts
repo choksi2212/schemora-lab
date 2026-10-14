@@ -250,8 +250,6 @@ export async function acceptVerifiedRunnerResponse(
     scoped.job.payload?.runId !== expected.runId
   )
     return { accepted: false, reason: 'stale_lease' };
-  if (scoped.project.status !== 'active') return { accepted: false, reason: 'stale_lease' };
-
   const runs = await client.query<LockedRun>(
     'SELECT status,run,binding FROM simulation_runs WHERE project_id=$1 AND id=$2 FOR UPDATE',
     [expected.projectId, expected.runId],
@@ -268,9 +266,10 @@ export async function acceptVerifiedRunnerResponse(
     not_before: Date;
     deadline_at: Date;
     state: string;
+    stop_requested_at: Date | null;
   }>(
     `SELECT attempt_id,attempt_number,payload_digest,execution_profile_id,image_digest,
-            binding_digest,request_jti,not_before,deadline_at,state
+            binding_digest,request_jti,not_before,deadline_at,state,stop_requested_at
        FROM simulation_run_attempts
       WHERE project_id=$1 AND run_id=$2 AND job_id=$3 AND attempt_number=$4
       FOR UPDATE`,
@@ -303,6 +302,22 @@ export async function acceptVerifiedRunnerResponse(
   )
     return { accepted: false, reason: 'stale_attempt' };
 
+  // Archive and deletion revoke normal project access, but a signed terminal
+  // response is still needed to prove an active process has stopped before a
+  // purge can remove its inputs. Do not accept progress after that transition.
+  if (scoped.project.status !== 'active') {
+    const stopRequestedAt = currentAttempt.stop_requested_at?.getTime();
+    const finishedAt = response.finishedAt === null ? null : Date.parse(response.finishedAt);
+    if (
+      currentRun.status !== 'stopping' ||
+      stopRequestedAt === undefined ||
+      !['completed', 'failed', 'cancelled'].includes(response.status) ||
+      finishedAt === null ||
+      (response.status === 'completed' && finishedAt > stopRequestedAt)
+    )
+      return { accepted: false, reason: 'stale_attempt' };
+  }
+
   const next = responseStatusForRun(response);
   if (!transitionAllowed(currentRun.status, response.status, currentAttempt.state, next))
     return { accepted: false, reason: 'invalid_transition' };
@@ -326,7 +341,6 @@ export async function acceptVerifiedRunnerResponse(
   const runValue = response.run ?? {
     ...currentRun.run,
     status: next,
-    ...(response.startedAt ? { startedAt: response.startedAt } : {}),
   };
   const updatedRun = await client.query(
     `UPDATE simulation_runs

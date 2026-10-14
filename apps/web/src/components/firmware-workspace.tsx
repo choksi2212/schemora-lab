@@ -9,6 +9,7 @@ import {
   canRequestRunStop,
   firmwareEntrypointError,
   firmwareGraphState,
+  resolveFirmwareDiagnosticLocation,
   serialOutput,
   type FirmwareLanguage,
 } from './firmware-workspace-state';
@@ -81,6 +82,8 @@ type BuildDiagnostic = {
   sourcePath: string | null;
   line: number | null;
   column: number | null;
+  endLine?: number | null;
+  endColumn?: number | null;
 };
 type FirmwareBuild = {
   id: string;
@@ -1048,6 +1051,11 @@ export function FirmwareWorkspace({
             source locations when the compiler supplies them; a build result does not mean the
             firmware was executed.
           </p>
+          <p className="fine-text" role="note">
+            Component source attribution is unavailable: this compiler result schema records file
+            locations only and supplies no component identity or source map. Locations below link to
+            the exact source file and range when that file is present in the selected artifact.
+          </p>
           {buildError && <p className="warning-notice">{buildError}</p>}
           {!buildError && builds.length === 0 && (
             <p className="fine-text">No compiler result is stored for this source version.</p>
@@ -1065,44 +1073,57 @@ export function FirmwareWorkspace({
                 <ul className={styles.buildDiagnostics}>
                   {build.result.diagnostics.map((diagnostic, index) => (
                     <li key={`${diagnostic.code}-${index}`}>
-                      <strong>
-                        {diagnostic.severity.toUpperCase()} · {diagnostic.code}
-                      </strong>
-                      {diagnostic.sourcePath &&
-                        (diagnostic.line !== null &&
-                        diagnostic.column !== null &&
-                        (currentArtifact.buildSystem !== 'esp-idf'
-                          ? diagnostic.sourcePath === currentArtifact.entrypoint
-                          : bundleFiles.some((file) => file.path === diagnostic.sourcePath)) ? (
-                          <button
-                            type="button"
-                            className={styles.diagnosticLocation}
-                            onClick={() => {
-                              if (currentArtifact.buildSystem === 'esp-idf') {
-                                const file = bundleFiles.find(
-                                  (item) => item.path === diagnostic.sourcePath,
-                                );
-                                if (!file) return;
-                                setActiveBundlePath(file.path);
-                                setSource(file.source);
-                              }
-                              setPendingDiagnosticLocation({
-                                path: diagnostic.sourcePath!,
-                                line: diagnostic.line!,
-                                column: diagnostic.column!,
-                              });
-                            }}
-                          >
-                            {diagnostic.sourcePath}:{diagnostic.line}:{diagnostic.column}
-                          </button>
-                        ) : (
-                          <code>
-                            {diagnostic.sourcePath}
-                            {diagnostic.line !== null && `:${diagnostic.line}`}
-                            {diagnostic.column !== null && `:${diagnostic.column}`}
-                          </code>
-                        ))}
-                      <span>{diagnostic.message}</span>
+                      {(() => {
+                        const sourceFiles =
+                          currentArtifact.buildSystem === 'esp-idf'
+                            ? bundleFiles
+                            : [{ path: currentArtifact.entrypoint, source }];
+                        const resolved = resolveFirmwareDiagnosticLocation(diagnostic, sourceFiles);
+                        const location = resolved.location;
+                        return (
+                          <>
+                            <strong>
+                              {diagnostic.severity.toUpperCase()} · {diagnostic.code}
+                            </strong>
+                            {location &&
+                              (resolved.sourceFileAvailable ? (
+                                <button
+                                  type="button"
+                                  className={styles.diagnosticLocation}
+                                  onClick={() => {
+                                    if (resolved.file) {
+                                      if (currentArtifact.buildSystem === 'esp-idf')
+                                        setActiveBundlePath(resolved.file.path);
+                                      setSource(resolved.file.source);
+                                    }
+                                    setPendingDiagnosticLocation({
+                                      path: location.path,
+                                      line: location.line,
+                                      column: location.column,
+                                    });
+                                  }}
+                                >
+                                  {location.path}:{location.line}:{location.column}
+                                  {location.endLine !== null && location.endColumn !== null
+                                    ? `–${location.endLine}:${location.endColumn}`
+                                    : ''}
+                                </button>
+                              ) : (
+                                <code>
+                                  {location.path}:{location.line}:{location.column}
+                                  {location.endLine !== null && location.endColumn !== null
+                                    ? `–${location.endLine}:${location.endColumn}`
+                                    : ''}{' '}
+                                  (source file is not available in this artifact view)
+                                </code>
+                              ))}
+                            {!location && diagnostic.sourcePath && (
+                              <code>{diagnostic.sourcePath} (no compiler position supplied)</code>
+                            )}
+                            <span>{diagnostic.message}</span>
+                          </>
+                        );
+                      })()}
                     </li>
                   ))}
                 </ul>
