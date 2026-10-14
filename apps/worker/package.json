@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@schemora/assembly-plan": "workspace:*",
+    "@schemora/catalog": "workspace:*",
     "@schemora/contracts": "workspace:*",
     "@schemora/intelligence": "workspace:*",
     "@schemora/persistence": "workspace:*",

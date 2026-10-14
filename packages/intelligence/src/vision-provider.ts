@@ -26,6 +26,31 @@ export type VisionProviderConfig = {
   fetch?: typeof fetch;
 };
 
+const observationJsonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['text', 'region'],
+  properties: {
+    text: { type: 'string' },
+    region: {
+      anyOf: [
+        { type: 'null' },
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['x', 'y', 'width', 'height'],
+          properties: {
+            x: { type: 'number' },
+            y: { type: 'number' },
+            width: { type: 'number' },
+            height: { type: 'number' },
+          },
+        },
+      ],
+    },
+  },
+} as const;
+
 const proposalJsonSchema = {
   type: 'object',
   additionalProperties: false,
@@ -38,55 +63,26 @@ const proposalJsonSchema = {
     },
     candidates: {
       type: 'array',
-      maxItems: 5,
       items: {
         type: 'object',
         additionalProperties: false,
         required: ['catalogPartId', 'rank', 'basis', 'visibleMarkings'],
         properties: {
           catalogPartId: { type: 'string' },
-          rank: { type: 'integer', minimum: 1, maximum: 5 },
+          rank: { type: 'integer' },
           basis: { type: 'string' },
           visibleMarkings: {
             type: 'array',
-            maxItems: 10,
-            items: { $ref: '#/$defs/observation' },
+            items: observationJsonSchema,
           },
         },
       },
     },
     observations: {
       type: 'array',
-      maxItems: 20,
-      items: { $ref: '#/$defs/observation' },
+      items: observationJsonSchema,
     },
-    limitations: { type: 'array', maxItems: 10, items: { type: 'string' } },
-  },
-  $defs: {
-    observation: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['text', 'region'],
-      properties: {
-        text: { type: 'string' },
-        region: {
-          anyOf: [
-            { type: 'null' },
-            {
-              type: 'object',
-              additionalProperties: false,
-              required: ['x', 'y', 'width', 'height'],
-              properties: {
-                x: { type: 'number', minimum: 0, maximum: 1 },
-                y: { type: 'number', minimum: 0, maximum: 1 },
-                width: { type: 'number', exclusiveMinimum: 0, maximum: 1 },
-                height: { type: 'number', exclusiveMinimum: 0, maximum: 1 },
-              },
-            },
-          ],
-        },
-      },
-    },
+    limitations: { type: 'array', items: { type: 'string' } },
   },
 } as const;
 

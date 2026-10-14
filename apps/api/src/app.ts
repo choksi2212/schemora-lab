@@ -2,6 +2,11 @@ import Fastify, { type FastifyRequest } from 'fastify';
 import { jwtVerify } from 'jose';
 import { z, ZodError } from 'zod';
 import { randomUUID } from 'node:crypto';
+import {
+  HARDWARE_RECOGNITION_CONSENT_VERSION,
+  hardwareRecognitionConsentSchema,
+  hardwareRecognitionProposalSchema,
+} from '@schemora/contracts';
 import { canonicalDigest } from '@schemora/assembly-plan';
 import { currentCatalogRelease } from './catalog.js';
 import {
@@ -9,6 +14,7 @@ import {
   RepositoryError,
   publicFirmwareArtifact,
   publicHardwarePhoto,
+  publicHardwareRecognitionRequest,
   publicImport,
   publicReview,
   requestSimulationRunStop,
@@ -40,6 +46,8 @@ const scope = z.object({ projectId: uuid });
 const importScope = scope.extend({ importId: uuid });
 const firmwareArtifactScope = scope.extend({ artifactId: uuid });
 const hardwarePhotoScope = scope.extend({ photoId: uuid });
+const hardwareRecognitionScope = scope.extend({ recognitionId: uuid });
+const hardwareInventoryScope = scope.extend({ itemId: uuid });
 const firmwareBuildScope = firmwareArtifactScope.extend({ buildId: uuid });
 const firmwareBuildArtifactScope = firmwareBuildScope.extend({
   role: z.enum(['application', 'bootloader', 'partition_table']),
@@ -47,6 +55,23 @@ const firmwareBuildArtifactScope = firmwareBuildScope.extend({
 const firmwareFileQuery = z.object({ path: z.string().min(1).max(240) }).strict();
 const simulationRunScope = scope.extend({ runId: uuid });
 const mutation = z.object({ expectedRevision }).strict();
+const hardwareRecognitionRequestSchema = z
+  .object({ expectedRevision, consent: hardwareRecognitionConsentSchema })
+  .strict();
+const hardwareRecognitionConfirmationSchema = z
+  .object({
+    expectedRevision,
+    catalogReleaseId: z.string().min(1).max(120),
+    catalogPartId: z.string().min(1).max(200),
+  })
+  .strict();
+const hardwareInventoryLinkSchema = z
+  .object({
+    expectedRevision,
+    graphSnapshotId: uuid,
+    componentInstanceId: z.string().min(1).max(200),
+  })
+  .strict();
 const simulationRunCreateSchema = z.object({ expectedRevision, firmwareArtifactId: uuid }).strict();
 const emptyBodySchema = z.object({}).strict();
 const circuitGraphWrite = z.object({ expectedRevision, graph: circuitGraphSchema }).strict();
@@ -448,6 +473,22 @@ export function buildApp(
                 'Save a circuit containing one supported development board before adding firmware.',
               FIRMWARE_TARGET_UNSUPPORTED:
                 'The saved circuit must resolve to exactly one development board in the current catalog.',
+              VISION_RECOGNITION_DISABLED:
+                'Remote hardware recognition is not enabled in this workspace.',
+              VISION_CONSENT_NOTICE_STALE:
+                'The recognition notice changed. Refresh the workspace and review it again.',
+              RECOGNITION_ALREADY_RUNNING:
+                'A recognition request is already running for this photo.',
+              RECOGNITION_NOT_READY:
+                'Wait until recognition finishes before confirming a catalog match.',
+              PART_NOT_PROPOSED: 'Confirm only a catalog part proposed for this photo.',
+              GRAPH_SNAPSHOT_STALE: 'The circuit changed. Refresh it before linking hardware.',
+              GRAPH_SNAPSHOT_NOT_FOUND: 'Save a circuit before linking confirmed hardware.',
+              CATALOG_RELEASE_MISMATCH: 'The hardware and circuit use different catalog releases.',
+              HARDWARE_COMPONENT_MISMATCH:
+                'Choose a circuit component with the same exact catalog part.',
+              HARDWARE_COMPONENT_ALREADY_LINKED:
+                'That circuit component is already linked to hardware.',
               INVALID_FIRMWARE_SOURCE:
                 'Upload valid UTF-8 C or C++ source no larger than 2,000,000 bytes.',
               FIRMWARE_ARTIFACT_LIMIT: 'This project has reached its firmware version limit.',
@@ -510,6 +551,15 @@ export function buildApp(
       release,
     });
   });
+  app.get('/v1/hardware-recognition-capability', async (request) =>
+    envelope(request, {
+      enabled: config.VISION_RECOGNITION_ENABLED === 'true',
+      providerId: 'vultr-inference',
+      providerName: 'Vultr Serverless Inference',
+      modelId: 'qwen3.8-27b',
+      noticeRevision: config.VISION_RECOGNITION_NOTICE_REVISION,
+    }),
+  );
   app.get('/v1/projects', async (request) => {
     const query = z.object({ cursor: z.string().max(300).optional() }).parse(request.query);
     return envelope(request, await repository.list(owner(request), query.cursor));
@@ -1276,6 +1326,18 @@ export function buildApp(
           const photo = removed.rows[0];
           if (!photo) throw new RepositoryError('NOT_FOUND', 404);
           await client.query(
+            `UPDATE jobs SET status='cancelled',payload='{}'::jsonb,lease_until=NULL,lease_token=NULL
+             WHERE project_id=$1 AND kind='process_hardware_recognition'
+               AND payload->>'photoId'=$2 AND status IN ('queued','running')`,
+            [projectId, photoId],
+          );
+          await client.query(
+            `UPDATE outbox SET delivered_at=COALESCE(delivered_at,now()),payload='{}'::jsonb
+             WHERE project_id=$1 AND kind='process_hardware_recognition'
+               AND payload->>'photoId'=$2 AND delivered_at IS NULL`,
+            [projectId, photoId],
+          );
+          await client.query(
             "DELETE FROM idempotency WHERE owner_id=$1 AND scope=$2 AND response->'photo'->>'id'=$3",
             [principal, projectId + ':hardware_photo_uploaded', photoId],
           );
@@ -1284,6 +1346,317 @@ export function buildApp(
             objectKey: photo.object_key,
           });
           return { deletedPhotoId: photoId };
+        },
+      ),
+    );
+  });
+  app.get('/v1/projects/:projectId/hardware-photos/:photoId/recognitions', async (request) => {
+    const { projectId, photoId } = hardwarePhotoScope.parse(request.params);
+    return envelope(request, {
+      items: await repository.hardwareRecognitionRequests(owner(request), projectId, photoId),
+    });
+  });
+  app.get('/v1/projects/:projectId/hardware-recognitions', async (request) => {
+    const { projectId } = scope.parse(request.params);
+    return envelope(request, {
+      items: await repository.hardwareRecognitionRequests(owner(request), projectId),
+    });
+  });
+  app.post(
+    '/v1/projects/:projectId/hardware-photos/:photoId/recognitions',
+    async (request, reply) => {
+      const { projectId, photoId } = hardwarePhotoScope.parse(request.params);
+      const body = hardwareRecognitionRequestSchema.parse(request.body);
+      if (config.VISION_RECOGNITION_ENABLED !== 'true')
+        throw new RepositoryError('VISION_RECOGNITION_DISABLED', 503);
+      if (
+        body.consent.version !== HARDWARE_RECOGNITION_CONSENT_VERSION ||
+        body.consent.noticeRevision !== config.VISION_RECOGNITION_NOTICE_REVISION
+      )
+        throw new RepositoryError('VISION_CONSENT_NOTICE_STALE', 409);
+      const principal = owner(request);
+      const recognitionId = randomUUID();
+      const recognitionCatalog = currentCatalogRelease().release;
+      const result = await repository.mutate(
+        principal,
+        projectId,
+        body.expectedRevision,
+        key(request),
+        'hardware_recognition_requested',
+        { photoId, consent: body.consent },
+        async (client, project) => {
+          const photoResult = await client.query<{
+            sha256: string;
+            status: string;
+          }>('SELECT sha256,status FROM hardware_photos WHERE project_id=$1 AND id=$2 FOR SHARE', [
+            projectId,
+            photoId,
+          ]);
+          const photo = photoResult.rows[0];
+          if (!photo) throw new RepositoryError('NOT_FOUND', 404);
+          if (photo.status !== 'manual_review')
+            throw new RepositoryError('PHOTO_NOT_AVAILABLE', 409);
+          const active = await client.query(
+            `SELECT 1 FROM hardware_recognition_requests WHERE project_id=$1 AND photo_id=$2
+           AND status IN ('queued','running') LIMIT 1`,
+            [projectId, photoId],
+          );
+          if (active.rowCount) throw new RepositoryError('RECOGNITION_ALREADY_RUNNING', 409);
+          const daily = await client.query<{ count: number }>(
+            `SELECT count(*)::int AS count FROM hardware_recognition_requests
+           WHERE project_id=$1 AND created_at >= now()-interval '24 hours'`,
+            [projectId],
+          );
+          if (daily.rows[0]!.count >= 20) throw new RepositoryError('VISION_DAILY_LIMIT', 429);
+          const inserted = await client.query(
+            `INSERT INTO hardware_recognition_requests
+           (id,project_id,photo_id,project_revision,actor_id,consent_version,provider_id,model_id,
+            catalog_release_id,notice_revision,image_sha256,status)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'queued') RETURNING *`,
+            [
+              recognitionId,
+              projectId,
+              photoId,
+              project.revision,
+              principal,
+              body.consent.version,
+              body.consent.providerId,
+              body.consent.modelId,
+              recognitionCatalog.releaseId,
+              body.consent.noticeRevision,
+              photo.sha256,
+            ],
+          );
+          await repository.enqueue(client, projectId, 'process_hardware_recognition', {
+            recognitionId,
+            photoId,
+          });
+          return { recognition: publicHardwareRecognitionRequest(inserted.rows[0]) };
+        },
+      );
+      return reply.code(202).send(envelope(request, result));
+    },
+  );
+  app.get('/v1/projects/:projectId/hardware-recognitions/:recognitionId', async (request) => {
+    const { projectId, recognitionId } = hardwareRecognitionScope.parse(request.params);
+    return envelope(request, {
+      recognition: await repository.hardwareRecognitionRequest(
+        owner(request),
+        projectId,
+        recognitionId,
+      ),
+    });
+  });
+  app.post(
+    '/v1/projects/:projectId/hardware-recognitions/:recognitionId/confirm',
+    async (request) => {
+      const { projectId, recognitionId } = hardwareRecognitionScope.parse(request.params);
+      const body = hardwareRecognitionConfirmationSchema.parse(request.body);
+      const principal = owner(request);
+      const inventoryId = randomUUID();
+      const catalog = currentCatalogRelease().release;
+      if (body.catalogReleaseId !== catalog.releaseId)
+        throw new RepositoryError('CATALOG_RELEASE_UNSUPPORTED', 409);
+      const part = catalog.parts.find((candidate) => candidate.id === body.catalogPartId);
+      if (!part) throw new RepositoryError('CATALOG_PART_UNSUPPORTED', 400);
+      return envelope(
+        request,
+        await repository.mutate(
+          principal,
+          projectId,
+          body.expectedRevision,
+          key(request),
+          'hardware_inventory_confirmed',
+          {
+            recognitionId,
+            catalogReleaseId: body.catalogReleaseId,
+            catalogPartId: body.catalogPartId,
+          },
+          async (client, project) => {
+            const recognitionResult = await client.query(
+              `SELECT status,proposal,catalog_release_id FROM hardware_recognition_requests
+             WHERE project_id=$1 AND id=$2 FOR UPDATE`,
+              [projectId, recognitionId],
+            );
+            const recognition = recognitionResult.rows[0];
+            if (!recognition) throw new RepositoryError('NOT_FOUND', 404);
+            if (recognition.status !== 'completed' || !recognition.proposal)
+              throw new RepositoryError('RECOGNITION_NOT_READY', 409);
+            if (recognition.catalog_release_id !== body.catalogReleaseId)
+              throw new RepositoryError('CATALOG_RELEASE_MISMATCH', 409);
+            const proposal = hardwareRecognitionProposalSchema.parse(recognition.proposal);
+            if (!proposal.candidates.some((candidate) => candidate.catalogPartId === part.id))
+              throw new RepositoryError('PART_NOT_PROPOSED', 409);
+            const alreadyConfirmed = await client.query(
+              'SELECT 1 FROM hardware_inventory WHERE project_id=$1 AND recognition_id=$2 LIMIT 1',
+              [projectId, recognitionId],
+            );
+            if (alreadyConfirmed.rowCount)
+              throw new RepositoryError('RECOGNITION_ALREADY_CONFIRMED', 409);
+            const inserted = await client.query(
+              `INSERT INTO hardware_inventory
+             (id,project_id,project_revision,actor_id,catalog_release_id,catalog_part_id,recognition_id,label)
+             VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+              [
+                inventoryId,
+                projectId,
+                project.revision,
+                principal,
+                catalog.releaseId,
+                part.id,
+                recognitionId,
+                `${part.manufacturer} ${part.model}`,
+              ],
+            );
+            return {
+              item: {
+                id: inserted.rows[0].id,
+                catalogReleaseId: inserted.rows[0].catalog_release_id,
+                catalogPartId: inserted.rows[0].catalog_part_id,
+                label: inserted.rows[0].label,
+                sourceRecognitionId: inserted.rows[0].recognition_id,
+                confirmedAt: inserted.rows[0].confirmed_at.toISOString(),
+              },
+            };
+          },
+        ),
+      );
+    },
+  );
+  app.get('/v1/projects/:projectId/hardware-inventory', async (request) => {
+    const { projectId } = scope.parse(request.params);
+    const items = await repository.transaction(async (client) => {
+      await repository.project(client, owner(request), projectId, 'share');
+      const result = await client.query(
+        `SELECT id,catalog_release_id,catalog_part_id,label,recognition_id,confirmed_at,
+                linked_component_id,linked_graph_snapshot_id
+         FROM hardware_inventory WHERE project_id=$1 ORDER BY confirmed_at DESC,id DESC LIMIT 100`,
+        [projectId],
+      );
+      return result.rows.map((item) => ({
+        id: item.id,
+        catalogReleaseId: item.catalog_release_id,
+        catalogPartId: item.catalog_part_id,
+        label: item.label,
+        sourceRecognitionId: item.recognition_id,
+        linkedComponentId: item.linked_component_id,
+        linkedGraphSnapshotId: item.linked_graph_snapshot_id,
+        confirmedAt: item.confirmed_at.toISOString(),
+      }));
+    });
+    return envelope(request, { items });
+  });
+  app.delete('/v1/projects/:projectId/hardware-inventory/:itemId', async (request) => {
+    const { projectId, itemId } = hardwareInventoryScope.parse(request.params);
+    const body = mutation.parse(request.body);
+    return envelope(
+      request,
+      await repository.mutate(
+        owner(request),
+        projectId,
+        body.expectedRevision,
+        key(request),
+        'hardware_inventory_removed',
+        { itemId },
+        async (client) => {
+          const removed = await client.query(
+            'DELETE FROM hardware_inventory WHERE project_id=$1 AND id=$2 RETURNING id',
+            [projectId, itemId],
+          );
+          if (!removed.rows[0]) throw new RepositoryError('NOT_FOUND', 404);
+          return { deletedInventoryId: itemId };
+        },
+      ),
+    );
+  });
+  app.put('/v1/projects/:projectId/hardware-inventory/:itemId/link', async (request) => {
+    const { projectId, itemId } = hardwareInventoryScope.parse(request.params);
+    const body = hardwareInventoryLinkSchema.parse(request.body);
+    const release = getCatalogRelease();
+    return envelope(
+      request,
+      await repository.mutate(
+        owner(request),
+        projectId,
+        body.expectedRevision,
+        key(request),
+        'hardware_inventory_linked',
+        {
+          itemId,
+          graphSnapshotId: body.graphSnapshotId,
+          componentInstanceId: body.componentInstanceId,
+        },
+        async (client, project) => {
+          const revisionResult = await client.query<{
+            snapshot: { circuitGraph?: { id: string } | null };
+          }>('SELECT snapshot FROM revisions WHERE project_id=$1 AND revision=$2', [
+            projectId,
+            project.revision - 1,
+          ]);
+          const graphId = revisionResult.rows[0]?.snapshot.circuitGraph?.id;
+          if (!graphId || graphId !== body.graphSnapshotId)
+            throw new RepositoryError('GRAPH_SNAPSHOT_STALE', 409);
+          const graphResult = await client.query<{ graph: unknown }>(
+            'SELECT graph FROM circuit_graph_snapshots WHERE project_id=$1 AND id=$2',
+            [projectId, graphId],
+          );
+          if (!graphResult.rows[0]) throw new RepositoryError('GRAPH_SNAPSHOT_NOT_FOUND', 404);
+          const graph = circuitGraphSchema.parse(graphResult.rows[0].graph);
+          const itemResult = await client.query<{
+            catalog_release_id: string;
+            catalog_part_id: string;
+          }>(
+            'SELECT catalog_release_id,catalog_part_id FROM hardware_inventory WHERE project_id=$1 AND id=$2 FOR UPDATE',
+            [projectId, itemId],
+          );
+          const item = itemResult.rows[0];
+          if (!item) throw new RepositoryError('NOT_FOUND', 404);
+          if (
+            item.catalog_release_id !== release.releaseId ||
+            graph.catalogReleaseId !== item.catalog_release_id
+          )
+            throw new RepositoryError('CATALOG_RELEASE_MISMATCH', 409);
+          const component = graph.components.find(
+            (candidate) => candidate.id === body.componentInstanceId,
+          );
+          if (!component || component.catalogPartId !== item.catalog_part_id)
+            throw new RepositoryError('HARDWARE_COMPONENT_MISMATCH', 409);
+          const assigned = await client.query(
+            'SELECT 1 FROM hardware_inventory WHERE project_id=$1 AND linked_component_id=$2 AND id<>$3 LIMIT 1',
+            [projectId, component.id, itemId],
+          );
+          if (assigned.rowCount)
+            throw new RepositoryError('HARDWARE_COMPONENT_ALREADY_LINKED', 409);
+          await client.query(
+            `UPDATE hardware_inventory SET linked_component_id=$3,linked_graph_snapshot_id=$4
+             WHERE project_id=$1 AND id=$2`,
+            [projectId, itemId, component.id, graphId],
+          );
+          return { itemId, linkedComponentId: component.id, linkedGraphSnapshotId: graphId };
+        },
+      ),
+    );
+  });
+  app.delete('/v1/projects/:projectId/hardware-inventory/:itemId/link', async (request) => {
+    const { projectId, itemId } = hardwareInventoryScope.parse(request.params);
+    const body = mutation.parse(request.body);
+    return envelope(
+      request,
+      await repository.mutate(
+        owner(request),
+        projectId,
+        body.expectedRevision,
+        key(request),
+        'hardware_inventory_unlinked',
+        { itemId },
+        async (client) => {
+          const removed = await client.query(
+            `UPDATE hardware_inventory SET linked_component_id=NULL,linked_graph_snapshot_id=NULL
+             WHERE project_id=$1 AND id=$2 RETURNING id`,
+            [projectId, itemId],
+          );
+          if (!removed.rows[0]) throw new RepositoryError('NOT_FOUND', 404);
+          return { unlinkedInventoryId: itemId };
         },
       ),
     );

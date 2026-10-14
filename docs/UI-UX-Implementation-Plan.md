@@ -51,7 +51,7 @@ This plan owns presentation, interaction, navigation, feedback, accessibility, a
 
 The interface can help a person understand and inspect supported circuit guidance. It cannot establish that an arbitrary physical design is safe, infer an exact hardware model from an ambiguous family name, or claim that a 3D representation proves electrical correctness. Visual confidence must never exceed the verification state represented by the system.
 
-The first release is desktop-first. A semantic, keyboard-usable path must preserve core work even if 3D rendering is unavailable. Mobile optimization, photo-based recognition, broad simulation, and unrestricted hardware coverage are outside this plan unless separately authorized by product scope.
+The first release is desktop-first. A semantic, keyboard-usable path must preserve core work even if 3D rendering is unavailable. Photo recognition is an optional Phase 7 panel, disabled unless the API and worker are explicitly configured and approved. Each remote request requires separate consent for one photo; storage consent never implies provider consent.
 
 ### 1.2 Source-of-truth relationship
 
@@ -190,19 +190,20 @@ Each stage has: a concise purpose, a visible completion condition, a blocker exp
 
 The inventory is the minimum screen set for the initial release. A screen may be a route or a state within a route; routing is an implementation decision so long as browser history, deep links, and return behavior remain predictable.
 
-| ID     | Screen                         | Main user decision/action                  | Required states                                                           |
-| ------ | ------------------------------ | ------------------------------------------ | ------------------------------------------------------------------------- |
-| UI-S01 | Projects home                  | Start or resume a project                  | Empty, loading, populated, load error                                     |
-| UI-S02 | Import setup                   | Choose a file and understand processing    | Empty selection, unsupported file, upload progress, upload failure        |
-| UI-S03 | Import progress                | Wait, leave, or retry                      | Queued, parsing, extracting, needs attention, complete, failed, cancelled |
-| UI-S04 | Conversation and design review | Confirm, edit, or question extracted facts | Candidate, confirmed, conflict, missing evidence, unsupported             |
-| UI-S05 | Hardware selection             | Select an exact catalog model              | Search, no results, candidate comparison, selected, unavailable           |
-| UI-S06 | Workbench                      | Inspect and edit supported circuit         | Loading, ready, unsaved, saving, validation stale, render fallback, error |
-| UI-S07 | Validation review              | Understand and resolve findings            | No findings, advisory, blocking, stale, service failure                   |
-| UI-S08 | Assembly guide                 | Complete or revisit ordered actions        | Ready, active, complete, blocked, skipped, stale after graph change       |
-| UI-S09 | Physical review                | Verify conditions before physical assembly | Checklist incomplete, review ready, unresolved caveat                     |
-| UI-S10 | Revision/history               | Compare or restore project versions        | Empty, current revision, prior revisions, restore confirmation            |
-| UI-S11 | Account/preferences/help       | Adjust supported preferences and get help  | Signed out/in, save failure, accessible help                              |
+| ID     | Screen                         | Main user decision/action                                    | Required states                                                                      |
+| ------ | ------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| UI-S01 | Projects home                  | Start or resume a project                                    | Empty, loading, populated, load error                                                |
+| UI-S02 | Import setup                   | Choose a file and understand processing                      | Empty selection, unsupported file, upload progress, upload failure                   |
+| UI-S03 | Import progress                | Wait, leave, or retry                                        | Queued, parsing, extracting, needs attention, complete, failed, cancelled            |
+| UI-S04 | Conversation and design review | Confirm, edit, or question extracted facts                   | Candidate, confirmed, conflict, missing evidence, unsupported                        |
+| UI-S05 | Hardware selection             | Select an exact catalog model                                | Search, no results, candidate comparison, selected, unavailable                      |
+| UI-S06 | Workbench                      | Inspect and edit supported circuit                           | Loading, ready, unsaved, saving, validation stale, render fallback, error            |
+| UI-S07 | Validation review              | Understand and resolve findings                              | No findings, advisory, blocking, stale, service failure                              |
+| UI-S08 | Assembly guide                 | Complete or revisit ordered actions                          | Ready, active, complete, blocked, skipped, stale after graph change                  |
+| UI-S09 | Physical review                | Verify conditions before physical assembly                   | Checklist incomplete, review ready, unresolved caveat                                |
+| UI-S10 | Revision/history               | Compare or restore project versions                          | Empty, current revision, prior revisions, restore confirmation                       |
+| UI-S11 | Account/preferences/help       | Adjust supported preferences and get help                    | Signed out/in, save failure, accessible help                                         |
+| UI-S12 | Project photo evidence panel   | Save, optionally analyze, review, or delete a hardware photo | Manual-only, consent required, queued, running, unknown, candidates, failed, deleted |
 
 ### 6.1 UI-S01 — Projects home
 
@@ -271,6 +272,12 @@ This screen is a deliberate handoff from a virtual guide to physical work. It re
 ### 6.9 UI-S10 and UI-S11 — History, preferences, help
 
 Revision history shows when the design changed and which downstream results became stale. Restoration is explicit and explains that it creates or activates a prior revision according to the domain contract. Preferences do not hide critical state or remove accessible alternatives. Help is contextual: terminology opens definitions near the current pin, component, or finding, with a route to fuller learning material if available.
+
+### 6.10 UI-S12 — Project photo evidence panel
+
+The panel keeps private photo storage and remote image processing as separate actions. The manual-review uploader asks for storage consent. When remote recognition is enabled, each saved photo has its own consent control naming Vultr Serverless Inference and the configured model, the visual-candidate purpose, a link to provider data-handling information, and a submit action. Consent is per request and resets after submission. The panel states that an in-flight provider request cannot be recalled by deleting the photo.
+
+Queued and running states are visible and recoverable after navigation. Results show visible markings, candidate catalog identities, limitations, and explicit unknown/unsupported/unclear outcomes. The result is labeled as an unverified suggestion. A separate user action confirms one exact catalog part and release into project hardware inventory; the panel never implies that this verifies a board pinout or electrical safety. Confirmed inventory can be removed explicitly. When the feature is disabled, photos remain usable for manual review and no remote action is offered.
 
 ## 7. Workbench interaction model
 

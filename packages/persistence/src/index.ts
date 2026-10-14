@@ -2,7 +2,12 @@ import { createHash, randomUUID, type KeyObject } from 'node:crypto';
 import { Pool, type PoolClient, type QueryResultRow } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { eq, and, desc, or, ne, lt, sql, getTableColumns } from 'drizzle-orm';
-import type { ConversationBundle, ExtractionResult } from '@schemora/contracts';
+import {
+  hardwareRecognitionProposalSchema,
+  type ConversationBundle,
+  type ExtractionResult,
+  type HardwareRecognitionProposal,
+} from '@schemora/contracts';
 import {
   firmwareCompileResultMatchesProfile,
   firmwareCompileResultSchema,
@@ -86,8 +91,19 @@ export interface ReviewRow extends QueryResultRow {
 export interface Job extends QueryResultRow {
   id: string;
   project_id: string;
-  kind: 'process_import' | 'delete_project' | 'simulate_run' | 'delete_hardware_photo';
-  payload: { importId?: string; runId?: string; photoId?: string; objectKey?: string };
+  kind:
+    | 'process_import'
+    | 'delete_project'
+    | 'simulate_run'
+    | 'delete_hardware_photo'
+    | 'process_hardware_recognition';
+  payload: {
+    importId?: string;
+    runId?: string;
+    photoId?: string;
+    objectKey?: string;
+    recognitionId?: string;
+  };
   lease_token: string;
   attempts: number;
 }
@@ -155,6 +171,43 @@ export interface HardwarePhotoRow extends QueryResultRow {
   consent_version: 'photo-evidence-v1';
   status: 'manual_review';
   created_at: Date;
+}
+export interface HardwareRecognitionRequestRow extends QueryResultRow {
+  id: string;
+  project_id: string;
+  photo_id: string;
+  project_revision: number;
+  actor_id: string;
+  consent_version: string;
+  provider_id: string;
+  model_id: string;
+  catalog_release_id: string;
+  notice_revision: string;
+  image_sha256: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  outcome: HardwareRecognitionProposal['outcome'] | null;
+  proposal: unknown;
+  error_code: string | null;
+  consented_at: Date;
+  created_at: Date;
+  updated_at: Date;
+  completed_at: Date | null;
+}
+export function publicHardwareRecognitionRequest(row: HardwareRecognitionRequestRow) {
+  return {
+    id: row.id,
+    photoId: row.photo_id,
+    projectRevision: row.project_revision,
+    providerId: row.provider_id,
+    modelId: row.model_id,
+    catalogReleaseId: row.catalog_release_id,
+    status: row.status,
+    outcome: row.outcome,
+    proposal: row.proposal === null ? null : hardwareRecognitionProposalSchema.parse(row.proposal),
+    errorCode: row.error_code,
+    createdAt: row.created_at.toISOString(),
+    completedAt: row.completed_at?.toISOString() ?? null,
+  };
 }
 export function publicHardwarePhoto(row: HardwarePhotoRow) {
   return {
@@ -565,6 +618,29 @@ export class Repository {
       );
       if (!result.rows[0]) throw new RepositoryError('NOT_FOUND', 404);
       return result.rows[0];
+    });
+  }
+  async hardwareRecognitionRequests(owner: string, projectId: string, photoId?: string) {
+    return this.transaction(async (client) => {
+      await this.project(client, owner, projectId, 'share');
+      const result = await client.query<HardwareRecognitionRequestRow>(
+        `SELECT * FROM hardware_recognition_requests
+         WHERE project_id=$1 AND ($2::uuid IS NULL OR photo_id=$2)
+         ORDER BY created_at DESC,id DESC LIMIT 100`,
+        [projectId, photoId ?? null],
+      );
+      return result.rows.map(publicHardwareRecognitionRequest);
+    });
+  }
+  async hardwareRecognitionRequest(owner: string, projectId: string, recognitionId: string) {
+    return this.transaction(async (client) => {
+      await this.project(client, owner, projectId, 'share');
+      const result = await client.query<HardwareRecognitionRequestRow>(
+        'SELECT * FROM hardware_recognition_requests WHERE project_id=$1 AND id=$2',
+        [projectId, recognitionId],
+      );
+      if (!result.rows[0]) throw new RepositoryError('NOT_FOUND', 404);
+      return publicHardwareRecognitionRequest(result.rows[0]);
     });
   }
   async firmwareArtifactRecord(owner: string, projectId: string, artifactId: string) {

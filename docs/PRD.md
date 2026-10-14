@@ -46,7 +46,7 @@ Schemora turns an existing AI-assisted hardware conversation into an interactive
 
 The workbench makes each connection concrete. It identifies the exact supported board model, the physical pin, the component terminal, and—where a breadboard is involved—the precise connected row or rail. The user can inspect the circuit in a desktop 3D scene, follow assembly steps in order, and understand why each action is required. A deterministic circuit model checks the connections for which the product has explicit rules. Missing or contradictory instructions remain visible as questions; the product must not guess in order to make a design look complete.
 
-The first product proof is deliberately narrow: import a conversation describing an ESP32 LED circuit, review the extracted specification, confirm a supported board and component set, build the pin-level circuit, follow an assembly sequence, and see meaningful feedback when a wire is wrong. Simulation, photo-based recognition, and broader hardware support are later capabilities gated by technical feasibility, data quality, licensing, and measured user value. A visually convincing result is not a substitute for electrical correctness or physical safety.
+The first product proof is deliberately narrow: import a conversation describing an ESP32 LED circuit, review the extracted specification, confirm a supported board and component set, build the pin-level circuit, follow an assembly sequence, and see meaningful feedback when a wire is wrong. Photo-based recognition is an optional Phase 7 aid using the selected Vultr remote provider, gated by separate per-photo consent, provider/account review, and a hardware-specific benchmark. It does not replace manual review or exact-model confirmation. Simulation and broader hardware support remain gated by technical feasibility, data quality, licensing, and measured user value. A visually convincing result is not a substitute for electrical correctness or physical safety.
 
 ## 2. Product definition
 
@@ -189,18 +189,18 @@ The exact ESP32 board and resistor value must be selected and verified during ca
 
 ### 7.2 Capability release sequence
 
-| Capability                    | Initial disposition       | Gate to broader release                                                                                  |
-| ----------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Conversation import           | Core                      | Parser coverage, message order, source locators, privacy and safe archive handling                       |
-| Structured extraction         | Core, review required     | Benchmark against varied conversations; every candidate retains provenance                               |
-| Hardware catalog              | Core, deliberately narrow | Electrical and physical facts reviewed; model, pin anchors, source, and license checked                  |
-| Circuit graph and validator   | Core for supported cases  | Known-good and fault fixtures; unknown is distinct from pass                                             |
-| 3D workbench                  | Core                      | Pin-level interaction correctness and acceptable performance on baseline desktop                         |
-| Assembly planner              | Core                      | Deterministic steps, dependencies, and verifiable completion predicates                                  |
-| Beginner explanations         | Core, curated first       | Tested with novice participants and grounded in approved facts                                           |
-| Simulation                    | Conditional               | Integration, commercial terms, supported component coverage, isolation, and repeatable reference results |
-| Photo-based recognition       | Later / optional          | Measured identification quality, user confirmation, privacy and image-retention controls                 |
-| Robotics and advanced physics | Later                     | Dedicated component, mechanical, electrical, and simulation models                                       |
+| Capability                    | Initial disposition        | Gate to broader release                                                                                                           |
+| ----------------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Conversation import           | Core                       | Parser coverage, message order, source locators, privacy and safe archive handling                                                |
+| Structured extraction         | Core, review required      | Benchmark against varied conversations; every candidate retains provenance                                                        |
+| Hardware catalog              | Core, deliberately narrow  | Electrical and physical facts reviewed; model, pin anchors, source, and license checked                                           |
+| Circuit graph and validator   | Core for supported cases   | Known-good and fault fixtures; unknown is distinct from pass                                                                      |
+| 3D workbench                  | Core                       | Pin-level interaction correctness and acceptable performance on baseline desktop                                                  |
+| Assembly planner              | Core                       | Deterministic steps, dependencies, and verifiable completion predicates                                                           |
+| Beginner explanations         | Core, curated first        | Tested with novice participants and grounded in approved facts                                                                    |
+| Simulation                    | Conditional                | Integration, commercial terms, supported component coverage, isolation, and repeatable reference results                          |
+| Photo-based recognition       | Optional, explicitly gated | Separate provider-processing consent, measured identification quality, exact catalog confirmation, privacy and retention controls |
+| Robotics and advanced physics | Later                      | Dedicated component, mechanical, electrical, and simulation models                                                                |
 
 ### 7.3 Desktop support
 
@@ -220,30 +220,30 @@ The scenario is successful only when the participant can identify the exact boar
 
 ## 8. Functional requirements
 
-| ID     | Requirement                                                    | Acceptance condition                                                                        |
-| ------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| PR-001 | The user can import supported conversation files               | Unsupported type, size, or malformed content is rejected with a clear reason                |
-| PR-002 | Conversation messages retain order and source location         | A displayed fact links to the message or source locator from which it was extracted         |
-| PR-003 | The system identifies revisions and conflicts                  | Superseded and contradictory instructions are not merged silently                           |
-| PR-004 | Extraction returns a typed project candidate                   | Candidate conforms to schema; invalid references are rejected                               |
-| PR-005 | The user can review extracted hardware facts                   | Candidate, confirmed, rejected, unknown, and conflicting states are visually distinct       |
-| PR-006 | The user can confirm exact hardware models                     | Board family alone cannot be treated as an exact supported board                            |
-| PR-007 | The user can inspect supported components in the workbench     | Each terminal maps to a stable catalog identity and physical anchor                         |
-| PR-008 | The user can create and remove wires through the scene         | Every visible wire corresponds to a graph edge; removal updates graph and validation state  |
-| PR-009 | Breadboard connections reflect selected board topology         | Holes that share a modeled node are treated as electrically connected                       |
-| PR-010 | The workbench supports undo and redo                           | Reversal creates a consistent graph state and cannot erase revision history                 |
-| PR-011 | The system validates supported electrical constraints          | Each finding identifies a rule, affected entity, result state, and relevant evidence        |
-| PR-012 | Unknown or unsupported conditions remain explicit              | An unknown value cannot be defaulted into a passing result                                  |
-| PR-013 | The user can follow ordered assembly instructions              | Each step has target components, action, prerequisite, and completion predicate             |
-| PR-014 | Step progress reflects the circuit state                       | User action alone cannot mark a failed predicate complete                                   |
-| PR-015 | The product explains terminology in context                    | “Why?” help references the selected component, step, or finding                             |
-| PR-016 | The product supports a physical pre-power checklist            | The user sees limits of virtual validation before building the real circuit                 |
-| PR-017 | Firmware can be associated with a project                      | Firmware version and source are retained; arbitrary code is not executed in the web process |
-| PR-018 | Simulation is shown only for supported integrations            | Unsupported design or unavailable engine is reported accurately                             |
-| PR-019 | The user can optionally identify physical hardware from photos | Recognition is a candidate and requires exact-model confirmation                            |
-| PR-020 | The user can save and resume projects                          | Project state and derived artifacts preserve their version and freshness                    |
-| PR-021 | The user can delete a project and its associated data          | Access is revoked immediately; cleanup status is visible and retryable                      |
-| PR-022 | The user can export a project guide                            | Export identifies catalog and design versions and follows access and retention policy       |
+| ID     | Requirement                                                    | Acceptance condition                                                                                                    |
+| ------ | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| PR-001 | The user can import supported conversation files               | Unsupported type, size, or malformed content is rejected with a clear reason                                            |
+| PR-002 | Conversation messages retain order and source location         | A displayed fact links to the message or source locator from which it was extracted                                     |
+| PR-003 | The system identifies revisions and conflicts                  | Superseded and contradictory instructions are not merged silently                                                       |
+| PR-004 | Extraction returns a typed project candidate                   | Candidate conforms to schema; invalid references are rejected                                                           |
+| PR-005 | The user can review extracted hardware facts                   | Candidate, confirmed, rejected, unknown, and conflicting states are visually distinct                                   |
+| PR-006 | The user can confirm exact hardware models                     | Board family alone cannot be treated as an exact supported board                                                        |
+| PR-007 | The user can inspect supported components in the workbench     | Each terminal maps to a stable catalog identity and physical anchor                                                     |
+| PR-008 | The user can create and remove wires through the scene         | Every visible wire corresponds to a graph edge; removal updates graph and validation state                              |
+| PR-009 | Breadboard connections reflect selected board topology         | Holes that share a modeled node are treated as electrically connected                                                   |
+| PR-010 | The workbench supports undo and redo                           | Reversal creates a consistent graph state and cannot erase revision history                                             |
+| PR-011 | The system validates supported electrical constraints          | Each finding identifies a rule, affected entity, result state, and relevant evidence                                    |
+| PR-012 | Unknown or unsupported conditions remain explicit              | An unknown value cannot be defaulted into a passing result                                                              |
+| PR-013 | The user can follow ordered assembly instructions              | Each step has target components, action, prerequisite, and completion predicate                                         |
+| PR-014 | Step progress reflects the circuit state                       | User action alone cannot mark a failed predicate complete                                                               |
+| PR-015 | The product explains terminology in context                    | “Why?” help references the selected component, step, or finding                                                         |
+| PR-016 | The product supports a physical pre-power checklist            | The user sees limits of virtual validation before building the real circuit                                             |
+| PR-017 | Firmware can be associated with a project                      | Firmware version and source are retained; arbitrary code is not executed in the web process                             |
+| PR-018 | Simulation is shown only for supported integrations            | Unsupported design or unavailable engine is reported accurately                                                         |
+| PR-019 | The user can optionally identify physical hardware from photos | Remote processing requires separate per-photo consent; recognition remains a candidate until exact catalog confirmation |
+| PR-020 | The user can save and resume projects                          | Project state and derived artifacts preserve their version and freshness                                                |
+| PR-021 | The user can delete a project and its associated data          | Access is revoked immediately; cleanup status is visible and retryable                                                  |
+| PR-022 | The user can export a project guide                            | Export identifies catalog and design versions and follows access and retention policy                                   |
 
 ## 9. Experience and interaction requirements
 

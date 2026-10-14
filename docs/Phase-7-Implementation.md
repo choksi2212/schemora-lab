@@ -106,7 +106,7 @@ One selected role currently applies to all files in a submission. Users should u
 - Content is returned through an authorization-checking API with no-store and nosniff headers. No direct public object access is introduced.
 - Project deletion enumerates and purges photo objects and records.
 - Users can remove an individual photo; its object removal is durable and retried by the worker. Photos otherwise remain until the user removes them or deletes the project; there is no automatic expiry policy.
-- No vision provider is configured, and the application does not transmit uploaded photos to one.
+- The Vultr adapter is present but disabled by default. No uploaded photo has been transmitted to a provider during this implementation.
 
 ## 9. Failure behavior and recovery
 
@@ -114,7 +114,7 @@ Invalid input is rejected before storage where possible. A storage failure or a 
 
 ## 10. Operational and scale notes
 
-The implementation uses the existing stateless API, PostgreSQL repository, private object storage, and worker deletion lifecycle. It introduces no long-running vision process, queue, model service, or provider dependency. Per-project volume is capped at 100 records and normalized images at 5 MiB each. The API's current JSON body limit is sufficient for one maximum-size image encoded as base64. The list is bounded to 100 items and sorted newest-first. At higher upload rates, replace base64 JSON transport with a short-lived, narrowly scoped upload intent and private object-store multipart flow only after preserving server-side validation and finalization checks.
+The implementation uses the existing stateless API, PostgreSQL repository, private object storage, and worker lifecycle, with an optional fixed-endpoint remote vision call performed only by a worker. The application queue is durable; it does not add a model service to the Schemora deployment. Per-project volume is capped at 100 photos and normalized images at 5 MiB each. The API's current JSON body limit is sufficient for one maximum-size image encoded as base64. The list is bounded to 100 items and sorted newest-first. At higher upload rates, replace base64 JSON transport with a short-lived, narrowly scoped upload intent and private object-store multipart flow only after preserving server-side validation and finalization checks.
 
 The database migration must be applied before the new API version receives traffic. Rollout should deploy the migration first, then API/worker, then web. Rollback must preserve the additive table and private objects until the compatible application version is restored or a controlled purge is performed.
 
@@ -170,4 +170,6 @@ Provider documentation reviewed:
 
 ### Current delivery status
 
-The repository now contains a fixed-endpoint Vultr adapter and shared, strict schemas for remote-processing consent and unconfirmed recognition proposals. The adapter is not called by the worker yet; no photo is transmitted by this code slice. The API consent route, durable recognition job and proposal persistence, candidate review interface, exact-part inventory confirmation, deletion/cancellation integration, and hardware-specific benchmark remain to be implemented before this phase can be enabled or considered complete.
+The repository now contains a fixed-endpoint Vultr adapter, strict consent/proposal contracts, a durable recognition request and confirmed-inventory schema, revisioned request/confirmation API routes, an asynchronous worker, and per-photo consent and review controls. API and worker flags default to disabled. No photo has been transmitted during implementation. Photos can be submitted only by an explicit per-photo action once both services are configured and approved. The exact-part inventory is a separate user confirmation and can be removed independently.
+
+Phase 7 remains incomplete. The rights-reviewed, labeled hardware benchmark has not been built or run, provider/account terms and budget controls still need owner review, the new migration has not been applied to a deployment database, and the remote provider flow has not been exercised with an explicitly consented Schemora photo. TypeScript checks for contracts, persistence, intelligence, API, worker, and web passed during implementation; test suites and browser flows were not run in this slice. Do not enable remote requests in production until these gates are closed.

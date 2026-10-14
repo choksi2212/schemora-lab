@@ -167,6 +167,9 @@ importers:
       '@schemora/assembly-plan':
         specifier: workspace:*
         version: link:../../packages/assembly-plan
+      '@schemora/catalog':
+        specifier: workspace:*
+        version: link:../../packages/hardware-catalog
       '@schemora/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts

@@ -13,6 +13,13 @@ const configSchema = z.object({
   API_HOST: z.string().default('127.0.0.1'),
   WEB_ORIGIN: z.string().url().default('http://localhost:3000'),
   DATABASE_POOL_SIZE: z.coerce.number().int().min(1).max(50).default(10),
+  VISION_RECOGNITION_ENABLED: z.enum(['true', 'false']).default('false'),
+  VISION_RECOGNITION_APPROVED: z.enum(['true', 'false']).default('false'),
+  VISION_RECOGNITION_NOTICE_REVISION: z
+    .string()
+    .min(1)
+    .max(64)
+    .default('vultr-qwen3.8-27b-notice-v1'),
 });
 export type ApiConfig = z.infer<typeof configSchema>;
 export function readConfig(environment: NodeJS.ProcessEnv = process.env): ApiConfig {
@@ -23,6 +30,8 @@ export function readConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
         parsed.error.issues.map((issue) => issue.path.join('.')).join(', '),
     );
   const config = parsed.data;
+  if (config.VISION_RECOGNITION_ENABLED === 'true' && config.VISION_RECOGNITION_APPROVED !== 'true')
+    throw new Error('Vision recognition requires explicit API-side approval');
   if (config.NODE_ENV === 'production') {
     if (/local|example|changeme|development/i.test(config.SESSION_SECRET))
       throw new Error('Production session secret must be generated independently');

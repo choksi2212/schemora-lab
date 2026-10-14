@@ -8,7 +8,19 @@ import {
   type NormalizedConversation,
 } from '@schemora/contracts';
 import { extractCandidates, createModelExtractor } from '@schemora/intelligence';
-import { Repository, requestDigest, type Job, type ImportRow } from '@schemora/persistence';
+import {
+  createVultrHardwareRecognizer,
+  type VisionImage,
+  type VisionProviderConfig,
+} from '@schemora/intelligence';
+import { getCatalogRelease } from '@schemora/catalog';
+import {
+  Repository,
+  requestDigest,
+  type Job,
+  type ImportRow,
+  type HardwareRecognitionRequestRow,
+} from '@schemora/persistence';
 import {
   simulationBindingSchema,
   simulationRunSchema,
@@ -75,14 +87,17 @@ export interface ExtractorConfig {
 }
 export class Worker {
   readonly firmwareCompilerProfiles: FirmwareCompilerProfileRegistry;
+  private readonly recognizeHardware?: ReturnType<typeof createVultrHardwareRecognizer>;
   constructor(
     private readonly repository: Repository,
     private readonly storage: PrivateStorage,
     private readonly extraction: ExtractorConfig = { mode: 'rules' },
     private readonly leaseSeconds = 120,
     firmwareCompilerProfiles = createFirmwareCompilerProfileRegistry([]),
+    visionProvider?: VisionProviderConfig,
   ) {
     this.firmwareCompilerProfiles = firmwareCompilerProfiles;
+    if (visionProvider) this.recognizeHardware = createVultrHardwareRecognizer(visionProvider);
   }
   async tick(kind: Job['kind']) {
     await this.repository.cleanupUploadIntents((key) => this.storage.delete(key));
@@ -107,6 +122,7 @@ export class Worker {
     try {
       if (kind === 'delete_project') await this.deleteProject(job);
       else if (kind === 'delete_hardware_photo') await this.deleteHardwarePhoto(job);
+      else if (kind === 'process_hardware_recognition') await this.processHardwareRecognition(job);
       else if (kind === 'simulate_run') await this.settleSimulationUnavailable(job);
       else await this.processImport(job);
     } catch (error) {
@@ -122,6 +138,7 @@ export class Worker {
           'INVALID_PROCESSOR_OUTPUT',
           'INVALID_JOB_PAYLOAD',
           'SIMULATION_RUN_NOT_FOUND',
+          'VISION_RECOGNITION_FAILED',
         ].includes(code),
       );
     } finally {
@@ -390,6 +407,7 @@ export class Worker {
       ]);
       await client.query('DELETE FROM simulation_runs WHERE project_id=$1', [job.project_id]);
       await client.query('DELETE FROM firmware_reviews WHERE project_id=$1', [job.project_id]);
+      await client.query('DELETE FROM hardware_inventory WHERE project_id=$1', [job.project_id]);
       await client.query('DELETE FROM hardware_photos WHERE project_id=$1', [job.project_id]);
       await client.query('DELETE FROM firmware_builds WHERE project_id=$1', [job.project_id]);
       await client.query('DELETE FROM firmware_artifacts WHERE project_id=$1', [job.project_id]);
@@ -428,5 +446,119 @@ export class Worker {
       "UPDATE jobs SET status='completed',payload='{}'::jsonb,lease_until=NULL,lease_token=NULL,error_code=NULL WHERE id=$1 AND lease_token=$2 AND status='running'",
       [job.id, job.lease_token],
     );
+  }
+  async processHardwareRecognition(job: Job) {
+    if (job.kind !== 'process_hardware_recognition' || !job.payload.recognitionId)
+      throw new Error('INVALID_JOB_PAYLOAD');
+    if (!this.recognizeHardware) {
+      await this.repository.transaction(async (client) => {
+        await client.query(
+          `UPDATE hardware_recognition_requests SET status='failed',error_code='VISION_PROVIDER_UNAVAILABLE',
+           updated_at=now(),completed_at=now() WHERE project_id=$1 AND id=$2 AND status='queued'`,
+          [job.project_id, job.payload.recognitionId],
+        );
+        await client.query(
+          `UPDATE jobs SET status='completed',payload='{}'::jsonb,lease_until=NULL,lease_token=NULL,error_code=NULL
+           WHERE id=$1 AND lease_token=$2 AND status='running'`,
+          [job.id, job.lease_token],
+        );
+      });
+      return;
+    }
+    const claimed = await this.repository.pool.query<HardwareRecognitionRequestRow>(
+      `UPDATE hardware_recognition_requests r SET status='running',updated_at=now()
+       FROM projects p,hardware_photos h
+       WHERE r.project_id=$1 AND r.id=$2 AND r.status='queued'
+         AND p.id=r.project_id AND p.status='active'
+         AND h.project_id=r.project_id AND h.id=r.photo_id AND h.sha256=r.image_sha256
+       RETURNING r.*`,
+      [job.project_id, job.payload.recognitionId],
+    );
+    const request = claimed.rows[0];
+    if (!request) {
+      await this.repository.pool.query(
+        `UPDATE jobs SET status='completed',payload='{}'::jsonb,lease_until=NULL,lease_token=NULL,error_code=NULL
+         WHERE id=$1 AND lease_token=$2 AND status='running'`,
+        [job.id, job.lease_token],
+      );
+      return;
+    }
+    try {
+      const photoResult = await this.repository.pool.query<{
+        object_key: string;
+        sha256: string;
+        format: 'jpeg' | 'png' | 'webp';
+        shot_role: VisionImage['role'];
+      }>(
+        `SELECT object_key,sha256,format,shot_role FROM hardware_photos
+         WHERE project_id=$1 AND id=$2 AND sha256=$3`,
+        [job.project_id, request.photo_id, request.image_sha256],
+      );
+      const photo = photoResult.rows[0];
+      if (!photo) throw new Error('VISION_RECOGNITION_FAILED');
+      const imageBytes = await this.storage.read(photo.object_key, photo.sha256);
+      const stillAuthorized = await this.repository.pool.query(
+        `SELECT 1 FROM hardware_recognition_requests r JOIN hardware_photos h
+           ON h.project_id=r.project_id AND h.id=r.photo_id AND h.sha256=r.image_sha256
+         WHERE r.project_id=$1 AND r.id=$2 AND r.status='running'`,
+        [job.project_id, request.id],
+      );
+      if (!stillAuthorized.rowCount) {
+        await this.repository.pool.query(
+          `UPDATE jobs SET status='completed',payload='{}'::jsonb,lease_until=NULL,lease_token=NULL,error_code=NULL
+           WHERE id=$1 AND lease_token=$2 AND status='running'`,
+          [job.id, job.lease_token],
+        );
+        return;
+      }
+      const catalog = getCatalogRelease();
+      if (catalog.releaseId !== request.catalog_release_id)
+        throw new Error('VISION_RECOGNITION_FAILED');
+      const proposal = await this.recognizeHardware(
+        { bytes: imageBytes, format: photo.format, role: photo.shot_role },
+        catalog.parts.map((part) => ({
+          id: part.id,
+          manufacturer: part.manufacturer,
+          model: part.model,
+          category: part.category,
+          description: part.summary,
+        })),
+      );
+      await this.repository.transaction(async (client) => {
+        await client.query(
+          `UPDATE hardware_recognition_requests SET status='completed',outcome=$3,proposal=$4::jsonb,
+         error_code=NULL,updated_at=now(),completed_at=now()
+         WHERE project_id=$1 AND id=$2 AND status='running'
+           AND EXISTS (SELECT 1 FROM hardware_photos h WHERE h.project_id=$1 AND h.id=$5 AND h.sha256=$6)`,
+          [
+            job.project_id,
+            request.id,
+            proposal.outcome,
+            JSON.stringify(proposal),
+            request.photo_id,
+            request.image_sha256,
+          ],
+        );
+        await client.query(
+          `UPDATE jobs SET status='completed',payload='{}'::jsonb,lease_until=NULL,lease_token=NULL,error_code=NULL
+           WHERE id=$1 AND lease_token=$2 AND status='running'`,
+          [job.id, job.lease_token],
+        );
+      });
+    } catch {
+      await this.repository.transaction(async (client) => {
+        await client.query(
+          `UPDATE hardware_recognition_requests SET status='failed',error_code='VISION_RECOGNITION_FAILED',
+           proposal=NULL,outcome=NULL,updated_at=now(),completed_at=now()
+           WHERE project_id=$1 AND id=$2 AND status='running'`,
+          [job.project_id, request.id],
+        );
+        await client.query(
+          `UPDATE jobs SET status='completed',payload='{}'::jsonb,lease_until=NULL,lease_token=NULL,error_code=NULL
+           WHERE id=$1 AND lease_token=$2 AND status='running'`,
+          [job.id, job.lease_token],
+        );
+      });
+    }
   }
 }

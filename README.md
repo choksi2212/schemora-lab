@@ -86,6 +86,8 @@ Production mode rejects filesystem storage, development identity, weak/example s
 
 Optional model extraction uses `EXTRACTION_MODE=provider`, `EXTRACTION_ENDPOINT`, `EXTRACTION_API_KEY`, and `EXTRACTION_MODEL`. `PROVIDER_REVIEW_APPROVED=true` is required after reviewing the provider's user-data policy. The endpoint must support the documented compatible chat-completions protocol and JSON output; it is configured server-side. Invalid or unavailable model output falls back to clearly labeled local source review with a warning. A chosen live model still needs the representative accuracy benchmark before enabling it for real users.
 
+Photo recognition is a separate provider capability and remains disabled by default. It requires `VISION_RECOGNITION_ENABLED=true` and `VISION_RECOGNITION_APPROVED=true` for the API, plus `VISION_RECOGNITION_MODE=vultr`, `VISION_RECOGNITION_APPROVED=true`, the fixed Vultr endpoint/model, and a rotated `VISION_PROVIDER_API_KEY` in the private worker environment. Keep the flags off until the account/data-handling review and hardware-specific benchmark are complete. Each image also requires an explicit per-photo consent in the workspace; the photo-storage checkbox does not grant provider permission. The worker sends only that photo and supported catalog vocabulary, and the model result cannot change a circuit or inventory until the user confirms an exact catalog part.
+
 Parser child processes have time and memory limits. Public production deployment also requires the network/filesystem sandbox, infrastructure, restoration, and security evidence described in the [backend runbook](apps/api/RUNBOOK.md) and [system design](docs/System-Design.md).
 
 ## Repository guide
@@ -94,9 +96,9 @@ Parser child processes have time and memory limits. Public production deployment
 | --------------------------- | ----------------------------------------------------------------------------- |
 | `apps/web`                  | Desktop UI, GitHub session, server-only API proxy, graph-derived 3D workbench |
 | `apps/api`                  | Authenticated project/import/review/catalog/circuit HTTP API                  |
-| `apps/worker`               | Durable import/extraction and deletion processing                             |
-| `packages/contracts`        | Strict versioned conversation and candidate schemas                           |
-| `packages/intelligence`     | Safe parsers, conservative extraction, provider adapter, benchmark            |
+| `apps/worker`               | Durable import/extraction, vision recognition, and deletion processing        |
+| `packages/contracts`        | Strict versioned conversation, extraction, and vision proposal schemas        |
+| `packages/intelligence`     | Safe parsers, conservative extraction, provider adapters, benchmarks          |
 | `packages/persistence`      | PostgreSQL/Drizzle, immutable artifacts/revisions/graphs/reports, outbox/jobs |
 | `packages/storage`          | Private development filesystem and S3 adapters                                |
 | `packages/hardware-catalog` | Versioned source-linked component and breadboard catalog                      |

@@ -48,6 +48,8 @@
 
 **Phase 2 implementation decision:** The first hardware/circuit slice is a source-linked immutable catalog package, deterministic graph/net package, narrow rules package, authenticated API, and immutable PostgreSQL graph/report history. It deliberately does not add a service boundary or treat visual geometry as electrical truth. Exact records, endpoints, persistence semantics, and electrical coverage limits are in [Phase-2-Implementation.md](Phase-2-Implementation.md).
 
+**Phase 7 implementation decision:** Optional photo recognition uses a dedicated, disabled-by-default Vultr Serverless Inference adapter and worker job. It sends only the selected normalized photo and supported catalog vocabulary after separate per-photo consent. Provider output remains a proposal; a revisioned user confirmation creates exact-release hardware inventory. The benchmark and account/policy release gates remain open in [Phase-7-Implementation.md](Phase-7-Implementation.md).
+
 Schemora turns imported conversation data into a reviewed hardware design, an exact catalog-bound circuit graph, validation findings, and ordered assembly guidance. The system must scale this workflow without allowing independent subsystems to disagree about which design is current or which facts are verified.
 
 The initial production shape is a **modular TypeScript application deployed in separate stateless web/API and worker process roles**, backed by PostgreSQL, private object storage, and a durable queue. The browser receives a versioned projection of the project and renders it; it does not own durable electrical truth. Long-running parsing, extraction, and optional simulation work execute asynchronously. Each worker family can scale independently by queue depth and resource profile while sharing domain contracts and application services.
@@ -84,7 +86,7 @@ The key architecture constraint is version alignment. Project revisions, catalog
 
 The launch product is desktop-first and supports a narrow, reviewed hardware scenario before broad catalog expansion. Extraction can be uncertain, and external model output is not authoritative. Exact model selection is required for pin-specific instruction. 3D rendering is a projection of semantic data and must have a non-3D fallback. The system must not claim that rule checks certify physical safety.
 
-The technical baseline uses Next.js, React, TypeScript, PostgreSQL/Drizzle, private object storage, versioned catalog assets, Zod contracts, and explicit API/worker roles. Identity, queue, storage provider, external AI provider, simulator, quantitative SLOs, and workload thresholds are still decisions to close with evidence.
+The technical baseline uses Next.js, React, TypeScript, PostgreSQL/Drizzle, private object storage, versioned catalog assets, Zod contracts, and explicit API/worker roles. Identity, queue, storage provider, conversation-extraction provider, simulator, quantitative SLOs, and workload thresholds remain decisions to close with evidence. The Phase 7 vision provider and initial model are selected, but disabled until consent, account review, cost controls, and benchmark gates close.
 
 ### 2.3 Non-goals for this design
 
@@ -212,11 +214,13 @@ flowchart TB
     WorkerA[Import/parser workers]
     WorkerB[Extraction workers]
     WorkerC[Validation/simulation workers]
+    WorkerD[Vision recognition workers]
     Pool[Database connection pool/proxy if required]
     DB[(Managed PostgreSQL primary)]
     Q[(Durable queue)]
     Obj[(Private object storage)]
   end
+  VisionProvider[Vultr Inference API]
   DNS --> WAF --> Web
   DNS --> CDN
   Web --> Pool --> DB
@@ -225,11 +229,15 @@ flowchart TB
   Q --> WorkerA
   Q --> WorkerB
   Q --> WorkerC
+  Q --> WorkerD
   WorkerA --> DB
   WorkerA --> Obj
   WorkerB --> DB
   WorkerB --> Obj
   WorkerC --> DB
+  WorkerD --> DB
+  WorkerD --> Obj
+  WorkerD --> VisionProvider
 ```
 
 ### 6.2 Environment separation
@@ -238,15 +246,16 @@ Maintain local, CI, development, staging, and production environments with separ
 
 ### 6.3 Runtime process roles
 
-| Role                      | Stateless?                                 | Scaling unit                            | Must not do                                                           |
-| ------------------------- | ------------------------------------------ | --------------------------------------- | --------------------------------------------------------------------- |
-| Web frontend              | Yes                                        | Replicas or platform instances          | Hold canonical project state or private credentials in client bundles |
-| API                       | Yes                                        | Replicas behind load balancer           | Run long parsing/provider/simulation work inline                      |
-| Outbox relay              | Leased/idempotent process                  | Replicas with safe row claiming         | Publish uncommitted or unrecorded business events                     |
-| Parser worker             | Yes between jobs; bounded temp workspace   | Concurrency per CPU/memory/input limit  | Access arbitrary network or unbounded archives                        |
-| Extraction worker         | Yes between jobs                           | Provider quota and tenant fair-share    | Treat generated output as confirmed facts                             |
-| Validation worker/service | Stateless computation over versioned input | CPU concurrency and bounded graph sizes | Mutate graph or claim physical safety                                 |
-| Simulation worker         | Isolated process/container                 | Per-run resources and product quotas    | Share unrestricted host access or credentials                         |
+| Role                      | Stateless?                                 | Scaling unit                                                | Must not do                                                           |
+| ------------------------- | ------------------------------------------ | ----------------------------------------------------------- | --------------------------------------------------------------------- |
+| Web frontend              | Yes                                        | Replicas or platform instances                              | Hold canonical project state or private credentials in client bundles |
+| API                       | Yes                                        | Replicas behind load balancer                               | Run long parsing/provider/simulation work inline                      |
+| Outbox relay              | Leased/idempotent process                  | Replicas with safe row claiming                             | Publish uncommitted or unrecorded business events                     |
+| Parser worker             | Yes between jobs; bounded temp workspace   | Concurrency per CPU/memory/input limit                      | Access arbitrary network or unbounded archives                        |
+| Extraction worker         | Yes between jobs                           | Provider quota and tenant fair-share                        | Treat generated output as confirmed facts                             |
+| Vision worker             | Yes between jobs                           | Explicit user consent, provider quota, per-tenant usage cap | Send unrelated photos or mutate confirmed hardware/circuits           |
+| Validation worker/service | Stateless computation over versioned input | CPU concurrency and bounded graph sizes                     | Mutate graph or claim physical safety                                 |
+| Simulation worker         | Isolated process/container                 | Per-run resources and product quotas                        | Share unrestricted host access or credentials                         |
 
 ## 7. Service boundaries and evolution path
 
@@ -329,6 +338,8 @@ The job record is the authoritative status. Browser progress can use bounded pol
 ### 9.1 System of record
 
 PostgreSQL is the system of record for principals, projects, memberships, revisions, graph metadata, source metadata, evidence, catalog release references, jobs, validation runs, assembly plans, progress, and audit/deletion state. Large blobs and immutable 3D assets live in object storage. The database stores opaque object references, checksums, sizes, content types, lifecycle, and ownership scope.
+
+Phase 7 adds photo-scoped recognition requests that retain consent/version metadata, image digest, provider/model, catalog release, bounded proposal, and durable job state. The proposal cascades with its source photo. Confirmed inventory is a separate revisioned table containing only exact catalog release/part identity and the confirming actor; it survives photo deletion as the user's assertion, and project deletion purges it. Candidate output never writes the circuit graph or pin mapping.
 
 The project’s current head points to an immutable revision or versioned snapshot. Mutations append or create revisioned state with optimistic concurrency. Validation and assembly outputs refer to exact input identities. Derived caches and search indexes can be rebuilt; they are not authorities.
 
@@ -506,7 +517,7 @@ Database backups, point-in-time recovery, object versioning/lifecycle, catalog d
 
 ### 17.2 Deletion and retention
 
-Deletion immediately revokes ordinary application access and blocks new work. Workers check deletion state before reading and before applying results. The deletion workflow covers source bytes, normalized messages, evidence excerpts, derived data, exports, cache entries, queued/running jobs, and eventual backup expiry. A durable deletion ledger is replayed after backup restore so erased content does not reappear. Retention periods and legal holds remain product/privacy decisions.
+Deletion immediately revokes ordinary application access and blocks new work. Workers check deletion state before reading and before applying results. Deleting a photo cancels queued recognition and purges its proposal; a request already sent to the provider cannot be recalled, and no late result may be retained. Project deletion also removes confirmed inventory. The deletion workflow covers source bytes, normalized messages, evidence excerpts, derived data, exports, cache entries, queued/running jobs, and eventual backup expiry. A durable deletion ledger is replayed after backup restore so erased content does not reappear. Retention periods and legal holds remain product/privacy decisions.
 
 ### 17.3 Regional strategy
 
@@ -545,20 +556,21 @@ This order supports a complete product proof before large-scale infrastructure i
 
 ## 20. Architecture decisions and open questions
 
-| ID    | Decision / question                    | Current baseline                                                | Closure evidence / owner                                                                      |
-| ----- | -------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| SD-01 | Initial execution topology             | Modular monolith; stateless web/API and separate worker roles   | Confirm hosting limits and runtime isolation; engineering/operations                          |
-| SD-02 | Queue provider and delivery guarantees | Provider-neutral durable queue with at-least-once delivery      | Delivery, ordering, visibility timeout, DLQ, regional recovery proof; operations              |
-| SD-03 | Object storage provider                | Private object store behind adapter                             | Signed upload, lifecycle, checksum, deletion, regional and restore proof; security/operations |
-| SD-04 | Identity and tenant model              | Trusted external identity; project-scoped authorization         | Provider lifecycle, session revocation, sharing decision; product/security                    |
-| SD-05 | Browser job update channel             | Polling initially; SSE if progress experience requires push     | Hosting support, reconnect behavior, cost, user evidence; UI/platform                         |
-| SD-06 | SLO, RPO, RTO values                   | Not set                                                         | Baseline and business impact workshop; product/operations                                     |
-| SD-07 | Provider service extraction            | Keep behind adapter/worker role initially                       | Isolation, quota, cost, or ownership evidence; engineering/security                           |
-| SD-08 | Catalog CDN policy                     | Immutable public/licensed assets may use CDN; user data private | License, cache, invalidation, integrity review; catalog/security                              |
-| SD-09 | Database read scaling                  | Primary first; tune before replica                              | Read load and lag-tolerant endpoint inventory; data/operations                                |
-| SD-10 | Multi-region recovery                  | Single write region initially                                   | Approved geography and recovery objectives; product/operations                                |
-| SD-11 | Analytics pipeline                     | Operational telemetry only at first                             | Product measurement plan, privacy review, retention; product/data                             |
-| SD-12 | Quantitative capacity budgets          | Establish through synthetic and pilot workload                  | Representative datasets and baseline devices; engineering/QA                                  |
+| ID    | Decision / question                    | Current baseline                                                | Closure evidence / owner                                                                                              |
+| ----- | -------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| SD-01 | Initial execution topology             | Modular monolith; stateless web/API and separate worker roles   | Confirm hosting limits and runtime isolation; engineering/operations                                                  |
+| SD-02 | Queue provider and delivery guarantees | Provider-neutral durable queue with at-least-once delivery      | Delivery, ordering, visibility timeout, DLQ, regional recovery proof; operations                                      |
+| SD-03 | Object storage provider                | Private object store behind adapter                             | Signed upload, lifecycle, checksum, deletion, regional and restore proof; security/operations                         |
+| SD-04 | Identity and tenant model              | Trusted external identity; project-scoped authorization         | Provider lifecycle, session revocation, sharing decision; product/security                                            |
+| SD-05 | Browser job update channel             | Polling initially; SSE if progress experience requires push     | Hosting support, reconnect behavior, cost, user evidence; UI/platform                                                 |
+| SD-06 | SLO, RPO, RTO values                   | Not set                                                         | Baseline and business impact workshop; product/operations                                                             |
+| SD-07 | Provider service extraction            | Keep behind adapter/worker role initially                       | Isolation, quota, cost, or ownership evidence; engineering/security                                                   |
+| SD-08 | Catalog CDN policy                     | Immutable public/licensed assets may use CDN; user data private | License, cache, invalidation, integrity review; catalog/security                                                      |
+| SD-09 | Database read scaling                  | Primary first; tune before replica                              | Read load and lag-tolerant endpoint inventory; data/operations                                                        |
+| SD-10 | Multi-region recovery                  | Single write region initially                                   | Approved geography and recovery objectives; product/operations                                                        |
+| SD-11 | Analytics pipeline                     | Operational telemetry only at first                             | Product measurement plan, privacy review, retention; product/data                                                     |
+| SD-12 | Quantitative capacity budgets          | Establish through synthetic and pilot workload                  | Representative datasets and baseline devices; engineering/QA                                                          |
+| SD-13 | Photo recognition provider/model       | Vultr Serverless Inference, `qwen3.8-27b`, disabled by default  | Account and data-handling review, spend/rate limits, hardware benchmark, and consent UX; product/security/engineering |
 
 ## 21. Acceptance and review checklist
 

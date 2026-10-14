@@ -19,11 +19,17 @@ const parsed = z
     EXTRACTION_API_KEY: z.string().optional(),
     EXTRACTION_MODEL: z.string().optional(),
     PROVIDER_REVIEW_APPROVED: z.enum(['true', 'false']).default('false'),
+    VISION_RECOGNITION_MODE: z.enum(['disabled', 'vultr']).default('disabled'),
+    VISION_RECOGNITION_APPROVED: z.enum(['true', 'false']).default('false'),
+    VISION_PROVIDER_ENDPOINT: z.string().url().optional(),
+    VISION_PROVIDER_API_KEY: z.string().optional(),
+    VISION_PROVIDER_MODEL: z.string().optional(),
     WORKER_POLL_MS: z.coerce.number().int().min(100).max(30_000).default(1000),
     WORKER_LEASE_SECONDS: z.coerce.number().int().min(120).max(600).default(120),
     WORKER_PROCESS_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(1),
     WORKER_DELETE_CONCURRENCY: z.coerce.number().int().min(1).max(4).default(1),
     WORKER_SIMULATION_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(1),
+    WORKER_VISION_CONCURRENCY: z.coerce.number().int().min(1).max(2).default(1),
     WORKER_FIRMWARE_COMPILER_PROFILES_JSON: z.string().max(65_536).default('[]'),
     WORKER_FIRMWARE_BUILD_ATTESTATION_PUBLIC_KEYS_JSON: z.string().max(65_536).default('{}'),
     DATABASE_POOL_SIZE: z.coerce.number().int().min(1).max(50).default(10),
@@ -71,6 +77,14 @@ if (
     config.PROVIDER_REVIEW_APPROVED !== 'true')
 )
   throw new Error('Provider requires reviewed configuration and explicit approval flag');
+if (
+  config.VISION_RECOGNITION_MODE === 'vultr' &&
+  (config.VISION_RECOGNITION_APPROVED !== 'true' ||
+    config.VISION_PROVIDER_ENDPOINT !== 'https://api.vultrinference.com/v1/chat/completions' ||
+    !config.VISION_PROVIDER_API_KEY ||
+    config.VISION_PROVIDER_MODEL !== 'qwen3.8-27b')
+)
+  throw new Error('Vision recognition requires reviewed Vultr configuration and explicit approval');
 const repository = new Repository(
   config.DATABASE_URL,
   config.DATABASE_POOL_SIZE,
@@ -92,6 +106,13 @@ const worker = new Worker(
   },
   config.WORKER_LEASE_SECONDS,
   firmwareCompilerProfiles,
+  config.VISION_RECOGNITION_MODE === 'vultr'
+    ? {
+        endpoint: config.VISION_PROVIDER_ENDPOINT!,
+        apiKey: config.VISION_PROVIDER_API_KEY!,
+        model: config.VISION_PROVIDER_MODEL!,
+      }
+    : undefined,
 );
 let stopping = false;
 for (const signal of ['SIGINT', 'SIGTERM'])
@@ -99,7 +120,12 @@ for (const signal of ['SIGINT', 'SIGTERM'])
     stopping = true;
   });
 async function loop(
-  kind: 'process_import' | 'delete_project' | 'simulate_run' | 'delete_hardware_photo',
+  kind:
+    | 'process_import'
+    | 'delete_project'
+    | 'simulate_run'
+    | 'delete_hardware_photo'
+    | 'process_hardware_recognition',
 ) {
   while (!stopping) {
     try {
@@ -115,5 +141,8 @@ await Promise.all([
   ...Array.from({ length: config.WORKER_DELETE_CONCURRENCY }, () => loop('delete_project')),
   ...Array.from({ length: config.WORKER_DELETE_CONCURRENCY }, () => loop('delete_hardware_photo')),
   ...Array.from({ length: config.WORKER_SIMULATION_CONCURRENCY }, () => loop('simulate_run')),
+  ...Array.from({ length: config.WORKER_VISION_CONCURRENCY }, () =>
+    loop('process_hardware_recognition'),
+  ),
 ]);
 await repository.pool.end();

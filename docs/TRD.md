@@ -274,20 +274,22 @@ erDiagram
 
 ### 6.3 Relational entities
 
-| Entity                        | Key fields                                                                  | Integrity and lifecycle                                                   |
-| ----------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Principal                     | application ID, issuer, provider subject, lifecycle                         | Unique issuer/subject; credential material remains with identity provider |
-| Project                       | owner, title, lifecycle, current revision, catalog release                  | Owner required while active; project scope is included in child access    |
-| Project revision              | project, sequence, parent, schema, digest, snapshot                         | Immutable; project and sequence unique                                    |
-| Source asset                  | project, uploader, object key, detected type, size, digest, retention state | Parser can read only accepted objects                                     |
-| Conversation/message          | parser/schema versions, ordered messages, source locator                    | Immutable normalized output; source text follows retention policy         |
-| Evidence/fact/issue           | origin, typed value, knowledge state, evidence reference, review history    | Candidates never overwrite confirmed facts implicitly                     |
-| Catalog release/component/pin | release digest, stable identity, physical pin, capabilities, sources        | Published release is immutable and reviewed                               |
-| Graph revision/entity/edge    | project, semantic endpoints, placement, graph digest                        | Endpoints must resolve within project and pinned catalog                  |
-| Validation run/finding        | exact input digests, ruleset, build, result, evidence                       | Report is immutable; unknown differs from fail and pass                   |
-| Assembly plan/step/progress   | input versions, prerequisite graph, predicate, progress event               | Predicate evaluated server-side; projection is rebuildable                |
-| Job/attempt/outbox            | type, payload version, idempotency, lease, outcome                          | Domain write and outbox intent share a transaction                        |
-| Audit event                   | actor, action, target, time, correlation, digests                           | Append-only to application roles; no source body                          |
+| Entity                             | Key fields                                                                                                                         | Integrity and lifecycle                                                                          |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Principal                          | application ID, issuer, provider subject, lifecycle                                                                                | Unique issuer/subject; credential material remains with identity provider                        |
+| Project                            | owner, title, lifecycle, current revision, catalog release                                                                         | Owner required while active; project scope is included in child access                           |
+| Project revision                   | project, sequence, parent, schema, digest, snapshot                                                                                | Immutable; project and sequence unique                                                           |
+| Source asset                       | project, uploader, object key, detected type, size, digest, retention state                                                        | Parser can read only accepted objects                                                            |
+| Conversation/message               | parser/schema versions, ordered messages, source locator                                                                           | Immutable normalized output; source text follows retention policy                                |
+| Evidence/fact/issue                | origin, typed value, knowledge state, evidence reference, review history                                                           | Candidates never overwrite confirmed facts implicitly                                            |
+| Catalog release/component/pin      | release digest, stable identity, physical pin, capabilities, sources                                                               | Published release is immutable and reviewed                                                      |
+| Graph revision/entity/edge         | project, semantic endpoints, placement, graph digest                                                                               | Endpoints must resolve within project and pinned catalog                                         |
+| Validation run/finding             | exact input digests, ruleset, build, result, evidence                                                                              | Report is immutable; unknown differs from fail and pass                                          |
+| Assembly plan/step/progress        | input versions, prerequisite graph, predicate, progress event                                                                      | Predicate evaluated server-side; projection is rebuildable                                       |
+| Hardware photo/recognition request | normalized private image metadata, photo digest, consent notice revision, provider/model, pinned catalog release, bounded proposal | Storage consent is separate from remote processing consent; proposal is purged with source photo |
+| Confirmed hardware inventory       | exact catalog release and part, project revision, confirming actor, optional recognition provenance                                | Created only by an explicit user confirmation of a proposed exact catalog part                   |
+| Job/attempt/outbox                 | type, payload version, idempotency, lease, outcome                                                                                 | Domain write and outbox intent share a transaction                                               |
+| Audit event                        | actor, action, target, time, correlation, digests                                                                                  | Append-only to application roles; no source body                                                 |
 
 ### 6.4 Required constraints and indexes
 
@@ -539,6 +541,8 @@ Errors use stable machine-readable codes. A revision conflict returns no partial
 The application derives principal identity from a trusted session. Project authorization is checked before loading nested resources. Storage access is issued only after checking the source metadata under the same project scope. Catalog administration uses a distinct permission. Support access to private content is disabled by default; any break-glass access is time-bounded, justified, and audited.
 
 Source conversations, firmware, and photos are private user data. Provider requests are minimized and governed by a documented retention and processing review. Secrets are held in a secret manager and never serialized to browser state, job payloads, logs, or build artifacts. TLS protects service communication; database, object, and backup encryption is required.
+
+Photo storage consent does not authorize remote image processing. A recognition request carries a separate versioned consent naming the provider, model, purpose, and notice revision. The Phase 7 provider boundary currently targets Vultr Serverless Inference and the `qwen3.8-27b` model through the worker only. The job sends one selected normalized photo plus the minimal supported catalog vocabulary; it excludes conversation history, unrelated photos, object URLs, and browser-held provider credentials. The result is validated against the supplied catalog IDs and remains an unconfirmed proposal. Only a separate revisioned user action can create a confirmed inventory entry. Both API and worker feature flags default to disabled.
 
 Deletion first revokes ordinary access and prevents new work. Workers recheck source lifecycle before reading or applying output. Cleanup covers source bytes, normalized text, evidence excerpts, derived exports, caches, and queued work according to retention policy. Backups expire on a separate schedule; restoration reapplies deletion records before the recovered project is exposed.
 
