@@ -460,6 +460,8 @@ A ruleset is a reviewed immutable release. A validation run binds the graph dige
 
 Rules can cover invalid pins, missing required connections, shorts established by the model, polarity, voltage incompatibility, GPIO capability, and known LED/resistor constraints. A rule may only assert what its inputs support. Readiness aggregation is policy-versioned and cannot convert unknown into pass. A report remains immutable when the graph changes; it is marked stale against current state.
 
+**Phase 8 implementation note:** Supported power-to-ground short and LED-polarity failures now include affected graph wire IDs when those wires are derivable from modeled conductive nets; the web workspace resolves the IDs into catalog endpoint labels and gives rule-specific correction instructions. The pre-power assembly step renders required physical inspection acknowledgements for exact component identity, board power requirements, each modeled wire, terminal placement, breadboard topology, and LED polarity. Current report identity and unresolved results remain visible. These acknowledgements are saved only in browser-local assembly progress. There is no separate intended-versus-as-built graph, no physical sensing, and no server-side checklist audit. See [Phase-8-Implementation.md](Phase-8-Implementation.md) for the exact current scope and remaining gates.
+
 ## 9. Assembly, teaching, firmware, and simulation
 
 ### 9.1 Assembly plan

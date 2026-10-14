@@ -237,6 +237,64 @@
   margin: 0.25rem 0.8rem 0.1rem 0;
   font-size: 0.84rem;
 }
+.correctionGuidance {
+  margin: 0.55rem 0 0.25rem;
+  padding: 0.65rem 0.75rem;
+  border-left: 3px solid #ad6b24;
+  background: #fff8eb;
+}
+.affectedWires {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0.45rem 0;
+  padding-left: 1.2rem;
+  color: var(--muted, #687386);
+  font-size: 0.86rem;
+}
+.prePowerChecklist {
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem;
+  border: 1px solid #d8c9a9;
+  border-radius: 0.7rem;
+  background: #fffdf7;
+}
+.prePowerHeading {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.prePowerHeading span,
+.prePowerChecklist small {
+  color: var(--muted, #687386);
+}
+.prePowerChecklist ul {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.prePowerChecklist li {
+  padding: 0.65rem;
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 0.5rem;
+  background: #fff;
+}
+.prePowerChecklist label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.65rem;
+  cursor: pointer;
+}
+.prePowerChecklist label > span {
+  display: grid;
+  gap: 0.25rem;
+}
+.prePowerChecklist input {
+  margin-top: 0.2rem;
+}
 .assemblyGuide {
   display: grid;
   gap: 1rem;

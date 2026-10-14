@@ -255,7 +255,7 @@ Panel widths, collapse behavior, and default pane selection must be validated at
 
 ### 6.6 UI-S07 — Validation review
 
-Findings are grouped by blocking status and then affected object. Each finding includes: a short title, what was observed, why it matters, the object or endpoints involved, and an available action. “Fix” must not imply an automatic safe repair if the correct answer depends on user intent. A result is tied to a graph revision; any graph change marks it stale until rerun.
+Findings are grouped by blocking status and then affected object. Each finding includes: a short title, what was observed, why it matters, the object or endpoints involved, and an available action. Supported Phase 8 findings provide a rule-specific correction path and affected virtual wires when the validator can derive them. “Fix” must not imply an automatic safe repair if the correct answer depends on user intent. A result is tied to a graph revision; any graph change marks it stale until rerun.
 
 The screen distinguishes a rule check from a physical safety guarantee. The user sees what the validator covers and can inspect unsupported or unmodeled conditions. A service error is not shown as “passed” or “no issues.”
 
@@ -267,7 +267,7 @@ When a step is blocked, say which prior condition is missing. If a graph edit in
 
 ### 6.8 UI-S09 — Physical pre-power review
 
-This screen is a deliberate handoff from a virtual guide to physical work. It repeats the exact board and relevant component identities, summarizes the latest validation revision, and presents the product-defined checklist from the PRD. Unresolved facts and advisory findings remain visible. Completion means the user acknowledged the listed checks; it is not a certification of safety.
+This screen is a deliberate handoff from a virtual guide to physical work. It repeats the exact board and relevant component identities, summarizes the latest validation revision, and presents graph-specific checks for every wire, placement, modeled topology, and supported polarity. Unresolved facts and advisory findings remain visible, and all listed checks must be acknowledged before completing the step. In the current implementation, progress is saved in browser-local storage under the plan digest. Completion means the user recorded the inspection; it is not a certification of safety or proof that the physical circuit matches the guide.
 
 ### 6.9 UI-S10 and UI-S11 — History, preferences, help
 

@@ -100,6 +100,7 @@ type Report = {
 type GraphSnapshot = { id: string; projectRevision: number; graphDigest: string; graph: Graph };
 type GraphResponse = { project: Project; graphSnapshot: GraphSnapshot | null };
 type ValidationResponse = { report: { report: Report } | null; current?: boolean };
+type PrePowerCheck = { id: string; title: string; detail: string };
 const starterParts = {
   board: 'board.espressif.esp32-devkitc-v4.wroom-32e.male',
   led: 'led.kingbright.wp7113id',
@@ -110,6 +111,113 @@ const terminal = (componentInstanceId: string, catalogTerminalId: string): Endpo
   terminal: { componentInstanceId, catalogTerminalId },
 });
 const uid = () => crypto.randomUUID();
+
+function describeEndpoint(endpoint: Endpoint, graph: Graph, parts: Map<string, Part>): string {
+  if (endpoint.kind === 'hole')
+    return `${endpoint.hole.breadboardInstanceId} · hole ${endpoint.hole.holeId}`;
+  const component = graph.components.find(
+    (item) => item.id === endpoint.terminal.componentInstanceId,
+  );
+  const part = component ? parts.get(component.catalogPartId) : undefined;
+  const terminal = part?.terminals.find((item) => item.id === endpoint.terminal.catalogTerminalId);
+  return `${endpoint.terminal.componentInstanceId} (${part?.model ?? component?.catalogPartId ?? 'component'}) · ${terminal?.label ?? endpoint.terminal.catalogTerminalId}`;
+}
+
+function makePrePowerChecklist(
+  graph: Graph,
+  parts: Map<string, Part>,
+  report: Report,
+): PrePowerCheck[] {
+  const checks: PrePowerCheck[] = [
+    {
+      id: 'power-disconnected',
+      title: 'Keep the real circuit disconnected from power during inspection.',
+      detail: 'Do not connect USB, batteries, or an external supply until the review is complete.',
+    },
+    {
+      id: 'physical-identities',
+      title: 'Confirm each physical component matches its exact catalog model and configuration.',
+      detail: graph.components
+        .map((component) => {
+          const part = parts.get(component.catalogPartId);
+          return `${component.id}: ${part ? `${part.manufacturer} ${part.model}` : component.catalogPartId}`;
+        })
+        .join(' · '),
+    },
+    {
+      id: 'board-power',
+      title: 'Check board supply requirements and polarity against the manufacturer guide.',
+      detail:
+        'The virtual model does not establish the physical supply voltage, polarity, or current budget.',
+    },
+  ];
+  for (const wire of graph.wires) {
+    checks.push({
+      id: `wire-${wire.id}`,
+      title: `Inspect wire ${wire.id} against the real connection.`,
+      detail: `${describeEndpoint(wire.source, graph, parts)} → ${describeEndpoint(wire.target, graph, parts)}`,
+    });
+  }
+  for (const placement of graph.terminalPlacements) {
+    checks.push({
+      id: `placement-${placement.terminal.componentInstanceId}-${placement.terminal.catalogTerminalId}`,
+      title: 'Check this terminal’s physical breadboard position.',
+      detail: `${describeEndpoint({ kind: 'terminal', terminal: placement.terminal }, graph, parts)} → ${placement.hole.breadboardInstanceId} · hole ${placement.hole.holeId}`,
+    });
+  }
+  for (const breadboard of graph.breadboards) {
+    const topology = breadboard.topologyId;
+    checks.push({
+      id: `topology-${breadboard.id}`,
+      title: 'Confirm the real breadboard matches the selected topology and rail variant.',
+      detail: `${breadboard.id}: ${topology}; verify split rails and printed row labels on the actual board.`,
+    });
+  }
+  const led = graph.components.find(
+    (component) => parts.get(component.catalogPartId)?.category === 'led',
+  );
+  if (led) {
+    const part = parts.get(led.catalogPartId)!;
+    checks.push({
+      id: `polarity-${led.id}`,
+      title: 'Verify the LED anode and cathode orientation on the physical part.',
+      detail: `Current graph: anode ${part.anodeTerminalId} · cathode ${part.cathodeTerminalId}. Use the manufacturer’s physical marking; do not infer polarity from color alone.`,
+    });
+  }
+  const uncertain = report.findings.filter(
+    (finding) =>
+      finding.status === 'unknown' || finding.status === 'error' || finding.status === 'fail',
+  );
+  if (uncertain.length) {
+    checks.push({
+      id: 'unresolved-findings',
+      title: 'Read and account for every failed or unknown digital finding.',
+      detail: uncertain.map((finding) => `${finding.ruleId}: ${finding.message}`).join(' · '),
+    });
+  }
+  return checks;
+}
+
+function relatedFaultWireIds(finding: Finding, graph: Graph): string[] {
+  const ids = new Set(
+    finding.affectedEntityIds
+      .filter((id) => id.startsWith('wire:'))
+      .map((id) => id.slice('wire:'.length)),
+  );
+  if (finding.ruleId === 'LED_SERIES_RESISTOR') {
+    const componentIds = new Set(finding.affectedEntityIds.filter((id) => !id.startsWith('wire:')));
+    for (const wire of graph.wires) {
+      if (
+        [wire.source, wire.target].some(
+          (endpoint) =>
+            endpoint.kind === 'terminal' && componentIds.has(endpoint.terminal.componentInstanceId),
+        )
+      )
+        ids.add(wire.id);
+    }
+  }
+  return [...ids].sort();
+}
 
 function starterGraph(projectId: string, revision: number, catalog: Catalog['release']): Graph {
   const board = catalog.parts.find((p) => p.id === starterParts.board)!;
@@ -176,6 +284,7 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
   const [assemblyStepIndex, setAssemblyStepIndex] = useState(0);
   const [completedAssemblySteps, setCompletedAssemblySteps] = useState<string[]>([]);
   const [skippedAssemblySteps, setSkippedAssemblySteps] = useState<string[]>([]);
+  const [checkedPrePowerItems, setCheckedPrePowerItems] = useState<string[]>([]);
   const [assemblyStale, setAssemblyStale] = useState(false);
   const [activeDesignPanel, setActiveDesignPanel] = useState<'wiring' | 'placement'>('wiring');
   const [explanationLevel, setExplanationLevel] = useState<ExplanationLevel>('beginner');
@@ -316,17 +425,25 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
       );
       if (!result.current) throw new Error('The assembly guide is no longer current.');
       const storageKey = `schemora-assembly:${projectId}:${result.plan.planDigest}`;
-      let progress: { completed: string[]; skipped: string[] } = { completed: [], skipped: [] };
+      let progress: { completed: string[]; skipped: string[]; prePowerChecks: string[] } = {
+        completed: [],
+        skipped: [],
+        prePowerChecks: [],
+      };
       try {
         const saved = JSON.parse(window.localStorage.getItem(storageKey) ?? 'null');
         if (
           saved &&
           Array.isArray(saved.completed) &&
           Array.isArray(saved.skipped) &&
+          (saved.prePowerChecks === undefined || Array.isArray(saved.prePowerChecks)) &&
           saved.completed.every((id: unknown) => typeof id === 'string') &&
-          saved.skipped.every((id: unknown) => typeof id === 'string')
-        )
-          progress = saved;
+          saved.skipped.every((id: unknown) => typeof id === 'string') &&
+          (saved.prePowerChecks === undefined ||
+            saved.prePowerChecks.every((id: unknown) => typeof id === 'string'))
+        ) {
+          progress = { ...saved, prePowerChecks: saved.prePowerChecks ?? [] };
+        }
       } catch {
         /* Invalid local progress is ignored and replaced below. */
       }
@@ -337,6 +454,7 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
       setSkippedAssemblySteps(
         progress.skipped.filter((id) => result.plan.steps.some((step) => step.id === id)),
       );
+      setCheckedPrePowerItems(progress.prePowerChecks);
       setAssemblyStepIndex(0);
       setAssemblyStale(false);
       setMessage('Deterministic assembly guide generated from the current saved circuit.');
@@ -352,7 +470,22 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
     setSkippedAssemblySteps(skipped);
     window.localStorage.setItem(
       `schemora-assembly:${projectId}:${assemblyPlan.planDigest}`,
-      JSON.stringify({ completed, skipped }),
+      JSON.stringify({ completed, skipped, prePowerChecks: checkedPrePowerItems }),
+    );
+  }
+  function togglePrePowerCheck(checkId: string, checked: boolean) {
+    if (!assemblyPlan) return;
+    const next = checked
+      ? [...new Set([...checkedPrePowerItems, checkId])]
+      : checkedPrePowerItems.filter((id) => id !== checkId);
+    setCheckedPrePowerItems(next);
+    window.localStorage.setItem(
+      `schemora-assembly:${projectId}:${assemblyPlan.planDigest}`,
+      JSON.stringify({
+        completed: completedAssemblySteps,
+        skipped: skippedAssemblySteps,
+        prePowerChecks: next,
+      }),
     );
   }
   async function validate() {
@@ -460,6 +593,12 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
     'ABCDEFGHIJ'.split('').map((row) => `${row}${column}`),
   );
   const completedSet = new Set(completedAssemblySteps);
+  const prePowerChecklist =
+    report && isCurrent && !dirty ? makePrePowerChecklist(graph, partMap, report) : [];
+  const prePowerReviewComplete =
+    activeAssemblyStep?.action !== 'pre_power_checklist' ||
+    (prePowerChecklist.length > 0 &&
+      prePowerChecklist.every((item) => checkedPrePowerItems.includes(item.id)));
   const prerequisitesComplete = Boolean(
     activeAssemblyStep?.prerequisites.every((id) => completedSet.has(id)),
   );
@@ -745,6 +884,33 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
                   <div>
                     <strong>{finding.ruleId}</strong>
                     <p>{finding.message}</p>
+                    {finding.status === 'fail' && (
+                      <p className={styles.correctionGuidance}>
+                        <strong>Correction:</strong>{' '}
+                        {finding.ruleId === 'POWER_GROUND_SHORT'
+                          ? 'Keep power disconnected. Inspect the identified wires and remove or reroute the unintended conductive bridge, then save and validate again.'
+                          : finding.ruleId === 'LED_POLARITY'
+                            ? 'Keep power disconnected. Compare the LED’s physical anode/cathode markings with the named graph endpoints and correct the orientation, then save and validate again.'
+                            : finding.ruleId === 'LED_SERIES_RESISTOR'
+                              ? 'Keep power disconnected. Trace the modeled source-to-ground path through the LED and ensure every such path passes through a resistor; remove any bypass, then save and validate again.'
+                              : 'Review the reported graph path and correct it against the intended project design, then save and validate again.'}
+                      </p>
+                    )}
+                    {relatedFaultWireIds(finding, graph).length > 0 && (
+                      <ul className={styles.affectedWires} aria-label="Affected virtual wires">
+                        {relatedFaultWireIds(finding, graph).map((wireId) => {
+                          const id = `wire:${wireId}`;
+                          const wire = graph.wires.find((item) => item.id === wireId);
+                          return (
+                            <li key={id}>
+                              {wire
+                                ? `${describeEndpoint(wire.source, graph, partMap)} → ${describeEndpoint(wire.target, graph, partMap)}`
+                                : wireId}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
                     {finding.sourceIds.map((id) => {
                       const source = catalog.sources.find((s) => s.id === id);
                       return source ? (
@@ -924,6 +1090,56 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
                   ))}
                 </ul>
               )}
+              {activeAssemblyStep.action === 'pre_power_checklist' && (
+                <section
+                  className={styles.prePowerChecklist}
+                  aria-label="Physical pre-power checklist"
+                >
+                  <div className={styles.prePowerHeading}>
+                    <strong>Inspect the real circuit before connecting power</strong>
+                    <span>
+                      {
+                        checkedPrePowerItems.filter((id) =>
+                          prePowerChecklist.some((item) => item.id === id),
+                        ).length
+                      }{' '}
+                      of {prePowerChecklist.length} checked
+                    </span>
+                  </div>
+                  <p className="warning-notice">
+                    These checks record your inspection only. Schemora cannot observe physical
+                    wiring or certify that the circuit is safe.
+                  </p>
+                  <p className="fine-text">
+                    Checklist progress is saved in this browser for this guide. It does not sync to
+                    other devices.
+                  </p>
+                  <ul>
+                    {prePowerChecklist.map((item) => (
+                      <li key={item.id}>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={checkedPrePowerItems.includes(item.id)}
+                            onChange={(event) => togglePrePowerCheck(item.id, event.target.checked)}
+                          />
+                          <span>
+                            <strong>{item.title}</strong>
+                            <small>{item.detail}</small>
+                          </span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                  {report && (
+                    <p className="fine-text">
+                      Digital report: {report.status.toUpperCase()} · revision{' '}
+                      {report.projectRevision} · graph {report.graphDigest.slice(0, 12)}. Unknown
+                      checks remain unknown after you complete this physical inspection.
+                    </p>
+                  )}
+                </section>
+              )}
               {activeAssemblyStep.prerequisites.length > 0 && (
                 <p className={prerequisitesComplete ? 'fine-text' : 'warning-notice'}>
                   {prerequisitesComplete
@@ -948,7 +1164,11 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
                 <button
                   type="button"
                   className="button primary"
-                  disabled={!prerequisitesComplete || completedSet.has(activeAssemblyStep.id)}
+                  disabled={
+                    !prerequisitesComplete ||
+                    !prePowerReviewComplete ||
+                    completedSet.has(activeAssemblyStep.id)
+                  }
                   onClick={() =>
                     saveAssemblyProgress(
                       [...completedAssemblySteps, activeAssemblyStep.id],

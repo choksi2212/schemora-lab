@@ -228,7 +228,10 @@ export function validateCircuit(input: ValidateCircuitInput): ValidationReport {
             'fail',
             'error',
             'A modeled power terminal and ground terminal share the same conductive net.',
-            terminals.map(({ ref }) => ref.componentInstanceId),
+            [
+              ...terminals.map(({ ref }) => ref.componentInstanceId),
+              ...net.wireIds.map((wireId) => `wire:${wireId}`),
+            ],
             terminals.flatMap(({ ref }) => {
               const instance = graph.components.find(
                 (candidate) => candidate.id === ref.componentInstanceId,
@@ -326,7 +329,16 @@ export function validateCircuit(input: ValidateCircuitInput): ValidationReport {
               : correctlyPolarized
                 ? 'The LED is oriented from a modeled source toward ground.'
                 : 'LED polarity cannot be resolved because the graph does not identify both a source side and a ground return.',
-          [instance.id],
+          [
+            instance.id,
+            ...new Set(
+              [anode, cathode].flatMap((netId) =>
+                (nets.find((net) => net.id === netId)?.wireIds ?? []).map(
+                  (wireId) => `wire:${wireId}`,
+                ),
+              ),
+            ),
+          ],
           part.sourceIds,
         ),
       );
