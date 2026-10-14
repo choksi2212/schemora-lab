@@ -69,6 +69,9 @@ importers:
 
   apps/sandbox-runner:
     dependencies:
+      '@schemora/assembly-plan':
+        specifier: workspace:*
+        version: link:../../packages/assembly-plan
       '@schemora/persistence':
         specifier: workspace:*
         version: link:../../packages/persistence

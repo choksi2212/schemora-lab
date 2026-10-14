@@ -9,6 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@schemora/assembly-plan": "workspace:*",
     "@schemora/persistence": "workspace:*",
     "@schemora/simulation": "workspace:*"
   },
