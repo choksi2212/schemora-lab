@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { createServer } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Repository } from '@schemora/persistence';
 import { FileStorage, S3Storage } from '@schemora/storage';
@@ -34,6 +35,7 @@ const parsed = z
     WORKER_FIRMWARE_BUILD_ATTESTATION_PUBLIC_KEYS_JSON: z.string().max(65_536).default('{}'),
     DATABASE_POOL_SIZE: z.coerce.number().int().min(1).max(50).default(10),
     JOB_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
+    WORKER_HEALTH_PORT: z.coerce.number().int().min(1).max(65535).default(4002),
   })
   .safeParse(process.env);
 if (!parsed.success)
@@ -114,6 +116,27 @@ const worker = new Worker(
       }
     : undefined,
 );
+const healthServer = createServer((request, response) => {
+  if (request.url === '/health/live') {
+    response.writeHead(200, { 'content-type': 'application/json' }).end('{"status":"ok"}');
+    return;
+  }
+  if (request.url !== '/health/ready') {
+    response.writeHead(404).end();
+    return;
+  }
+  void repository.pool
+    .query('SELECT 1')
+    .then(() =>
+      response.writeHead(200, { 'content-type': 'application/json' }).end('{"status":"ready"}'),
+    )
+    .catch(() =>
+      response
+        .writeHead(503, { 'content-type': 'application/json' })
+        .end('{"status":"unavailable"}'),
+    );
+});
+healthServer.listen(config.WORKER_HEALTH_PORT, '127.0.0.1');
 let stopping = false;
 for (const signal of ['SIGINT', 'SIGTERM'])
   process.once(signal, () => {
@@ -145,4 +168,7 @@ await Promise.all([
     loop('process_hardware_recognition'),
   ),
 ]);
+await new Promise<void>((resolve, reject) =>
+  healthServer.close((error) => (error ? reject(error) : resolve())),
+);
 await repository.pool.end();

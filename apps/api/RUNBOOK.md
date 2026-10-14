@@ -22,6 +22,7 @@ Every canonical mutation includes an integer expectedRevision and a UUID Idempot
 | WEB_ORIGIN                                                  | Exact application origin; HTTPS required in production                          |
 | API_HOST / API_PORT                                         | Bind interface and port; local default 127.0.0.1:4001                           |
 | DATABASE_POOL_SIZE                                          | Maximum connections per process, default 10                                     |
+| MALWARE_SCANNER_MODE / CLAMD_HOST / CLAMD_PORT              | Production must use `clamd`; the ClamD endpoint is private-network-only         |
 | WORKER_POLL_MS                                              | Idle poll interval, default 1000 ms                                             |
 | WORKER_LEASE_SECONDS                                        | Lease duration, default 120 seconds; minimum 120 through production entry point |
 | WORKER_PROCESS_CONCURRENCY                                  | Bounded parser work per replica, default 1                                      |
@@ -34,6 +35,12 @@ Every canonical mutation includes an integer expectedRevision and a UUID Idempot
 | PROVIDER_REVIEW_APPROVED                                    | Must be true to enable a configured provider                                    |
 
 Environment values are validated before listening. Errors name invalid settings without printing their values. API handlers return stable safe errors and do not serialize object keys, source bytes, tokens, database diagnostics or exception stacks. Worker routine logs contain only an event and job type.
+
+## Upload malware scanning
+
+Production API startup requires `MALWARE_SCANNER_MODE=clamd`, `CLAMD_HOST`, and `CLAMD_PORT`. The API sends decoded conversation uploads, original hardware-photo bytes, firmware source files, and each firmware-bundle file to ClamD with the `INSTREAM` protocol before parsing, image normalization, or private storage. A detection is rejected with a generic error that omits the signature name. A scanner timeout, malformed response, or connection failure fails the upload closed with a retryable service-unavailable response. `/health/ready` also returns 503 if ClamD does not answer `PING` with `PONG`.
+
+ClamD's TCP protocol has no authentication or TLS. Place it on a private service network reachable only by the API and monitoring. Do not publish its port. Keep virus definitions current, alert on stale definitions and daemon health, and provision `StreamMaxLength` above the largest upload (at least 16 MiB for the current 10 MiB source limit plus framing). Ensure ClamD's file-size and archive-recursion limits are not lower than the application's accepted formats; the application parser's own expansion and entry limits remain mandatory. Malware scanning is one layer and does not prove an upload is safe or replace parser sandboxing. Development may use the disabled local scanner, but that mode is rejected in production.
 
 `WORKER_FIRMWARE_COMPILER_PROFILES_JSON` is a deployment-owned JSON array parsed at worker startup. Profiles must pass the strict compiler profile schema and have unique IDs; invalid JSON or entries fail startup without logging the value. Missing or empty-array configuration resolves no profiles. This configuration is currently only loaded and validated; no worker job invokes the compiler helper, no compiler sandbox or transport is configured, and setting a profile does not enable compilation.
 

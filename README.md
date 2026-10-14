@@ -98,6 +98,8 @@ Photo recognition is a separate provider capability and remains disabled by defa
 
 Parser child processes have time and memory limits. Public production deployment also requires the network/filesystem sandbox, infrastructure, restoration, and security evidence described in the [backend runbook](apps/api/RUNBOOK.md) and [system design](docs/System-Design.md).
 
+Phase 10 container build and release instructions are in [the deployment runbook](docs/Phase-10-Deployment.md); current scope and remaining launch evidence are tracked in [the Phase 10 implementation record](docs/Phase-10-Implementation.md).
+
 ## Repository guide
 
 | Path                        | Responsibility                                                                |

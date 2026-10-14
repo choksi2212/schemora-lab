@@ -44,6 +44,11 @@ import { AssemblyPlanBlockedError, generateAssemblyPlan } from '@schemora/assemb
 import type { ApiConfig } from './config.js';
 import { MAX_HARDWARE_PHOTO_INPUT_BYTES, normalizeHardwarePhoto } from './hardware-photo.js';
 import { buildProjectSpecification, buildWiringChecklist } from './project-export.js';
+import {
+  localUploadScanner,
+  UploadScannerUnavailableError,
+  type UploadScanner,
+} from './upload-scanner.js';
 
 const uuid = z.string().uuid();
 const expectedRevision = z.number().int().positive();
@@ -343,13 +348,21 @@ export function buildApp(
   config: ApiConfig,
   repository: Repository,
   storage: PrivateStorage & Partial<PrivateBuildStorage>,
+  uploadScanner?: UploadScanner,
 ) {
+  if (config.NODE_ENV === 'production' && !uploadScanner)
+    throw new Error('Production API requires an active upload scanner');
+  const scanner = uploadScanner ?? localUploadScanner;
   const app = Fastify({
     bodyLimit: 14 * 1024 * 1024,
     logger: false,
     requestTimeout: 30_000,
     connectionTimeout: 10_000,
   });
+  const scanUpload = async (bytes: Uint8Array) => {
+    const result = await scanner.scan(bytes);
+    if (result === 'infected') throw new RepositoryError('MALWARE_DETECTED', 422);
+  };
   app.addHook('onResponse', async (request, reply) => {
     if (config.NODE_ENV !== 'test')
       console.log(
@@ -465,14 +478,25 @@ export function buildApp(
     const frameworkStatus =
       error instanceof Error && 'statusCode' in error ? error.statusCode : undefined;
     const invalid = error instanceof ZodError || frameworkStatus === 400;
-    const status = domain ? error.statusCode : invalid ? 400 : frameworkStatus === 413 ? 413 : 500;
+    const scannerUnavailable = error instanceof UploadScannerUnavailableError;
+    const status = scannerUnavailable
+      ? 503
+      : domain
+        ? error.statusCode
+        : invalid
+          ? 400
+          : frameworkStatus === 413
+            ? 413
+            : 500;
     const code = domain
       ? error.code
-      : invalid
-        ? 'INVALID_INPUT'
-        : status === 413
-          ? 'SOURCE_TOO_LARGE'
-          : 'SERVICE_UNAVAILABLE';
+      : scannerUnavailable
+        ? 'SCANNER_UNAVAILABLE'
+        : invalid
+          ? 'INVALID_INPUT'
+          : status === 413
+            ? 'SOURCE_TOO_LARGE'
+            : 'SERVICE_UNAVAILABLE';
     reply.code(status).send({
       error: {
         code,
@@ -510,13 +534,16 @@ export function buildApp(
               INVALID_FIRMWARE_SOURCE:
                 'Upload valid UTF-8 C or C++ source no larger than 2,000,000 bytes.',
               FIRMWARE_ARTIFACT_LIMIT: 'This project has reached its firmware version limit.',
+              MALWARE_DETECTED: 'The uploaded file was rejected by the malware scanner.',
             }[code] ?? 'This action is unavailable in the current state.')
-          : invalid
-            ? 'Check the submitted fields.'
-            : status === 413
-              ? 'Choose a file smaller than 10 MiB.'
-              : 'The service is unavailable. Try again.',
-        retryable: status === 500,
+          : scannerUnavailable
+            ? 'Secure upload scanning is temporarily unavailable. Try again later.'
+            : invalid
+              ? 'Check the submitted fields.'
+              : status === 413
+                ? 'Choose a file smaller than 10 MiB.'
+                : 'The service is unavailable. Try again.',
+        retryable: status === 500 || status === 503,
         requestId: request.id,
         ...(domain && error.currentRevision !== undefined
           ? { currentRevision: error.currentRevision }
@@ -528,6 +555,7 @@ export function buildApp(
   app.get('/health/ready', async (_request, reply) => {
     try {
       await repository.pool.query('SELECT 1');
+      if (!(await scanner.ready())) return reply.code(503).send({ status: 'unavailable' });
       return { status: 'ready' };
     } catch {
       return reply.code(503).send({ status: 'unavailable' });
@@ -1354,6 +1382,7 @@ export function buildApp(
       bytes.toString('base64') !== body.contentBase64
     )
       throw new RepositoryError('INVALID_SOURCE', 400);
+    await scanUpload(bytes);
     const objectKey = randomUUID();
     const sourceId = randomUUID();
     // Track the key durably before any private bytes can exist.
@@ -1418,6 +1447,7 @@ export function buildApp(
       encoded.toString('base64') !== body.contentBase64
     )
       throw new RepositoryError('INVALID_PHOTO', 400);
+    await scanUpload(encoded);
 
     const objectKey = randomUUID();
     const photoId = randomUUID();
@@ -1877,6 +1907,7 @@ export function buildApp(
       !Buffer.from(source, 'utf8').equals(bytes)
     )
       throw new RepositoryError('INVALID_FIRMWARE_SOURCE', 400);
+    await scanUpload(bytes);
     const principal = owner(request);
     const target = await firmwareTarget(principal, projectId);
     const objectKey = randomUUID();
@@ -1991,6 +2022,7 @@ export function buildApp(
         throw new RepositoryError('INVALID_FIRMWARE_SOURCE', 400);
       sourceFiles.push({ path: file.path, source: bytes });
     }
+    for (const file of sourceFiles) await scanUpload(file.source);
     let bundle;
     try {
       bundle = await createFirmwareProjectBundle({

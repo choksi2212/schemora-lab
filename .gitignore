@@ -9,6 +9,7 @@ test-results/
 .env.*
 !.env.example
 .schemora/
+/.phase10-deploy-api/
 *.tsbuildinfo
 next-env.d.ts
 .DS_Store

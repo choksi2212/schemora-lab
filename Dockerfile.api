@@ -1,0 +1,31 @@
+FROM node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS build
+RUN corepack enable && corepack prepare pnpm@11.5.2 --activate
+WORKDIR /workspace
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/sandbox-runner/package.json apps/sandbox-runner/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY apps/worker/package.json apps/worker/package.json
+COPY packages/assembly-plan/package.json packages/assembly-plan/package.json
+COPY packages/circuit-model/package.json packages/circuit-model/package.json
+COPY packages/contracts/package.json packages/contracts/package.json
+COPY packages/hardware-catalog/package.json packages/hardware-catalog/package.json
+COPY packages/intelligence/package.json packages/intelligence/package.json
+COPY packages/persistence/package.json packages/persistence/package.json
+COPY packages/simulation/package.json packages/simulation/package.json
+COPY packages/storage/package.json packages/storage/package.json
+COPY packages/teaching/package.json packages/teaching/package.json
+COPY packages/validation/package.json packages/validation/package.json
+RUN pnpm install --frozen-lockfile
+COPY . .
+RUN pnpm --filter @schemora/api --prod deploy --legacy /out
+
+FROM node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS runtime
+ENV NODE_ENV=production API_HOST=0.0.0.0 API_PORT=4001
+WORKDIR /app
+COPY --from=build --chown=node:node /out ./
+USER node
+EXPOSE 4001
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:' + (process.env.API_PORT || 4001) + '/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+CMD ["node", "--import", "tsx/esm", "src/server.ts"]

@@ -13,8 +13,17 @@ const config = readConfig({
 });
 const repository = new Repository(config.DATABASE_URL);
 const app = buildApp(config, repository, new FileStorage('.private-test-unused', 'test'));
+const scannedUploads: number[] = [];
+const scanningApp = buildApp(config, repository, new FileStorage('.private-test-unused', 'test'), {
+  scan: async (bytes) => {
+    scannedUploads.push(bytes.length);
+    return 'infected';
+  },
+  ready: async () => true,
+});
 afterAll(async () => {
   await app.close();
+  await scanningApp.close();
   await repository.pool.end();
 });
 describe('trusted identity and production configuration', () => {
@@ -48,6 +57,40 @@ describe('trusted identity and production configuration', () => {
       expect(response.statusCode).toBe(401);
     }
   });
+  it('rejects infected source and photo uploads before persistence or image parsing', async () => {
+    const token = await new SignJWT({})
+      .setSubject('github:1')
+      .setIssuer('schemora-web')
+      .setAudience('schemora-api')
+      .setIssuedAt()
+      .setExpirationTime('2m')
+      .setProtectedHeader({ alg: 'HS256' })
+      .sign(new TextEncoder().encode(secret));
+    const headers = { authorization: 'Bearer ' + token };
+    const projectId = '00000000-0000-4000-8000-000000000001';
+    const source = await scanningApp.inject({
+      method: 'POST',
+      url: `/v1/projects/${projectId}/imports`,
+      headers,
+      payload: { expectedRevision: 1, filename: 'source.txt', contentBase64: 'dGVzdA==' },
+    });
+    const photo = await scanningApp.inject({
+      method: 'POST',
+      url: `/v1/projects/${projectId}/hardware-photos`,
+      headers,
+      payload: {
+        expectedRevision: 1,
+        shotRole: 'other',
+        consentVersion: 'photo-evidence-v1',
+        contentBase64: 'dGVzdA==',
+      },
+    });
+    expect(source.statusCode).toBe(422);
+    expect(photo.statusCode).toBe(422);
+    expect(source.json().error.code).toBe('MALWARE_DETECTED');
+    expect(photo.json().error.code).toBe('MALWARE_DETECTED');
+    expect(scannedUploads).toEqual([4, 4]);
+  });
   it('rejects cross-origin requests before database access', async () => {
     const response = await app.inject({
       method: 'GET',
@@ -72,9 +115,15 @@ describe('trusted identity and production configuration', () => {
       STORAGE_DRIVER: 's3',
       S3_BUCKET: 'private-bucket',
       AWS_REGION: 'ap-south-1',
+      MALWARE_SCANNER_MODE: 'clamd',
+      CLAMD_HOST: 'clamav.internal',
       WEB_ORIGIN: 'https://schemora.example',
     };
     expect(readConfig(valid).STORAGE_DRIVER).toBe('s3');
+    expect(() => readConfig({ ...valid, MALWARE_SCANNER_MODE: 'disabled' })).toThrow(
+      'malware scanner',
+    );
+    expect(() => readConfig({ ...valid, CLAMD_HOST: undefined })).toThrow('scanner host');
     expect(() => readConfig({ ...valid, DATABASE_URL: config.DATABASE_URL })).toThrow('sslmode');
   });
   it('binds immutable artifact identity to processing metadata for an identical payload', () => {

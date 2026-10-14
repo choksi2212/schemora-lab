@@ -196,6 +196,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
             id: 'board_1',
             catalogPartId: 'board.espressif.esp32-devkitc-v4.wroom-32e.male',
           },
+          { id: 'led_1', catalogPartId: 'led.kingbright.wp7113id' },
+          { id: 'resistor_1', catalogPartId: 'resistor.yageo.cfr-25jb-52-220r' },
         ],
         breadboards: [],
         terminalPlacements: [],
