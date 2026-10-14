@@ -7,7 +7,12 @@ export async function GET(request: NextRequest) {
     const user = await identity(request);
     return NextResponse.json(
       user
-        ? { authenticated: true, mode: user.mode, user: { name: user.name } }
+        ? {
+            authenticated: true,
+            mode: user.mode,
+            authTime: user.authTime,
+            user: { name: user.name },
+          }
         : { authenticated: false },
       { headers: { 'Cache-Control': 'no-store' } },
     );

@@ -26,7 +26,7 @@ const canonicalJson = (value: unknown): string => {
 };
 
 async function authToken() {
-  return new SignJWT({})
+  return new SignJWT({ auth_time: Math.floor(Date.now() / 1000), name: 'maker' })
     .setSubject('github:101')
     .setIssuer('schemora-web')
     .setAudience('schemora-api')

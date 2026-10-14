@@ -1394,6 +1394,88 @@ textarea {
   border-radius: 7px;
   min-width: 0;
 }
+.account-page {
+  max-width: 1050px;
+}
+.account-page > .page-heading {
+  align-items: flex-start;
+}
+.account-panel {
+  margin: 24px 0;
+}
+.account-panel .panel-heading {
+  padding: 20px 24px;
+}
+.account-panel .panel-heading h2 {
+  font-size: 16px;
+}
+.account-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 30px;
+  padding: 24px;
+  margin: 0;
+}
+.account-facts dt {
+  color: var(--muted);
+  font-size: 11px;
+}
+.account-facts dd {
+  margin: 4px 0 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.account-footnote,
+.account-body {
+  padding: 0 24px 24px;
+}
+.account-footnote,
+.account-body p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.account-body p + p {
+  margin-top: 12px;
+}
+.account-danger {
+  border-color: #e8c9c5;
+}
+.account-danger .panel-heading {
+  border-color: #e8c9c5;
+}
+.account-danger .panel-heading h2 {
+  color: var(--danger);
+}
+.account-close-button,
+.account-signin {
+  margin-top: 18px;
+}
+.account-reauth {
+  display: inline-block;
+  margin-left: 14px;
+  color: var(--green-dark);
+  font-size: 12px;
+  text-decoration: underline;
+}
+.account-reauth-note {
+  margin-top: 12px;
+  color: var(--warning);
+  font-size: 12px;
+}
+.account-reauth-note a {
+  color: var(--green-dark);
+  text-decoration: underline;
+}
+.account-notice {
+  margin: 14px 0;
+  padding: 12px 14px;
+  border: 1px solid #c9ddc5;
+  border-radius: 6px;
+  background: #eff7ec;
+  color: #28583a;
+  font-size: 12px;
+}
 .panel-heading {
   padding: 17px 18px;
   display: flex;
@@ -2460,6 +2542,20 @@ textarea {
   }
 }
 @media (max-width: 600px) {
+  .account-facts {
+    grid-template-columns: 1fr;
+    padding: 18px;
+  }
+  .account-panel .panel-heading,
+  .account-footnote,
+  .account-body {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  .account-reauth {
+    display: block;
+    margin: 14px 0 0;
+  }
   .catalog-hero,
   .breadboard-heading {
     flex-direction: column;

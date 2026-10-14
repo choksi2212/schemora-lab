@@ -28,7 +28,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('project circuit API', () => {
   let tokenB: string;
 
   async function token(subject: string) {
-    return new SignJWT({})
+    return new SignJWT({ auth_time: Math.floor(Date.now() / 1000), name: 'maker' })
       .setSubject(subject)
       .setIssuer('schemora-web')
       .setAudience('schemora-api')

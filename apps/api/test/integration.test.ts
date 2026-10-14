@@ -31,6 +31,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
     const secret = 'test-session-secret-only-00000000000000000000';
     const userA = 'test:' + randomUUID();
     const userB = 'test:' + randomUUID();
+    const closureUser = 'test:' + randomUUID();
     const config = readConfig({
       NODE_ENV: 'test',
       DATABASE_URL:
@@ -44,8 +45,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
     let storage: FileStorage;
     let tokenA: string;
     let tokenB: string;
-    async function token(subject: string) {
-      return new SignJWT({})
+    async function token(subject: string, authTime = Math.floor(Date.now() / 1000)) {
+      return new SignJWT({ auth_time: authTime, name: 'maker' })
         .setSubject(subject)
         .setIssuer('schemora-web')
         .setAudience('schemora-api')
@@ -97,7 +98,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
         // Artifact-file triggers only permit cascade removal during the same
         // deleting state used by the production project purge worker.
         await client.query("UPDATE projects SET status='deleting' WHERE owner_id=ANY($1)", [
-          [userA, userB],
+          [userA, userB, closureUser],
         ]);
         for (const table of [
           'simulation_run_attempts',
@@ -116,11 +117,17 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
             'DELETE FROM ' +
               table +
               ' WHERE project_id IN (SELECT id FROM projects WHERE owner_id=ANY($1))',
-            [[userA, userB]],
+            [[userA, userB, closureUser]],
           );
-        await client.query('DELETE FROM idempotency WHERE owner_id=ANY($1)', [[userA, userB]]);
-        await client.query('DELETE FROM projects WHERE owner_id=ANY($1)', [[userA, userB]]);
-        await client.query('DELETE FROM principals WHERE id=ANY($1)', [[userA, userB]]);
+        await client.query('DELETE FROM idempotency WHERE owner_id=ANY($1)', [
+          [userA, userB, closureUser],
+        ]);
+        await client.query('DELETE FROM projects WHERE owner_id=ANY($1)', [
+          [userA, userB, closureUser],
+        ]);
+        await client.query('DELETE FROM principals WHERE id=ANY($1)', [
+          [userA, userB, closureUser],
+        ]);
       });
       await repository.pool.end();
       await rm(directory, { recursive: true, force: true });
@@ -1477,5 +1484,85 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
         404,
       );
     }, 60_000);
+    it('closes an account through durable project purges and only reopens an empty workspace', async () => {
+      const closureToken = await token(closureUser);
+      const created = await request(
+        'POST',
+        '/v1/projects',
+        { title: 'Account closure integration project' },
+        closureToken,
+      );
+      expect(created.status).toBe(201);
+      const projectId = created.data.id as string;
+      const lateUploadKey = randomUUID();
+      await repository.registerUploadIntent(closureUser, projectId, lateUploadKey);
+
+      const closing = await request(
+        'DELETE',
+        '/v1/account',
+        { confirmation: 'DELETE MY ACCOUNT' },
+        closureToken,
+      );
+      expect(closing.status).toBe(202);
+      expect(closing.data).toMatchObject({ status: 'closing', projectsScheduled: 1 });
+      expect(
+        (await request('GET', '/v1/projects/' + projectId, undefined, closureToken)).status,
+      ).toBe(410);
+
+      await repository.dispatch();
+      const purgeJob = (
+        await repository.pool.query<Job>(
+          `UPDATE jobs SET status='running',attempts=attempts+1,lease_token=$2,
+             lease_until=clock_timestamp()+interval '120 seconds'
+           WHERE project_id=$1 AND kind='delete_project' AND status='queued' RETURNING *`,
+          [projectId, randomUUID()],
+        )
+      ).rows[0]!;
+      await worker.deleteProject(purgeJob);
+      const waitingForUploadCleanup = await request('GET', '/v1/account', undefined, closureToken);
+      expect(waitingForUploadCleanup.data).toMatchObject({
+        status: 'closing',
+        activeProjectCount: 0,
+        pendingProjectDeletionCount: 0,
+        pendingUploadCleanupCount: 1,
+      });
+      await repository.pool.query(
+        "UPDATE upload_intents SET expires_at=now()-interval '1 second' WHERE object_key=$1",
+        [lateUploadKey],
+      );
+      await repository.cleanupUploadIntents((key) => storage.delete(key));
+      const closed = await request('GET', '/v1/account', undefined, closureToken);
+      expect(closed.data).toMatchObject({ status: 'closed', activeProjectCount: 0 });
+
+      const staleToken = await token(closureUser, Math.floor(Date.now() / 1000) - 301);
+      const staleReactivation = await request(
+        'POST',
+        '/v1/account/reactivate',
+        { confirmation: 'START A NEW WORKSPACE' },
+        staleToken,
+      );
+      expect(staleReactivation.status).toBe(401);
+      expect(staleReactivation.error.code).toBe('RECENT_SIGN_IN_REQUIRED');
+
+      const freshReactivation = await request(
+        'POST',
+        '/v1/account/reactivate',
+        { confirmation: 'START A NEW WORKSPACE' },
+        await token(closureUser),
+      );
+      expect(freshReactivation.status).toBe(200);
+      expect(freshReactivation.data).toMatchObject({ status: 'active', workspaceReset: true });
+      expect(
+        (await request('GET', '/v1/projects', undefined, await token(closureUser))).data.items,
+      ).toEqual([]);
+      const staleDeletion = await request(
+        'DELETE',
+        '/v1/account',
+        { confirmation: 'DELETE MY ACCOUNT' },
+        await token(closureUser, Math.floor(Date.now() / 1000) - 301),
+      );
+      expect(staleDeletion.status).toBe(401);
+      expect(staleDeletion.error.code).toBe('REAUTHENTICATION_REQUIRED');
+    });
   },
 );

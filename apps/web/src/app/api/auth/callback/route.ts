@@ -55,9 +55,21 @@ export async function GET(request: NextRequest) {
       cache: 'no-store',
     });
     const user = (await profile.json()) as { id?: number; login?: string };
-    if (!profile.ok || !Number.isSafeInteger(user.id) || typeof user.login !== 'string')
+    if (
+      !profile.ok ||
+      !Number.isSafeInteger(user.id) ||
+      typeof user.login !== 'string' ||
+      !/^[A-Za-z0-9-]{1,39}$/.test(user.login)
+    )
       throw new Error('Identity lookup failed.');
-    const response = NextResponse.redirect(new URL('/', webOrigin()));
+    const returnTo =
+      typeof payload.returnTo === 'string' &&
+      payload.returnTo.startsWith('/') &&
+      !payload.returnTo.startsWith('//') &&
+      !payload.returnTo.includes('\\')
+        ? payload.returnTo
+        : '/';
+    const response = NextResponse.redirect(new URL(returnTo, webOrigin()));
     response.cookies.set(sessionCookie, await signSession(`github:${user.id}`, user.login), {
       ...cookieOptions,
       maxAge: 3600,

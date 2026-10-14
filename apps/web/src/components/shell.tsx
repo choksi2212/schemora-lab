@@ -78,9 +78,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
               or physical safety.
             </div>
           )}
-          <a className="nav-item" href="/api/auth/signin">
+          <Link className="nav-item" href="/account">
             <FileText size={18} /> Account <ArrowUpRight size={15} />
-          </a>
+          </Link>
           <span className="sidebar-version">SCHEMORA · PHASE 03</span>
         </div>
       </aside>

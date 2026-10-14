@@ -376,6 +376,8 @@ export function buildApp(
       );
   });
   const identities = new WeakMap<FastifyRequest, string>();
+  const authenticationTimes = new WeakMap<FastifyRequest, number>();
+  const profileNames = new WeakMap<FastifyRequest, string | null>();
   app.addHook('onRequest', async (request, reply) => {
     if (request.url === '/health/live' || request.url === '/health/ready') return;
     if (request.headers.origin && request.headers.origin !== new URL(config.WEB_ORIGIN).origin) {
@@ -383,6 +385,7 @@ export function buildApp(
     }
     const token = request.headers.authorization?.match(/^Bearer ([^\s]+)$/)?.[1];
     if (!token) throw new RepositoryError('UNAUTHENTICATED', 401);
+    let databaseLookup = false;
     try {
       const { payload } = await jwtVerify(token, new TextEncoder().encode(config.SESSION_SECRET), {
         algorithms: ['HS256'],
@@ -403,13 +406,57 @@ export function buildApp(
       }
       if (config.NODE_ENV === 'production' && !/^github:\d+$/.test(payload.sub))
         throw new Error('Unsupported production principal');
+      if (
+        !Number.isSafeInteger(payload.auth_time) ||
+        (payload.auth_time as number) > Date.now() / 1000 + 5
+      )
+        throw new Error('Invalid authentication time');
+      const profileName =
+        typeof payload.name === 'string' && payload.name.length <= 39 ? payload.name : null;
+      const path = request.url.split('?')[0];
+      const accountRoute = path === '/v1/account' || path.startsWith('/v1/account/');
+      const catalogRoute = path === '/v1/catalog' || path.startsWith('/v1/catalog/');
+      if (accountRoute || !catalogRoute) {
+        databaseLookup = true;
+        if (accountRoute)
+          await repository.pool.query(
+            `INSERT INTO principals(id,display_name) VALUES($1,$2)
+             ON CONFLICT(id) DO UPDATE SET display_name=EXCLUDED.display_name
+             WHERE principals.lifecycle_status='active'`,
+            [payload.sub, profileName],
+          );
+        else
+          await repository.pool.query(
+            'INSERT INTO principals(id) VALUES($1) ON CONFLICT DO NOTHING',
+            [payload.sub],
+          );
+        const principal = await repository.pool.query<{ lifecycle_status: string }>(
+          'SELECT lifecycle_status FROM principals WHERE id=$1',
+          [payload.sub],
+        );
+        databaseLookup = false;
+        if (!principal.rows[0]) throw new Error('Missing principal');
+        if (!accountRoute && principal.rows[0].lifecycle_status !== 'active') {
+          return reply.code(410).send({
+            error: {
+              code: 'ACCOUNT_CLOSED',
+              message: 'This account is closing or closed. Open account settings to continue.',
+              retryable: false,
+              requestId: request.id,
+            },
+          });
+        }
+      }
       identities.set(request, payload.sub);
+      authenticationTimes.set(request, payload.auth_time as number);
+      profileNames.set(request, profileName);
     } catch {
-      await reply.code(401).send({
+      const unavailable = databaseLookup;
+      await reply.code(unavailable ? 503 : 401).send({
         error: {
-          code: 'UNAUTHENTICATED',
-          message: 'Sign in to continue.',
-          retryable: false,
+          code: unavailable ? 'SERVICE_UNAVAILABLE' : 'UNAUTHENTICATED',
+          message: unavailable ? 'Account status could not be verified.' : 'Sign in to continue.',
+          retryable: unavailable,
           requestId: request.id,
         },
       });
@@ -535,6 +582,10 @@ export function buildApp(
                 'Upload valid UTF-8 C or C++ source no larger than 2,000,000 bytes.',
               FIRMWARE_ARTIFACT_LIMIT: 'This project has reached its firmware version limit.',
               MALWARE_DETECTED: 'The uploaded file was rejected by the malware scanner.',
+              RECENT_SIGN_IN_REQUIRED: 'Sign in again before starting a new workspace.',
+              REAUTHENTICATION_REQUIRED: 'Sign in again before deleting this account.',
+              ACCOUNT_DELETION_IN_PROGRESS: 'Account deletion is already in progress.',
+              ACCOUNT_CLOSED: 'This account is closed. Open account settings to continue.',
             }[code] ?? 'This action is unavailable in the current state.')
           : scannerUnavailable
             ? 'Secure upload scanning is temporarily unavailable. Try again later.'
@@ -599,6 +650,161 @@ export function buildApp(
       noticeRevision: config.VISION_RECOGNITION_NOTICE_REVISION,
     }),
   );
+  app.get('/v1/account', async (request) => {
+    const account = await repository.pool.query<{
+      id: string;
+      display_name: string | null;
+      lifecycle_status: string;
+      created_at: Date;
+      deletion_requested_at: Date | null;
+      closed_at: Date | null;
+      active_projects: number;
+      pending_deletions: number;
+      pending_upload_cleanups: number;
+    }>(
+      `SELECT p.id,p.display_name,p.lifecycle_status,p.created_at,p.deletion_requested_at,p.closed_at,
+        count(*) FILTER (WHERE projects.status IN ('active','archived'))::int AS active_projects,
+        count(*) FILTER (WHERE projects.status='deleting')::int AS pending_deletions,
+        (SELECT count(*)::int FROM upload_intents i JOIN projects owned ON owned.id=i.project_id
+         WHERE owned.owner_id=p.id) AS pending_upload_cleanups
+       FROM principals p LEFT JOIN projects ON projects.owner_id=p.id
+       WHERE p.id=$1
+       GROUP BY p.id`,
+      [owner(request)],
+    );
+    const row = account.rows[0];
+    if (!row) throw new RepositoryError('NOT_FOUND', 404);
+    return envelope(request, {
+      provider: row.id.startsWith('github:') ? 'github' : 'development',
+      providerAccountId: row.id,
+      displayName: row.display_name,
+      status: row.lifecycle_status,
+      createdAt: row.created_at.toISOString(),
+      deletionRequestedAt: row.deletion_requested_at?.toISOString() ?? null,
+      closedAt: row.closed_at?.toISOString() ?? null,
+      activeProjectCount: row.active_projects,
+      pendingProjectDeletionCount: row.pending_deletions,
+      pendingUploadCleanupCount: row.pending_upload_cleanups,
+      proposedBackupRetentionDays: 35,
+    });
+  });
+  app.delete('/v1/account', async (request, reply) => {
+    z.object({ confirmation: z.literal('DELETE MY ACCOUNT') })
+      .strict()
+      .parse(request.body);
+    const authTime = authenticationTimes.get(request);
+    if (!authTime || Math.floor(Date.now() / 1000) - authTime > 300)
+      throw new RepositoryError('REAUTHENTICATION_REQUIRED', 401);
+    const principalId = owner(request);
+    const result = await repository.transaction(async (client) => {
+      const account = await client.query<{ lifecycle_status: string }>(
+        'SELECT lifecycle_status FROM principals WHERE id=$1 FOR UPDATE',
+        [principalId],
+      );
+      const status = account.rows[0]?.lifecycle_status;
+      if (!status) throw new RepositoryError('NOT_FOUND', 404);
+      if (status === 'closed')
+        return {
+          status,
+          projectsScheduled: 0,
+          projectsRemaining: 0,
+          pendingUploadCleanupCount: 0,
+        };
+      const projects = await client.query<{ id: string; status: string }>(
+        "SELECT id,status FROM projects WHERE owner_id=$1 AND status<>'deleted' ORDER BY id FOR UPDATE",
+        [principalId],
+      );
+      if (status === 'active')
+        await client.query(
+          "UPDATE principals SET lifecycle_status='closing',display_name=NULL,deletion_requested_at=now() WHERE id=$1",
+          [principalId],
+        );
+      for (const project of projects.rows) {
+        if (project.status !== 'deleting')
+          await client.query("UPDATE projects SET status='deleting',updated_at=now() WHERE id=$1", [
+            project.id,
+          ]);
+        await client.query(
+          "UPDATE imports SET status='cancelled' WHERE project_id=$1 AND status IN ('queued','processing','awaiting_selection')",
+          [project.id],
+        );
+        await client.query(
+          "UPDATE jobs SET status='cancelled',lease_token=NULL,lease_until=NULL WHERE project_id=$1 AND kind='process_import' AND status IN ('queued','running')",
+          [project.id],
+        );
+        await client.query(
+          "UPDATE outbox SET delivered_at=coalesce(delivered_at,now()) WHERE project_id=$1 AND kind='process_import'",
+          [project.id],
+        );
+        await stopProjectSimulationRuns(
+          client,
+          project.id,
+          'Account deletion began before simulation.',
+        );
+        await client.query(
+          "UPDATE jobs SET status='queued',attempts=0,available_at=now(),lease_until=NULL,lease_token=NULL,error_code=NULL WHERE project_id=$1 AND kind='delete_project' AND status IN ('failed','cancelled')",
+          [project.id],
+        );
+        const pending = await client.query(
+          "SELECT 1 FROM jobs WHERE project_id=$1 AND kind='delete_project' AND status IN ('queued','running') LIMIT 1",
+          [project.id],
+        );
+        if (!pending.rows[0]) await repository.enqueue(client, project.id, 'delete_project', {});
+      }
+      const remaining = projects.rows.length;
+      const uploadIntents = await client.query<{ count: number }>(
+        `SELECT count(*)::int AS count FROM upload_intents i
+         JOIN projects owned ON owned.id=i.project_id WHERE owned.owner_id=$1`,
+        [principalId],
+      );
+      const pendingUploadCleanupCount = uploadIntents.rows[0]?.count ?? 0;
+      if (remaining === 0 && pendingUploadCleanupCount === 0) {
+        await client.query(
+          "UPDATE principals SET lifecycle_status='closed',closed_at=coalesce(closed_at,now()) WHERE id=$1",
+          [principalId],
+        );
+        return {
+          status: 'closed',
+          projectsScheduled: 0,
+          projectsRemaining: 0,
+          pendingUploadCleanupCount: 0,
+        };
+      }
+      return {
+        status: 'closing',
+        projectsScheduled: remaining,
+        projectsRemaining: remaining,
+        pendingUploadCleanupCount,
+      };
+    });
+    return reply.code(result.status === 'closed' ? 200 : 202).send(envelope(request, result));
+  });
+  app.post('/v1/account/reactivate', async (request) => {
+    z.object({ confirmation: z.literal('START A NEW WORKSPACE') })
+      .strict()
+      .parse(request.body);
+    const principalId = owner(request);
+    const authTime = authenticationTimes.get(request);
+    if (!authTime || Math.floor(Date.now() / 1000) - authTime > 300)
+      throw new RepositoryError('RECENT_SIGN_IN_REQUIRED', 401);
+    const name = profileNames.get(request) ?? null;
+    const result = await repository.pool.query<{ lifecycle_status: string }>(
+      `UPDATE principals SET lifecycle_status='active',display_name=$2,deletion_requested_at=NULL,closed_at=NULL
+       WHERE id=$1 AND lifecycle_status='closed' RETURNING lifecycle_status`,
+      [principalId, name],
+    );
+    if (!result.rows[0]) {
+      const current = await repository.pool.query<{ lifecycle_status: string }>(
+        'SELECT lifecycle_status FROM principals WHERE id=$1',
+        [principalId],
+      );
+      if (current.rows[0]?.lifecycle_status === 'closing')
+        throw new RepositoryError('ACCOUNT_DELETION_IN_PROGRESS', 409);
+      if (current.rows[0]?.lifecycle_status !== 'active')
+        throw new RepositoryError('NOT_FOUND', 404);
+    }
+    return envelope(request, { status: 'active', workspaceReset: true });
+  });
   app.get('/v1/projects', async (request) => {
     const query = z.object({ cursor: z.string().max(300).optional() }).parse(request.query);
     return envelope(request, await repository.list(owner(request), query.cursor));

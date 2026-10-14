@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { SignJWT } from 'jose';
 import { Repository, requestDigest } from '@schemora/persistence';
 import { FileStorage } from '@schemora/storage';
@@ -41,7 +41,7 @@ describe('trusted identity and production configuration', () => {
       ['other-api', secret],
       ['schemora-api', secret + 'wrong'],
     ]) {
-      const token = await new SignJWT({})
+      const token = await new SignJWT({ auth_time: Math.floor(Date.now() / 1000) })
         .setSubject('github:1')
         .setIssuer('schemora-web')
         .setAudience(audience!)
@@ -58,7 +58,13 @@ describe('trusted identity and production configuration', () => {
     }
   });
   it('rejects infected source and photo uploads before persistence or image parsing', async () => {
-    const token = await new SignJWT({})
+    const accountGuard = vi
+      .spyOn(repository.pool, 'query')
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 } as never)
+      .mockResolvedValueOnce({ rows: [{ lifecycle_status: 'active' }], rowCount: 1 } as never)
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 } as never)
+      .mockResolvedValueOnce({ rows: [{ lifecycle_status: 'active' }], rowCount: 1 } as never);
+    const token = await new SignJWT({ auth_time: Math.floor(Date.now() / 1000), name: 'maker' })
       .setSubject('github:1')
       .setIssuer('schemora-web')
       .setAudience('schemora-api')
@@ -90,6 +96,7 @@ describe('trusted identity and production configuration', () => {
     expect(source.json().error.code).toBe('MALWARE_DETECTED');
     expect(photo.json().error.code).toBe('MALWARE_DETECTED');
     expect(scannedUploads).toEqual([4, 4]);
+    accountGuard.mockRestore();
   });
   it('rejects cross-origin requests before database access', async () => {
     const response = await app.inject({

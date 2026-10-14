@@ -14,6 +14,10 @@ import {
 
 export const principals = pgTable('principals', {
   id: text('id').primaryKey(),
+  displayName: text('display_name'),
+  lifecycleStatus: text('lifecycle_status').notNull().default('active'),
+  deletionRequestedAt: timestamp('deletion_requested_at', { withTimezone: true }),
+  closedAt: timestamp('closed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 export const projects = pgTable('projects', {

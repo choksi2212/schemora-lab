@@ -13,11 +13,14 @@ export const runtime = 'nodejs';
 export async function GET(request: NextRequest) {
   try {
     if (developmentIdentity(request)) return NextResponse.redirect(new URL('/', webOrigin()));
+    const returnTo = request.nextUrl.searchParams.get('returnTo') ?? '/';
+    if (!returnTo.startsWith('/') || returnTo.startsWith('//') || returnTo.includes('\\'))
+      return NextResponse.json({ error: 'Invalid return path.' }, { status: 400 });
     const clientId = process.env.AUTH_GITHUB_ID;
     if (!clientId || !process.env.AUTH_GITHUB_SECRET)
       return NextResponse.json({ error: 'GitHub sign-in is not configured.' }, { status: 503 });
     const flow = newFlow();
-    const token = await new SignJWT({ state: flow.state, verifier: flow.verifier })
+    const token = await new SignJWT({ state: flow.state, verifier: flow.verifier, returnTo })
       .setProtectedHeader({ alg: 'HS256' })
       .setIssuer('schemora-oauth')
       .setAudience('github')

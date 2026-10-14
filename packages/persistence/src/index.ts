@@ -1413,8 +1413,14 @@ export class Repository {
   }
   async duplicateProject(owner: string, sourceId: string, key: string, title?: string) {
     return this.transaction(async (client) => {
-      const source = await this.project(client, owner, sourceId, true);
       await client.query('INSERT INTO principals(id) VALUES($1) ON CONFLICT DO NOTHING', [owner]);
+      const principal = await client.query<{ lifecycle_status: string }>(
+        'SELECT lifecycle_status FROM principals WHERE id=$1 FOR SHARE',
+        [owner],
+      );
+      if (principal.rows[0]?.lifecycle_status !== 'active')
+        throw new RepositoryError('ACCOUNT_CLOSED', 410);
+      const source = await this.project(client, owner, sourceId, true);
       const scope = sourceId + ':project_duplicate';
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [owner + scope + key]);
       const fingerprint = requestDigest({ sourceId, title: title ?? null });
@@ -1583,6 +1589,12 @@ export class Repository {
   async create(owner: string, title: string, key: string) {
     return this.transaction(async (client) => {
       await client.query('INSERT INTO principals(id) VALUES($1) ON CONFLICT DO NOTHING', [owner]);
+      const principal = await client.query<{ lifecycle_status: string }>(
+        'SELECT lifecycle_status FROM principals WHERE id=$1 FOR SHARE',
+        [owner],
+      );
+      if (principal.rows[0]?.lifecycle_status !== 'active')
+        throw new RepositoryError('ACCOUNT_CLOSED', 410);
       const scope = 'create_project';
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [owner + scope + key]);
       const fingerprint = requestDigest({ title });
@@ -1715,8 +1727,8 @@ export class Repository {
     let removed = 0;
     for (const item of pending.rows) {
       await this.transaction(async (client) => {
-        const intent = await client.query(
-          'SELECT object_key FROM upload_intents WHERE object_key=$1 AND expires_at<=now() FOR UPDATE SKIP LOCKED',
+        const intent = await client.query<{ object_key: string; project_id: string }>(
+          'SELECT object_key,project_id FROM upload_intents WHERE object_key=$1 AND expires_at<=now() FOR UPDATE SKIP LOCKED',
           [item.object_key],
         );
         if (!intent.rows[0]) return;
@@ -1726,6 +1738,16 @@ export class Repository {
         );
         if (!accepted.rows[0]) await removeObject(item.object_key);
         await client.query('DELETE FROM upload_intents WHERE object_key=$1', [item.object_key]);
+        await client.query(
+          `UPDATE principals SET lifecycle_status='closed',closed_at=coalesce(closed_at,now()),display_name=NULL
+           WHERE id=(SELECT owner_id FROM projects WHERE id=$1) AND lifecycle_status='closing'
+             AND NOT EXISTS (SELECT 1 FROM projects WHERE owner_id=(SELECT owner_id FROM projects WHERE id=$1) AND status<>'deleted')
+             AND NOT EXISTS (
+               SELECT 1 FROM upload_intents i JOIN projects p ON p.id=i.project_id
+               WHERE p.owner_id=(SELECT owner_id FROM projects WHERE id=$1)
+             )`,
+          [intent.rows[0].project_id],
+        );
         removed++;
       }).catch(() => {
         // Preserve the durable intent if object removal fails; next maintenance pass retries.

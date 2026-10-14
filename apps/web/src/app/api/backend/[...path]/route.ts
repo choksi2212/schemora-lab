@@ -24,8 +24,10 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
       ['GET', 'HEAD'].includes(request.method) &&
       (path.length === 2 || path.length === 3);
     const validProjectOperation = path[0] === 'v1' && path[1] === 'projects';
+    const validAccountOperation =
+      path[0] === 'v1' && path[1] === 'account' && (path.length === 2 || path.length === 3);
     if (
-      (!validCatalogRead && !validProjectOperation) ||
+      (!validCatalogRead && !validProjectOperation && !validAccountOperation) ||
       path.some((part) => part === '..' || part.includes('/') || part.includes('\\'))
     )
       return NextResponse.json(
@@ -35,7 +37,9 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
     const origin = new URL(process.env.API_ORIGIN ?? 'http://127.0.0.1:4000');
     const target = new URL(`/${path.map(encodeURIComponent).join('/')}`, origin);
     target.search = request.nextUrl.search;
-    const headers = new Headers({ Authorization: `Bearer ${await apiToken(user.sub)}` });
+    const headers = new Headers({
+      Authorization: `Bearer ${await apiToken(user.sub, user.name, user.authTime)}`,
+    });
     for (const name of ['content-type', 'idempotency-key', 'x-request-id']) {
       const value = request.headers.get(name);
       if (value) headers.set(name, value);

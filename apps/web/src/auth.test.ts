@@ -35,16 +35,23 @@ describe('server identity and BFF boundary', () => {
     const request = new NextRequest('http://localhost:3000/', {
       headers: { cookie: `${sessionCookie}=${token}` },
     });
-    expect(await identity(request)).toEqual({ sub: 'github:12345', name: 'maker', mode: 'github' });
+    expect(await identity(request)).toMatchObject({
+      sub: 'github:12345',
+      name: 'maker',
+      mode: 'github',
+      authTime: expect.any(Number),
+    });
   });
   it('makes short-lived API tokens unusable as browser sessions', async () => {
-    const token = await apiToken('github:12345');
+    const token = await apiToken('github:12345', 'maker', Math.floor(Date.now() / 1000));
     const { payload } = await jwtVerify(
       token,
       new TextEncoder().encode(process.env.SESSION_SECRET),
       { issuer: 'schemora-web', audience: 'schemora-api', algorithms: ['HS256'] },
     );
     expect(payload.sub).toBe('github:12345');
+    expect(payload.name).toBe('maker');
+    expect(payload.auth_time).toEqual(expect.any(Number));
     expect(payload.exp! - payload.iat!).toBe(120);
     expect(
       await identity(

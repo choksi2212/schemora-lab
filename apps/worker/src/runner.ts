@@ -408,10 +408,12 @@ export class Worker {
     });
     if (!sources) return;
     for (const source of sources) await this.storage.delete(source.object_key);
+    let closingOwnerId: string | undefined;
     // Fresh intents remain until their deadline: an in-flight put could complete after this purge.
     await this.repository.transaction(async (client) => {
       const project = await this.repository.jobScope(client, job);
       if (!project || project.status !== 'deleting') return;
+      closingOwnerId = project.owner_id;
       await client.query('DELETE FROM reviews WHERE project_id=$1', [job.project_id]);
       // The attempt ledger intentionally retains terminal rows during normal
       // operation, so purge its children before removing their run parents.
@@ -450,6 +452,14 @@ export class Worker {
         [job.project_id],
       );
     });
+    if (closingOwnerId)
+      await this.repository.pool.query(
+        `UPDATE principals SET lifecycle_status='closed',closed_at=coalesce(closed_at,now()),display_name=NULL
+         WHERE id=$1 AND lifecycle_status='closing'
+           AND NOT EXISTS (SELECT 1 FROM projects WHERE owner_id=$1 AND status<>'deleted')
+           AND NOT EXISTS (SELECT 1 FROM upload_intents i JOIN projects p ON p.id=i.project_id WHERE p.owner_id=$1)`,
+        [closingOwnerId],
+      );
   }
   async deleteHardwarePhoto(job: Job) {
     if (job.kind !== 'delete_hardware_photo' || !job.payload.objectKey)

@@ -38,7 +38,12 @@ export function developmentIdentity(request: NextRequest) {
 }
 export async function identity(request: NextRequest) {
   if (developmentIdentity(request))
-    return { sub: 'dev:local', name: 'Local developer', mode: 'development' as const };
+    return {
+      sub: 'dev:local',
+      name: 'Local developer',
+      authTime: Math.floor(Date.now() / 1000),
+      mode: 'development' as const,
+    };
   const token = request.cookies.get(sessionCookie)?.value;
   if (!token) return null;
   try {
@@ -47,8 +52,18 @@ export async function identity(request: NextRequest) {
       issuer: 'schemora-auth',
       audience: 'schemora-browser',
     });
-    if (!payload.sub?.startsWith('github:') || typeof payload.name !== 'string') return null;
-    return { sub: payload.sub, name: payload.name, mode: 'github' as const };
+    if (
+      !payload.sub?.startsWith('github:') ||
+      typeof payload.name !== 'string' ||
+      !Number.isSafeInteger(payload.auth_time)
+    )
+      return null;
+    return {
+      sub: payload.sub,
+      name: payload.name,
+      authTime: payload.auth_time as number,
+      mode: 'github' as const,
+    };
   } catch {
     return null;
   }
@@ -64,7 +79,7 @@ export function sameState(a: string, b: string) {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 export async function signSession(sub: string, name: string) {
-  return new SignJWT({ name })
+  return new SignJWT({ name, auth_time: Math.floor(Date.now() / 1000) })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(sub)
     .setIssuer('schemora-auth')
@@ -73,8 +88,8 @@ export async function signSession(sub: string, name: string) {
     .setExpirationTime('1h')
     .sign(secret('AUTH_SECRET'));
 }
-export async function apiToken(sub: string) {
-  return new SignJWT({})
+export async function apiToken(sub: string, name: string, authTime: number) {
+  return new SignJWT({ name, auth_time: authTime })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(sub)
     .setIssuer('schemora-web')
