@@ -1255,6 +1255,39 @@ export function buildApp(
       .type(contentType)
       .send(bytes);
   });
+  app.delete('/v1/projects/:projectId/hardware-photos/:photoId', async (request) => {
+    const { projectId, photoId } = hardwarePhotoScope.parse(request.params);
+    const body = mutation.parse(request.body);
+    const principal = owner(request);
+    return envelope(
+      request,
+      await repository.mutate(
+        principal,
+        projectId,
+        body.expectedRevision,
+        key(request),
+        'hardware_photo_deleted',
+        { photoId },
+        async (client) => {
+          const removed = await client.query<{ object_key: string }>(
+            'DELETE FROM hardware_photos WHERE project_id=$1 AND id=$2 RETURNING object_key',
+            [projectId, photoId],
+          );
+          const photo = removed.rows[0];
+          if (!photo) throw new RepositoryError('NOT_FOUND', 404);
+          await client.query(
+            "DELETE FROM idempotency WHERE owner_id=$1 AND scope=$2 AND response->'photo'->>'id'=$3",
+            [principal, projectId + ':hardware_photo_uploaded', photoId],
+          );
+          await repository.enqueue(client, projectId, 'delete_hardware_photo', {
+            photoId,
+            objectKey: photo.object_key,
+          });
+          return { deletedPhotoId: photoId };
+        },
+      ),
+    );
+  });
   app.get('/v1/projects/:projectId/firmware-artifacts', async (request) => {
     const { projectId } = scope.parse(request.params);
     return envelope(request, {

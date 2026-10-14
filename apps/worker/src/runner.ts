@@ -106,6 +106,7 @@ export class Worker {
     );
     try {
       if (kind === 'delete_project') await this.deleteProject(job);
+      else if (kind === 'delete_hardware_photo') await this.deleteHardwarePhoto(job);
       else if (kind === 'simulate_run') await this.settleSimulationUnavailable(job);
       else await this.processImport(job);
     } catch (error) {
@@ -370,7 +371,7 @@ export class Worker {
       }
       return (
         await client.query<{ object_key: string }>(
-          'SELECT object_key FROM imports WHERE project_id=$1 UNION SELECT object_key FROM firmware_artifacts WHERE project_id=$1 UNION SELECT object_key FROM hardware_photos WHERE project_id=$1 UNION SELECT object_key FROM firmware_artifact_files WHERE project_id=$1 UNION SELECT object_key FROM firmware_build_artifacts WHERE project_id=$1 UNION SELECT object_key FROM upload_intents WHERE project_id=$1',
+          "SELECT object_key FROM imports WHERE project_id=$1 UNION SELECT object_key FROM firmware_artifacts WHERE project_id=$1 UNION SELECT object_key FROM hardware_photos WHERE project_id=$1 UNION SELECT object_key FROM firmware_artifact_files WHERE project_id=$1 UNION SELECT object_key FROM firmware_build_artifacts WHERE project_id=$1 UNION SELECT object_key FROM upload_intents WHERE project_id=$1 UNION SELECT (payload->>'objectKey')::uuid AS object_key FROM jobs WHERE project_id=$1 AND kind='delete_hardware_photo' AND payload ? 'objectKey'",
           [job.project_id],
         )
       ).rows;
@@ -418,5 +419,14 @@ export class Worker {
         [job.project_id],
       );
     });
+  }
+  async deleteHardwarePhoto(job: Job) {
+    if (job.kind !== 'delete_hardware_photo' || !job.payload.objectKey)
+      throw new Error('INVALID_JOB_PAYLOAD');
+    await this.storage.delete(job.payload.objectKey);
+    await this.repository.pool.query(
+      "UPDATE jobs SET status='completed',payload='{}'::jsonb,lease_until=NULL,lease_token=NULL,error_code=NULL WHERE id=$1 AND lease_token=$2 AND status='running'",
+      [job.id, job.lease_token],
+    );
   }
 }

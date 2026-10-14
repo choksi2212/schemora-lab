@@ -86,8 +86,8 @@ export interface ReviewRow extends QueryResultRow {
 export interface Job extends QueryResultRow {
   id: string;
   project_id: string;
-  kind: 'process_import' | 'delete_project' | 'simulate_run';
-  payload: { importId?: string; runId?: string };
+  kind: 'process_import' | 'delete_project' | 'simulate_run' | 'delete_hardware_photo';
+  payload: { importId?: string; runId?: string; photoId?: string; objectKey?: string };
   lease_token: string;
   attempts: number;
 }
@@ -998,12 +998,6 @@ export class Repository {
       WHERE a.project_id=$1 ORDER BY a.created_at,a.id`,
       [project.id],
     );
-    const hardwarePhotos = await client.query(
-      `SELECT id,project_revision,sha256,byte_length,format,width,height,shot_role,
-        consent_version,status,created_at FROM hardware_photos
-       WHERE project_id=$1 ORDER BY created_at,id`,
-      [project.id],
-    );
     let associatedGraph = graphRef;
     if (associatedGraph === undefined) {
       const graph = await client.query<{
@@ -1024,7 +1018,6 @@ export class Repository {
       project: publicProject(project),
       imports: imports.rows,
       firmwareArtifacts: firmwareArtifacts.rows,
-      hardwarePhotos: hardwarePhotos.rows,
       reviewThroughRevision: project.revision,
       circuitGraph: associatedGraph,
     };

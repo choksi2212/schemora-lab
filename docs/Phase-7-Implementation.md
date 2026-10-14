@@ -22,7 +22,7 @@ Before submission, the interface checks the browser-reported image type and the 
 - JPEG, PNG, and WebP still images only.
 - A 5 MiB limit on both original and normalized image bytes.
 - A 25-megapixel decoded-image limit and single-frame restriction.
-- Private storage, project authorization, revisioned metadata, idempotent writes, integrity checking, and project-deletion cleanup.
+- Private storage, project authorization, revisioned metadata, idempotent writes, integrity checking, per-photo removal, and project-deletion cleanup.
 - Explicit consent version `photo-evidence-v1` recorded with each accepted image.
 - `manual_review` as the only server-side status.
 
@@ -30,7 +30,7 @@ Before submission, the interface checks the browser-reported image type and the 
 
 - Computer-vision, OCR, image-quality scoring, model-provider calls, or candidate ranking.
 - A catalog candidate/confirmation workflow, a confirmed hardware inventory, or automatic workbench changes.
-- Individual photo deletion or an image-retention scheduler.
+- An automatic image-retention scheduler.
 - Any inference that visually similar boards share electrical behavior.
 - Phase 6 simulation execution or Phase 8 diagnosis.
 
@@ -53,9 +53,9 @@ The browser does not receive object keys or storage credentials. The API does no
 
 ## 5. Persistence model
 
-Migration `0015_hardware_photos.sql` creates `hardware_photos` with a composite `(project_id, id)` primary key. Each record contains the project revision, actor, opaque storage key, SHA-256 digest, byte count, normalized format and dimensions, capture role, consent version, fixed status, and creation timestamp. Constraints bound the format, dimensions, role, consent version, digest, and normalized byte length. The project/revision foreign key ties each image to an immutable revision. A database trigger rejects metadata updates; deletion is available to the project purge lifecycle.
+Migration `0015_hardware_photos.sql` creates `hardware_photos` with a composite `(project_id, id)` primary key. Each record contains the project revision, actor, opaque storage key, SHA-256 digest, byte count, normalized format and dimensions, capture role, consent version, fixed status, and creation timestamp. Constraints bound the format, dimensions, role, consent version, digest, and normalized byte length. The project/revision foreign key ties each image to an immutable revision. A database trigger rejects metadata updates; explicit user and project deletion remove the row.
 
-The public projection deliberately omits `actor_id` and `object_key`. Revision snapshots include the evidence metadata needed to describe the revision, never the object key. Project deletion enumerates photo keys, removes photo rows, and purges private object versions through the existing worker lifecycle. Expired upload-intent cleanup treats a photo object as accepted while its metadata row exists.
+The public projection deliberately omits `actor_id` and `object_key`. Photo records are tied to a project revision but are not copied into immutable revision snapshots; this allows a user's removal request to erase the image metadata instead of leaving historical image hashes and capture details behind. Per-photo removal deletes the current evidence row and its upload idempotency response, then writes a durable `delete_hardware_photo` outbox job in the same project-revision transaction. A worker removes the private object and then clears the job payload. Project deletion enumerates both current photo rows and queued photo-deletion objects before purging records and job payloads. Expired upload-intent cleanup treats a photo object as accepted while its metadata row exists.
 
 ## 6. API contract
 
@@ -83,9 +83,15 @@ The API registers an upload intent before storage writes. It commits the photo m
 
 Returns only normalized bytes after owner/project lookup and digest verification. It never redirects to a public bucket or exposes a signed storage URL.
 
+### Delete photo evidence
+
+`DELETE /v1/projects/{projectId}/hardware-photos/{photoId}`
+
+Requires edit access, a UUID `Idempotency-Key`, and a strict `{ expectedRevision }` body. It removes the photo from the current project evidence list and creates a durable private-object deletion job atomically with the new project revision. An identical retry replays the prior response. The worker deletion is safe to retry. Project deletion also captures object keys from pending photo-deletion jobs to avoid orphaned bytes when project cleanup races with photo cleanup.
+
 ## 7. Browser workflow and accessibility
 
-The project workspace presents a dedicated hardware-photo evidence panel. It provides a multiple-file picker, capture-role selection, required consent, per-file upload progress, error and retry feedback, a saved-image list, and authenticated previews. The panel is disabled for users without edit access while existing records remain viewable to project readers. Labels and status messages are programmatically associated with their controls, and live progress/errors use status/alert semantics.
+The project workspace presents a dedicated hardware-photo evidence panel. It provides a multiple-file picker, capture-role selection, required consent, per-file upload progress, error and retry feedback, a saved-image list, authenticated previews, and an explicit per-photo delete action. The panel is disabled for users without edit access while existing records remain viewable to project readers. Labels and status messages are programmatically associated with their controls, and live progress/errors use status/alert semantics.
 
 One selected role currently applies to all files in a submission. Users should upload different capture roles in separate selections. The saved record remains evidence only; it does not auto-add a catalog part or change the circuit graph.
 
@@ -99,6 +105,7 @@ One selected role currently applies to all files in a submission. Users should u
 - Object keys are random UUIDs and never appear in public record projections.
 - Content is returned through an authorization-checking API with no-store and nosniff headers. No direct public object access is introduced.
 - Project deletion enumerates and purges photo objects and records.
+- Users can remove an individual photo; its object removal is durable and retried by the worker. Photos otherwise remain until the user removes them or deletes the project; there is no automatic expiry policy.
 - No vision provider is configured, and the application does not transmit uploaded photos to one.
 
 ## 9. Failure behavior and recovery
@@ -122,7 +129,7 @@ Before enabling recognition, complete all of the following:
 3. Measure per-class precision/recall and false exact-model identification. A broad family guess must not be promoted to an exact board revision.
 4. Add candidate evidence with source images/regions and calibrated uncertainty, clear unknown/unsupported states, and a user confirmation step.
 5. Bind a confirmed inventory entry to an exact catalog release and exact part identifier. Never alter the graph or pin mapping from an unconfirmed prediction.
-6. Add user-visible per-photo deletion and a documented retention/deletion policy before treating consented image storage as production-ready.
+6. Review the explicit retention policy (photos remain until user or project deletion) against launch requirements and add scheduled expiry only if policy requires it.
 7. Exercise authorization boundaries, malformed/hostile image inputs, idempotent retry behavior, project purge, and operational cleanup using the repository's approved verification process.
 
 Phase 7 is complete only when the recognition, candidate comparison, exact-model confirmation, and confirmed inventory behavior meet the completion criterion in `context.md`: a defined supported hardware set can be identified accurately enough for the user to confirm the exact board-specific pin mapping. Upload and storage alone do not meet that criterion.

@@ -98,7 +98,9 @@ for (const signal of ['SIGINT', 'SIGTERM'])
   process.once(signal, () => {
     stopping = true;
   });
-async function loop(kind: 'process_import' | 'delete_project' | 'simulate_run') {
+async function loop(
+  kind: 'process_import' | 'delete_project' | 'simulate_run' | 'delete_hardware_photo',
+) {
   while (!stopping) {
     try {
       if (!(await worker.tick(kind))) await delay(config.WORKER_POLL_MS);
@@ -111,6 +113,7 @@ async function loop(kind: 'process_import' | 'delete_project' | 'simulate_run') 
 await Promise.all([
   ...Array.from({ length: config.WORKER_PROCESS_CONCURRENCY }, () => loop('process_import')),
   ...Array.from({ length: config.WORKER_DELETE_CONCURRENCY }, () => loop('delete_project')),
+  ...Array.from({ length: config.WORKER_DELETE_CONCURRENCY }, () => loop('delete_hardware_photo')),
   ...Array.from({ length: config.WORKER_SIMULATION_CONCURRENCY }, () => loop('simulate_run')),
 ]);
 await repository.pool.end();

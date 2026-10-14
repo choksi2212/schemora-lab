@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
-import { Camera, ImagePlus, LoaderCircle, RefreshCw, Upload } from 'lucide-react';
+import { Camera, ImagePlus, LoaderCircle, RefreshCw, Trash2, Upload } from 'lucide-react';
 import { api, friendlyError, type ProjectDetail } from '@/lib/api';
 
 const PHOTO_LIMIT_BYTES = 5 * 1024 * 1024;
@@ -131,11 +131,13 @@ export function HardwarePhotoEvidence({
   const [consent, setConsent] = useState(false);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [deletingPhotoId, setDeletingPhotoId] = useState('');
   const [activeFile, setActiveFile] = useState('');
   const [uploadPercent, setUploadPercent] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
   const idempotencyKeys = useRef(new WeakMap<File, string>());
+  const deleteIdempotencyKeys = useRef(new Map<string, string>());
 
   const loadPhotos = useCallback(
     async (signal?: AbortSignal) => {
@@ -217,7 +219,7 @@ export function HardwarePhotoEvidence({
       setStatus(`${uploaded} photo${uploaded === 1 ? '' : 's'} saved for manual review.`);
       await loadPhotos();
     } catch (cause) {
-      setError(friendlyError(cause));
+      const message = friendlyError(cause);
       if (uploaded) {
         setStatus(
           `${uploaded} photo${uploaded === 1 ? '' : 's'} saved. The remaining selected photos are still available to retry.`,
@@ -229,11 +231,56 @@ export function HardwarePhotoEvidence({
           // Keep the saved evidence visible even if the revision refresh is temporarily unavailable.
         }
       }
-      void loadPhotos();
+      await loadPhotos();
+      setError(message);
     } finally {
       setActiveFile('');
       setUploadPercent(null);
       setUploading(false);
+    }
+  }
+
+  async function deletePhoto(photo: HardwarePhoto) {
+    if (!editable || uploading || deletingPhotoId) return;
+    setDeletingPhotoId(photo.id);
+    setError('');
+    setStatus('');
+    let idempotencyKey = deleteIdempotencyKeys.current.get(photo.id);
+    if (!idempotencyKey) {
+      idempotencyKey = crypto.randomUUID();
+      deleteIdempotencyKeys.current.set(photo.id, idempotencyKey);
+    }
+    try {
+      const result = await api<{ project: { revision: number }; deletedPhotoId: string }>(
+        `/projects/${projectId}/hardware-photos/${encodeURIComponent(photo.id)}`,
+        {
+          method: 'DELETE',
+          body: { expectedRevision: revision },
+          idempotencyKey,
+        },
+      );
+      deleteIdempotencyKeys.current.delete(photo.id);
+      setPhotos((previous) => previous.filter((item) => item.id !== result.deletedPhotoId));
+      onRevision(Math.max(revision, result.project.revision));
+      try {
+        const latest = await api<ProjectDetail>(`/projects/${projectId}`);
+        onRevision(latest.project.revision);
+      } catch {
+        // Keep the monotonic revision from the delete response if refresh is unavailable.
+      }
+      setStatus('Photo removed. Private image deletion is queued.');
+    } catch (cause) {
+      const message = friendlyError(cause);
+      try {
+        const latest = await api<ProjectDetail>(`/projects/${projectId}`);
+        onRevision(latest.project.revision);
+      } catch {
+        // Preserve the retry key if the deletion result is ambiguous.
+      }
+      await loadPhotos();
+      setError(message);
+    } finally {
+      setDeletingPhotoId('');
     }
   }
 
@@ -389,6 +436,22 @@ export function HardwarePhotoEvidence({
                 <small>
                   Manual review pending · {new Date(photo.createdAt).toLocaleDateString()}
                 </small>
+                {editable && (
+                  <button
+                    className="hardware-photo-delete"
+                    type="button"
+                    onClick={() => void deletePhoto(photo)}
+                    disabled={uploading || Boolean(deletingPhotoId)}
+                    aria-label={`Delete ${shotRoleLabels[photo.shotRole]} photo`}
+                  >
+                    {deletingPhotoId === photo.id ? (
+                      <LoaderCircle className="hardware-photo-spinner" size={14} />
+                    ) : (
+                      <Trash2 size={14} />
+                    )}
+                    {deletingPhotoId === photo.id ? 'Removing…' : 'Delete photo'}
+                  </button>
+                )}
               </div>
             </article>
           ))}

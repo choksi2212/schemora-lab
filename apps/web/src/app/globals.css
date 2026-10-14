@@ -1185,6 +1185,24 @@ textarea {
 .hardware-photo-card-info small {
   color: var(--muted);
 }
+.hardware-photo-delete {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+  color: #8b3c31;
+  font: inherit;
+  cursor: pointer;
+}
+.hardware-photo-delete:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
 .import-state {
   display: flex;
   align-items: center;
