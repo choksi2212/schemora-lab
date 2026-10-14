@@ -24,9 +24,14 @@ export function redactProviderSecrets(conversation: NormalizedConversation): {
     /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/gi,
     /\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|password|passwd|secret|authorization)\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)/gi,
     /\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi,
+    /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+    /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g,
     /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g,
     /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g,
+    /\bglpat-[A-Za-z0-9_-]{20,}\b/g,
+    /\bAIza[A-Za-z0-9_-]{30,}\b/g,
     /\bsk-[A-Za-z0-9_-]{20,}\b/g,
+    /\bhttps?:\/\/[^\s/@:]+:[^\s/@]+@[^\s/]+/gi,
   ];
   let redacted = false;
   const messages = conversation.messages.map((message) => {
