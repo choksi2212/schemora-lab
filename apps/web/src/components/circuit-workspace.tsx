@@ -16,6 +16,7 @@ import {
 import { api, friendlyError, type Project } from '@/lib/api';
 import { CircuitScene } from './circuit-scene';
 import { FirmwareWorkspace } from './firmware-workspace';
+import type { SceneSimulationRun } from './simulation-scene-state';
 import styles from './circuit-workspace.module.css';
 import type { AssemblyPlan } from '@schemora/assembly-plan';
 import {
@@ -179,6 +180,8 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
   const [activeDesignPanel, setActiveDesignPanel] = useState<'wiring' | 'placement'>('wiring');
   const [explanationLevel, setExplanationLevel] = useState<ExplanationLevel>('beginner');
   const [teaching, setTeaching] = useState<TeachingExplanation | null>(null);
+  const [sceneSimulationRun, setSceneSimulationRun] = useState<SceneSimulationRun | null>(null);
+  const [sceneFirmwareDigest, setSceneFirmwareDigest] = useState<string | null>(null);
   const load = useCallback(async () => {
     setError('');
     try {
@@ -209,6 +212,13 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
       setError(friendlyError(cause));
     }
   }, [projectId]);
+  const handleSceneRunChange = useCallback(
+    (run: SceneSimulationRun | null, firmwareDigest: string | null) => {
+      setSceneSimulationRun(run);
+      setSceneFirmwareDigest(firmwareDigest);
+    },
+    [],
+  );
   useEffect(() => {
     void load();
   }, [load]);
@@ -518,7 +528,9 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
       <CircuitScene
         graph={graph}
         onGraphChange={edit}
+        simulationRun={sceneSimulationRun}
         currentGraphDigest={report && isCurrent && !dirty ? report.graphDigest : null}
+        currentFirmwareDigest={sceneFirmwareDigest}
       />
       <FirmwareWorkspace
         project={project}
@@ -538,6 +550,7 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
         )}
         boardPartId={developmentBoards.length === 1 ? developmentBoards[0]!.catalogPartId : null}
         onProjectChange={setProject}
+        onSceneRunChange={handleSceneRunChange}
       />
       <div className={styles.grid}>
         <div className={styles.responsivePanelNav} role="group" aria-label="Circuit design panels">

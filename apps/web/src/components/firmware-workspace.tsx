@@ -14,6 +14,7 @@ import {
   type FirmwareLanguage,
 } from './firmware-workspace-state';
 import styles from './circuit-workspace.module.css';
+import type { SceneSimulationRun } from './simulation-scene-state';
 
 const MonacoEditor = dynamic(() => import('./firmware-monaco-editor'), {
   ssr: false,
@@ -56,8 +57,11 @@ type StoredRun = {
     | 'timed_out'
     | 'cancelled';
   binding: {
+    projectId: string;
     projectRevision: number;
+    graphId: string;
     graphDigest: string;
+    catalogReleaseId: string;
     firmwareArtifactId: string;
     firmwareDigest: string;
   };
@@ -155,6 +159,7 @@ export function FirmwareWorkspace({
   validationReady,
   boardPartId,
   onProjectChange,
+  onSceneRunChange,
 }: {
   project: Project;
   projectId: string;
@@ -164,6 +169,7 @@ export function FirmwareWorkspace({
   validationReady: boolean;
   boardPartId: string | null;
   onProjectChange: (project: Project) => void;
+  onSceneRunChange: (run: SceneSimulationRun | null, firmwareDigest: string | null) => void;
 }) {
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [bindings, setBindings] = useState<Record<string, BoundArtifact>>({});
@@ -195,6 +201,39 @@ export function FirmwareWorkspace({
   const runRequestId = useRef(0);
 
   const currentArtifact = artifacts.find((artifact) => artifact.id === selectedId) ?? null;
+  const currentFirmwareDigest = currentArtifact
+    ? (currentArtifact.bundleDigest ?? currentArtifact.sha256)
+    : null;
+
+  useEffect(() => {
+    const currentRunMatches = Boolean(
+      run &&
+      currentArtifact &&
+      currentArtifact.reviewStatus === 'accepted' &&
+      graphDigest &&
+      !graphDirty &&
+      run.status === 'completed' &&
+      run.binding.projectId === projectId &&
+      run.binding.projectRevision === graphRevision &&
+      run.binding.graphDigest === graphDigest &&
+      run.binding.catalogReleaseId === currentArtifact.catalogReleaseId &&
+      run.binding.firmwareArtifactId === currentArtifact.id &&
+      run.binding.firmwareDigest === currentFirmwareDigest,
+    );
+    onSceneRunChange(
+      currentRunMatches ? (run as SceneSimulationRun) : null,
+      currentArtifact ? currentFirmwareDigest : null,
+    );
+  }, [
+    run,
+    currentArtifact,
+    currentFirmwareDigest,
+    graphDigest,
+    graphRevision,
+    graphDirty,
+    projectId,
+    onSceneRunChange,
+  ]);
   const association = currentArtifact ? (bindings[currentArtifact.id] ?? null) : null;
   const artifactState = useMemo(
     () =>
@@ -413,6 +452,7 @@ export function FirmwareWorkspace({
   }, [projectId, run?.runId, run?.status]);
 
   async function selectArtifact(artifactId: string) {
+    onSceneRunChange(null, null);
     setSource('');
     setContentBusy(Boolean(artifactId));
     setSelectedId(artifactId);
@@ -616,6 +656,7 @@ export function FirmwareWorkspace({
   }
 
   async function selectRun(id: string) {
+    onSceneRunChange(null, currentFirmwareDigest);
     const requestId = ++runRequestId.current;
     try {
       const result = await api<{ run: StoredRun; stopRequestedAt: string | null }>(
