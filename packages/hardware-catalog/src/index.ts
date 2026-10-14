@@ -13,6 +13,8 @@ export type {
   CatalogSource,
 } from './schema.js';
 export { catalogRelease2026_10 } from './release-2026-10.js';
+export { hardwareFamilyContractSchema, parseHardwareFamilyContract } from './family-contract.js';
+export type { HardwareFamilyContract } from './family-contract.js';
 
 import { catalogReleaseSchema } from './schema.js';
 import { catalogRelease2026_10 } from './release-2026-10.js';
