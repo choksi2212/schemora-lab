@@ -1,10 +1,12 @@
 import { getCatalogRelease } from '@schemora/catalog';
 import { describe, expect, it } from 'vitest';
 import {
+  createTransientSwitchOverlay,
   deriveNets,
   compareCircuitDesigns,
   mapReviewedConnectionCandidate,
   validateCircuitGraph,
+  validateTransientSwitchOverlay,
   type CircuitCatalog,
   type CircuitGraph,
 } from '../src/index.js';
@@ -214,6 +216,111 @@ describe('circuit model', () => {
     expect(
       nets.find((net) => net.terminalRefs.some((ref) => ref.catalogTerminalId === 'gnd-j3-1')),
     ).toBeDefined();
+  });
+
+  it('applies ideal switch states as a transient overlay without changing the saved graph', () => {
+    const switchGraph: CircuitGraph = {
+      ...structuredClone(graph),
+      components: [
+        ...structuredClone(graph.components),
+        { id: 'switch_1', catalogPartId: 'resistor.yageo.cfr-25jb-52-220r' },
+      ],
+    };
+    const overlay = {
+      switches: [
+        {
+          componentInstanceId: 'switch_1',
+          contactPairs: [{ terminalAId: 'lead-a', terminalBId: 'lead-b' }],
+        },
+      ],
+      closedSwitchInstanceIds: ['switch_1'],
+    };
+    const before = JSON.stringify(switchGraph);
+    const closedNets = deriveNets(switchGraph, catalog, overlay);
+    const openNets = deriveNets(switchGraph, catalog, {
+      ...overlay,
+      closedSwitchInstanceIds: [],
+    });
+    const isInSameNet = (nets: ReturnType<typeof deriveNets>) => {
+      const netFor = (terminalId: string) =>
+        nets.find((net) =>
+          net.terminalRefs.some(
+            (ref) => ref.componentInstanceId === 'switch_1' && ref.catalogTerminalId === terminalId,
+          ),
+        )?.id;
+      return netFor('lead-a') === netFor('lead-b');
+    };
+
+    expect(isInSameNet(closedNets)).toBe(true);
+    expect(isInSameNet(openNets)).toBe(false);
+    expect(JSON.stringify(switchGraph)).toBe(before);
+    expect(validateTransientSwitchOverlay(switchGraph, catalog, overlay)).toEqual({
+      valid: true,
+      issues: [],
+    });
+  });
+
+  it('rejects transient switch definitions with unknown terminals or undeclared states', () => {
+    const switchGraph: CircuitGraph = {
+      ...structuredClone(graph),
+      components: [
+        ...structuredClone(graph.components),
+        { id: 'switch_1', catalogPartId: 'resistor.yageo.cfr-25jb-52-220r' },
+      ],
+    };
+    const result = validateTransientSwitchOverlay(switchGraph, catalog, {
+      switches: [
+        {
+          componentInstanceId: 'switch_1',
+          contactPairs: [{ terminalAId: 'lead-a', terminalBId: 'missing' }],
+        },
+      ],
+      closedSwitchInstanceIds: ['unlisted_switch'],
+    });
+    expect(result.valid).toBe(false);
+    expect(result.issues.map((issue) => issue.code)).toEqual([
+      'UNKNOWN_SWITCH_TERMINAL',
+      'UNKNOWN_SWITCH_STATE',
+    ]);
+  });
+
+  it('derives B3F intrinsic terminal groups and pressed bridge from catalog metadata', () => {
+    const buttonGraph: CircuitGraph = {
+      ...structuredClone(graph),
+      components: [
+        ...structuredClone(graph.components),
+        { id: 'button_1', catalogPartId: 'button.omron.b3f-1000' },
+      ],
+    };
+    const openOverlay = createTransientSwitchOverlay(buttonGraph, catalog);
+    const closedOverlay = createTransientSwitchOverlay(buttonGraph, catalog, ['button_1']);
+    const isSameNet = (nets: ReturnType<typeof deriveNets>, left: string, right: string) => {
+      const netId = (terminalId: string) =>
+        nets.find((net) =>
+          net.terminalRefs.some(
+            (ref) => ref.componentInstanceId === 'button_1' && ref.catalogTerminalId === terminalId,
+          ),
+        )?.id;
+      return netId(left) === netId(right);
+    };
+    const openNets = deriveNets(buttonGraph, catalog, openOverlay);
+    const closedNets = deriveNets(buttonGraph, catalog, closedOverlay);
+
+    expect(openOverlay.switches).toEqual([
+      {
+        componentInstanceId: 'button_1',
+        alwaysConnectedPairs: [
+          { terminalAId: 'pin-2', terminalBId: 'pin-4' },
+          { terminalAId: 'pin-1', terminalBId: 'pin-3' },
+        ],
+        contactPairs: [{ terminalAId: 'pin-2', terminalBId: 'pin-1' }],
+      },
+    ]);
+    expect(isSameNet(openNets, 'pin-2', 'pin-4')).toBe(true);
+    expect(isSameNet(openNets, 'pin-1', 'pin-3')).toBe(true);
+    expect(isSameNet(openNets, 'pin-2', 'pin-1')).toBe(false);
+    expect(isSameNet(closedNets, 'pin-2', 'pin-1')).toBe(true);
+    expect(validateTransientSwitchOverlay(buttonGraph, catalog, openOverlay).valid).toBe(true);
   });
 
   it('validates a bounded, versioned visual layout independently of connectivity', () => {

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { catalogReleaseSchema, type CatalogPart, type CatalogRelease } from '@schemora/catalog';
 import {
   circuitGraphSchema,
+  createTransientSwitchOverlay,
   deriveNets,
   validateCircuitGraph,
   type CircuitGraph,
@@ -10,8 +11,8 @@ import {
 import { validationReportSchema, type ValidationFinding, type ValidationReport } from './schema.js';
 
 const RULESET_ID = 'schemora-phase2-basic-circuit' as const;
-const RULESET_VERSION = '1.0.0' as const;
-const VALIDATOR_VERSION = '0.1.0' as const;
+const RULESET_VERSION = '1.1.0' as const;
+const VALIDATOR_VERSION = '0.2.0' as const;
 
 export type ValidateCircuitInput = {
   graph: unknown;
@@ -189,9 +190,8 @@ export function validateCircuit(input: ValidateCircuitInput): ValidationReport {
     );
 
     const parts = new Map(catalog.parts.map((part) => [part.id, part]));
-    const nets = deriveNets(graph, {
-      release: catalog,
-    });
+    const switchOverlay = createTransientSwitchOverlay(graph, { release: catalog });
+    const nets = deriveNets(graph, { release: catalog }, switchOverlay);
     const netForTerminal = new Map<string, string>();
     const terminalsByNet = new Map<
       string,
@@ -215,6 +215,21 @@ export function validateCircuit(input: ValidateCircuitInput): ValidationReport {
         list.push({ ref, role: role ?? 'unknown', availableForScenario });
         terminalsByNet.set(net.id, list);
       }
+    }
+
+    for (const instance of graph.components) {
+      const part = parts.get(instance.catalogPartId);
+      if (!part || part.category !== 'pushbutton') continue;
+      findings.push(
+        makeFinding(
+          'PUSHBUTTON_ELECTRICAL_SCOPE',
+          'unknown',
+          'warning',
+          'The catalog models this normally-open pushbutton as ideal internal contacts. Validation uses its released state; it does not establish GPIO logic levels, pull-up/pull-down requirements, switching limits, contact bounce, debounce, or firmware response.',
+          [instance.id],
+          part.sourceIds,
+        ),
+      );
     }
 
     for (const net of nets) {
@@ -396,7 +411,7 @@ export function validateCircuit(input: ValidateCircuitInput): ValidationReport {
       'ELECTRICAL_SCOPE_LIMIT',
       'unknown',
       'warning',
-      'This ruleset checks only explicitly modeled connectivity, selected shorts, LED polarity, and a series resistor. GPIO current budgets, analog behavior, thermal margins, transient conditions, component authenticity, wiring quality, and unmodeled parts remain unverified.',
+      'This ruleset checks modeled connectivity, selected shorts, LED polarity, series resistance, and catalog-defined pushbutton contact topology. It does not establish GPIO current budgets or logic levels, analog behavior, thermal margins, contact bounce, physical fit, component authenticity, wiring quality, or unmodeled behavior.',
       [graph.id],
       catalog.sources.map((source) => source.id),
     ),

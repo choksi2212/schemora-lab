@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { getCatalogRelease } from '@schemora/catalog';
+import { getCatalogRelease, getCatalogReleaseById, getCatalogReleases } from '@schemora/catalog';
 
 /** JSON canonicalization used for stable release identity across processes. */
 function canonicalJson(value: unknown): string {
@@ -13,8 +13,24 @@ function canonicalJson(value: unknown): string {
 }
 
 /** Return a validated copy of the bundled release and its content digest. */
-export function currentCatalogRelease() {
-  const release = getCatalogRelease();
+export function catalogReleaseById(releaseId: string) {
+  const release = getCatalogReleaseById(releaseId);
+  if (!release) return null;
   const sha256 = createHash('sha256').update(canonicalJson(release), 'utf8').digest('hex');
   return { release, sha256 };
+}
+
+export function currentCatalogRelease() {
+  return catalogReleaseById(getCatalogRelease().releaseId)!;
+}
+
+export function catalogReleaseIndex() {
+  return getCatalogReleases().map((release) => ({
+    schemaVersion: release.schemaVersion,
+    releaseId: release.releaseId,
+    publishedOn: release.publishedOn,
+    status: release.status,
+    sha256: createHash('sha256').update(canonicalJson(release), 'utf8').digest('hex'),
+    parts: release.parts,
+  }));
 }

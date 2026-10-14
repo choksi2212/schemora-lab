@@ -106,6 +106,9 @@ importers:
       '@schemora/catalog':
         specifier: workspace:*
         version: link:../../packages/hardware-catalog
+      '@schemora/circuit-model':
+        specifier: workspace:*
+        version: link:../../packages/circuit-model
       '@schemora/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts

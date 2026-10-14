@@ -125,3 +125,63 @@ export type HardwareFamilyContract = z.infer<typeof hardwareFamilyContractSchema
 export function parseHardwareFamilyContract(input: unknown): HardwareFamilyContract {
   return hardwareFamilyContractSchema.parse(input);
 }
+
+/**
+ * Statically registered capabilities shipped by this application version.
+ * Catalog facts alone never activate executable providers from remote data.
+ */
+export const hardwareFamilyContracts: readonly HardwareFamilyContract[] = [
+  parseHardwareFamilyContract({
+    schemaVersion: 1,
+    familyId: 'momentary-tactile-switch',
+    contractVersion: '1.0.0',
+    category: 'pushbutton',
+    supportedPartIds: ['button.omron.b3f-1000'],
+    terminals: {
+      source: 'catalog',
+      supportsInternalConnectivity: true,
+      stateModel: 'discrete-interaction',
+    },
+    physicalModel: {
+      representation: 'catalog-facts-only',
+      coordinateFrame: 'none',
+      sourceRequired: true,
+      assemblyClearanceModel: 'none',
+    },
+    electricalModel: {
+      modelId: 'ideal-momentary-contact-connectivity',
+      domain: 'connectivity',
+      stateInputs: ['released', 'pressed'],
+      explicitUnknowns: [
+        'contact resistance',
+        'contact bounce and debounce',
+        'GPIO voltage levels and pull-up or pull-down requirements',
+        'switching current and voltage limits',
+      ],
+    },
+    assembly: {
+      actionIds: ['identify-component', 'connect-labeled-terminals'],
+      dependencies: 'terminal-placement',
+      instructionsSource: 'catalog-limitations',
+    },
+    simulation: {
+      mode: 'circuit-level',
+      adapterId: 'schemora.ideal-switch-net/v1',
+      observableIds: ['terminal-net-membership'],
+      inputStimulusIds: ['press', 'release'],
+      limitations: [
+        'Only ideal terminal connectivity changes; this does not execute firmware or predict voltage, current, timing, bounce, or mechanical fit.',
+      ],
+    },
+    validation: {
+      ruleIds: ['PUSHBUTTON_ELECTRICAL_SCOPE', 'GRAPH_INTEGRITY'],
+      version: '1.0.0',
+      fixturesRequired: true,
+    },
+    owner: 'Schemora hardware catalog maintainers',
+  }),
+];
+
+export function getHardwareFamilyContract(partId: string): HardwareFamilyContract | undefined {
+  return hardwareFamilyContracts.find((contract) => contract.supportedPartIds.includes(partId));
+}

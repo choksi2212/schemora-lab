@@ -137,7 +137,15 @@ const terminalSchema = z
   .object({
     id: z.string().min(1),
     label: z.string().min(1),
-    electricalRole: z.enum(['gpio', 'ground', 'power', 'anode', 'cathode', 'passive']),
+    electricalRole: z.enum([
+      'gpio',
+      'ground',
+      'power',
+      'anode',
+      'cathode',
+      'passive',
+      'switch-contact',
+    ]),
   })
   .strict();
 
@@ -145,7 +153,7 @@ const basePart = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9._-]+$/),
   manufacturer: z.string().min(1),
   model: z.string().min(1),
-  category: z.enum(['development-board', 'led', 'resistor']),
+  category: z.enum(['development-board', 'led', 'resistor', 'pushbutton']),
   identityScope: z.literal('exact-configuration'),
   summary: z.string().min(1),
   terminals: z.array(terminalSchema).min(2),
@@ -240,16 +248,77 @@ export const resistorSchema = basePart
   })
   .strict();
 
+export const pushbuttonSchema = basePart
+  .extend({
+    category: z.literal('pushbutton'),
+    model: z.literal('B3F-1000'),
+    package: z.literal('6 × 6 mm through-hole tactile switch'),
+    contactType: z.literal('normally-open momentary'),
+    terminalGroups: z.tuple([
+      z
+        .object({
+          id: z.string().min(1),
+          terminalIds: z.tuple([z.string().min(1), z.string().min(1)]),
+        })
+        .strict(),
+      z
+        .object({
+          id: z.string().min(1),
+          terminalIds: z.tuple([z.string().min(1), z.string().min(1)]),
+        })
+        .strict(),
+    ]),
+    pressedConnection: z.tuple([z.string().min(1), z.string().min(1)]),
+    operatingForceNewton: quantity,
+    heightMm: quantity,
+  })
+  .strict()
+  .superRefine((button, ctx) => {
+    const terminalIds = button.terminals.map((terminal) => terminal.id);
+    const groupedTerminalIds = button.terminalGroups.flatMap((group) => group.terminalIds);
+    if (
+      new Set(groupedTerminalIds).size !== groupedTerminalIds.length ||
+      groupedTerminalIds.length !== terminalIds.length ||
+      groupedTerminalIds.some((id) => !terminalIds.includes(id))
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['terminalGroups'],
+        message: 'Terminal groups must partition every physical switch terminal exactly once.',
+      });
+    }
+    const groupIds = button.terminalGroups.map((group) => group.id);
+    if (new Set(groupIds).size !== groupIds.length) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['terminalGroups'],
+        message: 'Terminal group IDs must be unique.',
+      });
+    }
+    if (
+      button.pressedConnection[0] === button.pressedConnection[1] ||
+      !groupIds.includes(button.pressedConnection[0]) ||
+      !groupIds.includes(button.pressedConnection[1])
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['pressedConnection'],
+        message: 'Pressing must connect the two distinct terminal groups.',
+      });
+    }
+  });
+
 export const hardwarePartSchema = z.discriminatedUnion('category', [
   boardSchema,
   ledSchema,
   resistorSchema,
+  pushbuttonSchema,
 ]);
 
 export const catalogReleaseSchema = z
   .object({
     schemaVersion: z.literal(1),
-    releaseId: z.string().regex(/^schemora-hw-[0-9]{4}\.[0-9]{2}$/),
+    releaseId: z.string().regex(/^schemora-hw-[0-9]{4}\.[0-9]{2}(?:\.\d+)?$/),
     publishedOn: z.string().date(),
     status: z.literal('curated'),
     sources: z.array(sourceReferenceSchema).min(1),
@@ -267,6 +336,13 @@ export const catalogReleaseSchema = z
         code: 'custom',
         path: ['breadboardTopologies'],
         message: 'Topology IDs must be unique within a release.',
+      });
+    }
+    if (partIds.size !== release.parts.length) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['parts'],
+        message: 'Part IDs must be unique within a release.',
       });
     }
     for (const [i, topology] of release.breadboardTopologies.entries()) {
@@ -311,6 +387,20 @@ export const catalogReleaseSchema = z
               path: ['parts', i, 'pins'],
               message: `Pin references unknown terminal ${pin.terminalId}.`,
             });
+          }
+        }
+      }
+      if (part.category === 'pushbutton') {
+        for (const group of part.terminalGroups) {
+          for (const terminalId of group.terminalIds) {
+            const terminal = part.terminals.find((item) => item.id === terminalId);
+            if (terminal?.electricalRole !== 'switch-contact') {
+              ctx.addIssue({
+                code: 'custom',
+                path: ['parts', i, 'terminalGroups'],
+                message: `Pushbutton contact group references a non-contact terminal ${terminalId}.`,
+              });
+            }
           }
         }
       }

@@ -19,6 +19,12 @@ import { FirmwareWorkspace } from './firmware-workspace';
 import type { SceneSimulationRun } from './simulation-scene-state';
 import styles from './circuit-workspace.module.css';
 import type { AssemblyPlan } from '@schemora/assembly-plan';
+import type { CatalogRelease } from '@schemora/catalog';
+import {
+  createTransientSwitchOverlay,
+  deriveNets,
+  type TransientSwitchOverlay,
+} from '@schemora/circuit-model';
 import {
   explainAssemblyStep,
   type ExplanationLevel,
@@ -35,22 +41,10 @@ type Part = {
   sourceIds: string[];
   summary: string;
   limitations: string[];
-  [key: string]: unknown;
+  anodeTerminalId?: string;
+  cathodeTerminalId?: string;
 };
-type Catalog = {
-  release: {
-    releaseId: string;
-    sources: { id: string; title: string; url: string }[];
-    parts: Part[];
-    breadboardTopologies: {
-      id: string;
-      version: number;
-      name: string;
-      terminalStripGroups: { holes: string[] }[];
-      railGroups: { id: string; connectivityVariants: { id: string }[] }[];
-    }[];
-  };
-};
+type Catalog = { release: CatalogRelease };
 type Endpoint =
   | { kind: 'terminal'; terminal: { componentInstanceId: string; catalogTerminalId: string } }
   | { kind: 'hole'; hole: { breadboardInstanceId: string; holeId: string } };
@@ -310,6 +304,8 @@ function starterGraph(projectId: string, revision: number, catalog: Catalog['rel
 export function CircuitWorkspace({ projectId }: { projectId: string }) {
   const [project, setProject] = useState<Project | null>(null);
   const [catalog, setCatalog] = useState<Catalog['release'] | null>(null);
+  const [latestCatalog, setLatestCatalog] = useState<Catalog['release'] | null>(null);
+  const [catalogReleases, setCatalogReleases] = useState<Record<string, Catalog['release']>>({});
   const [graph, setGraph] = useState<Graph | null>(null);
   const [graphDigest, setGraphDigest] = useState<string | null>(null);
   const [graphSnapshotId, setGraphSnapshotId] = useState<string | null>(null);
@@ -334,6 +330,7 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
   const [teaching, setTeaching] = useState<TeachingExplanation | null>(null);
   const [sceneSimulationRun, setSceneSimulationRun] = useState<SceneSimulationRun | null>(null);
   const [sceneFirmwareDigest, setSceneFirmwareDigest] = useState<string | null>(null);
+  const [closedSwitchInstanceIds, setClosedSwitchInstanceIds] = useState<string[]>([]);
   const refreshDesignDiff = useCallback(async () => {
     try {
       setDesignDiff(await api<DesignDiffResponse>(`/projects/${projectId}/circuit/design-diff`));
@@ -346,7 +343,7 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
     try {
       const [p, catalogIndex, saved, validation, comparison] = await Promise.all([
         api<{ project: Project }>(`/projects/${projectId}`),
-        api<{ releases: { releaseId: string }[] }>('/catalog'),
+        api<{ currentReleaseId?: string; releases: { releaseId: string }[] }>('/catalog'),
         api<GraphResponse>(`/projects/${projectId}/circuit`),
         api<ValidationResponse>(`/projects/${projectId}/circuit/validation`).catch(
           (): ValidationResponse => ({ report: null }),
@@ -358,9 +355,21 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
       const releaseId =
         saved.graphSnapshot?.graph.catalogReleaseId ?? catalogIndex.releases[0]?.releaseId;
       if (!releaseId) throw new Error('The hardware catalog has no published release yet.');
-      const c = await api<Catalog>(`/catalog/${encodeURIComponent(releaseId)}`);
+      const currentReleaseId = catalogIndex.currentReleaseId ?? catalogIndex.releases[0]?.releaseId;
+      if (!currentReleaseId) throw new Error('The hardware catalog has no current release.');
+      const [c, latest] = await Promise.all([
+        api<Catalog>(`/catalog/${encodeURIComponent(releaseId)}`),
+        releaseId === currentReleaseId
+          ? api<Catalog>(`/catalog/${encodeURIComponent(releaseId)}`)
+          : api<Catalog>(`/catalog/${encodeURIComponent(currentReleaseId)}`),
+      ]);
       setProject(p.project);
       setCatalog(c.release);
+      setLatestCatalog(latest.release);
+      setCatalogReleases({
+        [c.release.releaseId]: c.release,
+        [latest.release.releaseId]: latest.release,
+      });
       setGraph(
         saved.graphSnapshot?.graph ?? starterGraph(projectId, p.project.revision, c.release),
       );
@@ -401,6 +410,34 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
       ) ?? [],
     [graph, partMap],
   );
+  const switchOverlay = useMemo<TransientSwitchOverlay | null>(() => {
+    if (!catalog || !graph) return null;
+    if (
+      !graph.components.some(
+        (component) => partMap.get(component.catalogPartId)?.category === 'pushbutton',
+      )
+    )
+      return null;
+    try {
+      return createTransientSwitchOverlay(
+        graph,
+        { release: catalog },
+        closedSwitchInstanceIds.filter((id) =>
+          graph.components.some((component) => component.id === id),
+        ),
+      );
+    } catch {
+      return null;
+    }
+  }, [catalog, closedSwitchInstanceIds, graph, partMap]);
+  const circuitLevelNets = useMemo(() => {
+    if (!catalog || !graph || !switchOverlay) return null;
+    try {
+      return deriveNets(graph, { release: catalog }, switchOverlay);
+    } catch {
+      return null;
+    }
+  }, [catalog, graph, switchOverlay]);
   function edit(next: Graph) {
     if (graph) setUndoStack((history) => [...history.slice(-49), graph]);
     setRedoStack([]);
@@ -414,6 +451,8 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
   function undo() {
     if (!graph || undoStack.length === 0) return;
     const previous = undoStack.at(-1)!;
+    const nextCatalog = catalogReleases[previous.catalogReleaseId];
+    if (nextCatalog) setCatalog(nextCatalog);
     setUndoStack((history) => history.slice(0, -1));
     setRedoStack((history) => [...history, graph]);
     setGraph(previous);
@@ -426,6 +465,8 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
   function redo() {
     if (!graph || redoStack.length === 0) return;
     const next = redoStack.at(-1)!;
+    const nextCatalog = catalogReleases[next.catalogReleaseId];
+    if (nextCatalog) setCatalog(nextCatalog);
     setRedoStack((history) => history.slice(0, -1));
     setUndoStack((history) => [...history, graph]);
     setGraph(next);
@@ -749,13 +790,175 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
           {catalog.parts.find((p) => p.id === starterParts.board)?.limitations[0]}
         </p>
       </section>
+      {latestCatalog && latestCatalog.releaseId !== catalog.releaseId && (
+        <section className="panel" aria-labelledby="catalog-upgrade-title">
+          <h2 id="catalog-upgrade-title">New hardware release available</h2>
+          <p className="fine-text">
+            This graph is pinned to {catalog.releaseId}. Upgrade it to {latestCatalog.releaseId} to
+            use newly published parts. Existing part IDs remain available in this release; the
+            upgrade changes the graph's catalog identity and must be saved and validated.
+          </p>
+          <button
+            type="button"
+            className="button secondary"
+            disabled={
+              busy ||
+              !graph.components.every((component) =>
+                latestCatalog.parts.some((part) => part.id === component.catalogPartId),
+              )
+            }
+            onClick={() => {
+              setCatalog(latestCatalog);
+              edit({ ...graph, catalogReleaseId: latestCatalog.releaseId });
+            }}
+          >
+            Upgrade design catalog
+          </button>
+        </section>
+      )}
       <CircuitScene
+        key={graph.components.map((component) => component.id).join(':')}
         graph={graph}
         onGraphChange={edit}
+        buttonStates={Object.fromEntries(
+          closedSwitchInstanceIds.map((instanceId) => [instanceId, true]),
+        )}
         simulationRun={sceneSimulationRun}
         currentGraphDigest={report && isCurrent && !dirty ? report.graphDigest : null}
         currentFirmwareDigest={sceneFirmwareDigest}
       />
+      {catalog.parts.some((part) => part.category === 'pushbutton') && (
+        <section className="panel" aria-labelledby="switch-model-title">
+          <div className="panel-heading">
+            <h2 id="switch-model-title">Momentary switch · circuit-level interaction</h2>
+            <span className="status-chip">Ideal contact model</span>
+          </div>
+          <p className="fine-text">
+            Add an exact OMRON B3F-1000, connect its labeled terminals, then hold Press to close its
+            two contact groups. This changes only the transient modeled net view; it does not edit
+            the saved graph or run firmware. Contact bounce, resistance, electrical levels, and
+            physical fit are not simulated.
+          </p>
+          <div className="workspace-actions">
+            <button
+              type="button"
+              className="button secondary"
+              disabled={
+                busy ||
+                graph.components.some((part) => part.catalogPartId === 'button.omron.b3f-1000')
+              }
+              onClick={() => {
+                const buttonPart = catalog.parts.find(
+                  (part) => part.id === 'button.omron.b3f-1000',
+                );
+                if (!buttonPart) return;
+                edit({
+                  ...graph,
+                  components: [
+                    ...graph.components,
+                    { id: `button-${uid()}`, catalogPartId: buttonPart.id },
+                  ],
+                });
+              }}
+            >
+              Add B3F-1000
+            </button>
+            {graph.components
+              .filter((component) => component.catalogPartId === 'button.omron.b3f-1000')
+              .map((component) => {
+                const pressed = closedSwitchInstanceIds.includes(component.id);
+                return (
+                  <span key={component.id} className="workspace-actions">
+                    <button
+                      type="button"
+                      className={pressed ? 'button primary' : 'button secondary'}
+                      aria-pressed={pressed}
+                      onPointerDown={() =>
+                        setClosedSwitchInstanceIds((current) =>
+                          current.includes(component.id) ? current : [...current, component.id],
+                        )
+                      }
+                      onPointerUp={() =>
+                        setClosedSwitchInstanceIds((current) =>
+                          current.filter((id) => id !== component.id),
+                        )
+                      }
+                      onPointerLeave={() =>
+                        setClosedSwitchInstanceIds((current) =>
+                          current.filter((id) => id !== component.id),
+                        )
+                      }
+                      onPointerCancel={() =>
+                        setClosedSwitchInstanceIds((current) =>
+                          current.filter((id) => id !== component.id),
+                        )
+                      }
+                      onKeyDown={(event) => {
+                        if (event.key === ' ' || event.key === 'Enter')
+                          setClosedSwitchInstanceIds((current) =>
+                            current.includes(component.id) ? current : [...current, component.id],
+                          );
+                      }}
+                      onKeyUp={() =>
+                        setClosedSwitchInstanceIds((current) =>
+                          current.filter((id) => id !== component.id),
+                        )
+                      }
+                      onBlur={() =>
+                        setClosedSwitchInstanceIds((current) =>
+                          current.filter((id) => id !== component.id),
+                        )
+                      }
+                    >
+                      {pressed ? 'Pressed · release' : 'Press and hold'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button secondary"
+                      disabled={busy}
+                      onClick={() => {
+                        edit({
+                          ...graph,
+                          components: graph.components.filter((item) => item.id !== component.id),
+                          wires: graph.wires.filter((wire) => {
+                            const touches = (endpoint: Endpoint) =>
+                              endpoint.kind === 'terminal' &&
+                              endpoint.terminal.componentInstanceId === component.id;
+                            return !touches(wire.source) && !touches(wire.target);
+                          }),
+                          terminalPlacements: graph.terminalPlacements.filter(
+                            (placement) => placement.terminal.componentInstanceId !== component.id,
+                          ),
+                          visualLayout: graph.visualLayout
+                            ? {
+                                ...graph.visualLayout,
+                                componentPlacements: graph.visualLayout.componentPlacements.filter(
+                                  (placement) => placement.componentInstanceId !== component.id,
+                                ),
+                              }
+                            : undefined,
+                        });
+                        setClosedSwitchInstanceIds((current) =>
+                          current.filter((id) => id !== component.id),
+                        );
+                      }}
+                    >
+                      Remove switch
+                    </button>
+                    <span className="fine-text" role="status">
+                      {pressed
+                        ? 'The modeled contact bridge is closed.'
+                        : 'The modeled contact bridge is open.'}{' '}
+                      {circuitLevelNets
+                        ? `${circuitLevelNets.length} modeled nets in this transient state.`
+                        : 'Net state unavailable while the circuit contains invalid edits.'}
+                    </span>
+                  </span>
+                );
+              })}
+          </div>
+        </section>
+      )}
       <FirmwareWorkspace
         project={project}
         projectId={projectId}

@@ -13,7 +13,7 @@ import {
   type VisionImage,
   type VisionProviderConfig,
 } from '@schemora/intelligence';
-import { getCatalogRelease } from '@schemora/catalog';
+import { getCatalogReleaseById } from '@schemora/catalog';
 import {
   Repository,
   requestDigest,
@@ -511,9 +511,8 @@ export class Worker {
         );
         return;
       }
-      const catalog = getCatalogRelease();
-      if (catalog.releaseId !== request.catalog_release_id)
-        throw new Error('VISION_RECOGNITION_FAILED');
+      const catalog = getCatalogReleaseById(request.catalog_release_id);
+      if (!catalog) throw new Error('VISION_RECOGNITION_FAILED');
       const proposal = await this.recognizeHardware(
         { bytes: imageBytes, format: photo.format, role: photo.shot_role },
         catalog.parts.map((part) => ({

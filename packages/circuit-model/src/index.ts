@@ -21,8 +21,20 @@ export type {
   VisualLayout,
 } from './schema.js';
 export type { BreadboardTopology } from '@schemora/catalog';
-export { deriveNets, validateCircuitGraph } from './graph.js';
-export type { CircuitCatalog, CircuitGraphIssue, CircuitValidationResult } from './graph.js';
+export {
+  createTransientSwitchOverlay,
+  deriveNets,
+  validateCircuitGraph,
+  validateTransientSwitchOverlay,
+} from './graph.js';
+export type {
+  CircuitCatalog,
+  CircuitGraphIssue,
+  CircuitValidationResult,
+  TransientSwitchContact,
+  TransientSwitchDefinition,
+  TransientSwitchOverlay,
+} from './graph.js';
 export { deriveStableId } from './stable-id.js';
 export { compareCircuitDesigns } from './design-diff.js';
 export type { CircuitDesignDifference } from './design-diff.js';

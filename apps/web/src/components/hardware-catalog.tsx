@@ -17,7 +17,7 @@ type Part = {
   id: string;
   manufacturer: string;
   model: string;
-  category: 'development-board' | 'led' | 'resistor';
+  category: 'development-board' | 'led' | 'resistor' | 'pushbutton';
   identityScope: string;
   summary: string;
   sourceIds: string[];
@@ -49,6 +49,11 @@ type Part = {
   ratedPowerWatt?: number;
   construction?: string;
   mounting?: string;
+  contactType?: string;
+  terminalGroups?: { id: string; terminalIds: [string, string] }[];
+  pressedConnection?: [string, string];
+  operatingForceNewton?: number;
+  heightMm?: number;
 };
 type Topology = {
   id: string;
@@ -305,7 +310,9 @@ function categoryName(category: Part['category']) {
     ? 'Development board'
     : category === 'led'
       ? 'LED'
-      : 'Resistor';
+      : category === 'resistor'
+        ? 'Resistor'
+        : 'Pushbutton';
 }
 
 function PartDetail({
@@ -398,6 +405,32 @@ function PartDetail({
             <Fact
               label="Construction"
               value={`${part.construction ?? 'Unknown'} · ${part.mounting ?? 'Unknown'}`}
+            />
+          </>
+        )}
+        {part.category === 'pushbutton' && (
+          <>
+            <Fact label="Package" value={part.package ?? 'Not recorded'} />
+            <Fact label="Contact type" value={part.contactType ?? 'Not recorded'} />
+            <Fact
+              label="Operating force / height"
+              value={
+                part.operatingForceNewton && part.heightMm
+                  ? `${part.operatingForceNewton} N · ${part.heightMm} mm`
+                  : 'Not recorded'
+              }
+            />
+            <Fact
+              label="Internal contact groups"
+              value={
+                part.terminalGroups
+                  ?.map((group) => `${group.id}: ${group.terminalIds.join(' / ')}`)
+                  .join(' · ') ?? 'Not recorded'
+              }
+            />
+            <Fact
+              label="Press connection"
+              value={part.pressedConnection?.join(' ↔ ') ?? 'Not recorded'}
             />
           </>
         )}

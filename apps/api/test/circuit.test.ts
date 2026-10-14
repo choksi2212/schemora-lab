@@ -16,7 +16,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('project circuit API', () => {
   const userB = 'circuit-test:' + randomUUID();
   const config = readConfig({
     NODE_ENV: 'test',
-    DATABASE_URL: process.env.TEST_DATABASE_URL!,
+    // Vitest evaluates a skipped suite's declaration callback too. Keep the
+    // configuration schema valid when the database-backed suite is skipped.
+    DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgresql://localhost/schemora_test',
     SESSION_SECRET: secret,
   });
   const repository = new Repository(config.DATABASE_URL);

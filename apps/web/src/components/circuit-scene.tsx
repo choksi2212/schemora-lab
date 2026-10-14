@@ -56,6 +56,7 @@ type Props = {
   simulationRun?: SceneSimulationRun | null;
   currentGraphDigest?: string | null;
   currentFirmwareDigest?: string | null;
+  buttonStates?: Readonly<Record<string, boolean>>;
   className?: string;
   title?: string;
 };
@@ -66,6 +67,7 @@ const partNames: Record<string, string> = {
   'board.espressif.esp32-devkitc-v4.wroom-32e.male': 'ESP32-DevKitC V4 · WROOM-32E',
   'resistor.yageo.cfr-25jb-52-220r': 'YAGEO 220 Ω resistor',
   'led.kingbright.wp7113id': 'Kingbright WP7113ID red LED',
+  'button.omron.b3f-1000': 'OMRON B3F-1000 tactile switch',
 };
 const terminalNames: Record<string, Record<string, string>> = {
   'board.espressif.esp32-devkitc-v4.wroom-32e.male': {
@@ -76,6 +78,12 @@ const terminalNames: Record<string, Record<string, string>> = {
   },
   'resistor.yageo.cfr-25jb-52-220r': { 'lead-a': 'Lead A', 'lead-b': 'Lead B' },
   'led.kingbright.wp7113id': { anode: 'Anode', cathode: 'Cathode' },
+  'button.omron.b3f-1000': {
+    'pin-1': 'Pin 1 · upper-right, bottom view',
+    'pin-2': 'Pin 2 · upper-left, bottom view',
+    'pin-3': 'Pin 3 · lower-right, bottom view',
+    'pin-4': 'Pin 4 · lower-left, bottom view',
+  },
 };
 
 function poseFor(
@@ -90,6 +98,7 @@ function poseFor(
   if (catalogPartId.includes('esp32-devkitc')) return { x: 0, z: 0.63, rotationY: 0 };
   if (catalogPartId.includes('resistor')) return { x: 0, z: 0.12, rotationY: 0 };
   if (catalogPartId.includes('led')) return { x: 0.95, z: -0.05, rotationY: 0 };
+  if (catalogPartId === 'button.omron.b3f-1000') return { x: 1.25, z: 0.55, rotationY: 0 };
   return { x: 0, z: 0, rotationY: 0 };
 }
 
@@ -157,6 +166,15 @@ function terminalPoint(partId: string, terminalId: string): Vec3 | null {
   if (partId.includes('resistor'))
     return terminalId === 'lead-a' ? [-0.48, 0.36, 0] : [0.48, 0.36, 0];
   if (partId.includes('led')) return terminalId === 'anode' ? [-0.07, 0.39, 0] : [0.07, 0.39, 0];
+  if (partId === 'button.omron.b3f-1000') {
+    const anchors: Record<string, Vec3> = {
+      'pin-1': [0.12, 0.36, -0.12],
+      'pin-2': [-0.12, 0.36, -0.12],
+      'pin-3': [0.12, 0.36, 0.12],
+      'pin-4': [-0.12, 0.36, 0.12],
+    };
+    return anchors[terminalId] ?? null;
+  }
   return null;
 }
 
@@ -303,6 +321,7 @@ function InstancedHoles({
 function BoardScene({
   graph,
   ledStates,
+  buttonStates,
   selected,
   onSelect,
   onRemoveWire,
@@ -310,6 +329,7 @@ function BoardScene({
 }: {
   graph: CircuitWorkbenchGraph;
   ledStates: Readonly<Record<string, 'on' | 'off'>>;
+  buttonStates: Readonly<Record<string, boolean>>;
   selected: TerminalRef | null;
   onSelect: (terminal: TerminalRef) => void;
   onRemoveWire: (wireId: string) => void;
@@ -451,6 +471,36 @@ function BoardScene({
                 </mesh>
               ))}
             </group>
+          ) : component.catalogPartId === 'button.omron.b3f-1000' ? (
+            <group
+              key={component.id}
+              position={[pose.x, 0.32, pose.z]}
+              rotation={rotation}
+              onClick={selectPart}
+            >
+              <mesh castShadow>
+                <boxGeometry args={[0.3, 0.12, 0.3]} />
+                <meshStandardMaterial color="#dedbd4" roughness={0.62} />
+              </mesh>
+              <mesh position={[0, buttonStates[component.id] ? 0.14 : 0.19, 0]} castShadow>
+                <cylinderGeometry args={[0.09, 0.1, 0.14, 16]} />
+                <meshStandardMaterial
+                  color={buttonStates[component.id] ? '#bd3544' : '#d44a58'}
+                  roughness={0.35}
+                />
+              </mesh>
+              {[
+                [-0.12, -0.12],
+                [0.12, -0.12],
+                [-0.12, 0.12],
+                [0.12, 0.12],
+              ].map(([x, z], index) => (
+                <mesh key={index} position={[x, -0.12, z]} rotation={[Math.PI / 2, 0, 0]}>
+                  <cylinderGeometry args={[0.018, 0.018, 0.16, 8]} />
+                  <meshStandardMaterial color="#bdc4c8" metalness={0.68} />
+                </mesh>
+              ))}
+            </group>
           ) : null;
         })}
         {graph.components.flatMap((component) => {
@@ -547,6 +597,7 @@ export function CircuitScene({
   simulationRun = null,
   currentGraphDigest = null,
   currentFirmwareDigest = null,
+  buttonStates = {},
   className,
   title = 'Circuit workbench 3D view',
 }: Props) {
@@ -858,6 +909,7 @@ export function CircuitScene({
                 <BoardScene
                   graph={graph}
                   ledStates={ledStates}
+                  buttonStates={buttonStates}
                   selected={selected}
                   onSelect={selectTerminal}
                   onRemoveWire={removeWire}

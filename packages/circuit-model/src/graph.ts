@@ -1,4 +1,9 @@
-import type { BreadboardTopology, CatalogPart, CatalogRelease } from '@schemora/catalog';
+import {
+  getHardwareFamilyContract,
+  type BreadboardTopology,
+  type CatalogPart,
+  type CatalogRelease,
+} from '@schemora/catalog';
 import {
   circuitGraphSchema,
   type CircuitGraph,
@@ -11,6 +16,19 @@ import { deriveStableId } from './stable-id.js';
 export type CircuitCatalog = { release: CatalogRelease };
 export type CircuitGraphIssue = { path: string; code: string; message: string };
 export type CircuitValidationResult = { valid: boolean; issues: CircuitGraphIssue[] };
+export type TransientSwitchContact = { terminalAId: string; terminalBId: string };
+export type TransientSwitchDefinition = {
+  componentInstanceId: string;
+  /** Intrinsic continuity present in both switch states (for multi-terminal packages). */
+  alwaysConnectedPairs?: TransientSwitchContact[];
+  /** Contacts that become connected only while the instance is closed. */
+  contactPairs: TransientSwitchContact[];
+};
+/** Ephemeral ideal-contact states. This overlay is never persisted into CircuitGraph. */
+export type TransientSwitchOverlay = {
+  switches: TransientSwitchDefinition[];
+  closedSwitchInstanceIds: string[];
+};
 
 type ResolvedGroup = {
   id: string;
@@ -292,13 +310,155 @@ export function validateCircuitGraph(
   return { valid: issues.length === 0, issues };
 }
 
-export function deriveNets(input: unknown, catalog: CircuitCatalog): Net[] {
+export function validateTransientSwitchOverlay(
+  input: unknown,
+  catalog: CircuitCatalog,
+  overlay: TransientSwitchOverlay,
+): CircuitValidationResult {
+  const graphResult = validateCircuitGraph(input, catalog);
+  if (!graphResult.valid) return graphResult;
+  const graph = circuitGraphSchema.parse(input);
+  const parts = partMap(catalog.release);
+  const instances = new Map(graph.components.map((component) => [component.id, component]));
+  const issues: CircuitGraphIssue[] = [];
+  const issue = (path: string, code: string, message: string) =>
+    issues.push({ path, code, message });
+  const switchByInstance = new Map<string, TransientSwitchDefinition>();
+  for (const [index, definition] of overlay.switches.entries()) {
+    const path = `switches.${index}`;
+    if (switchByInstance.has(definition.componentInstanceId)) {
+      issue(
+        `${path}.componentInstanceId`,
+        'DUPLICATE_SWITCH_INSTANCE',
+        'A switch instance may be defined only once.',
+      );
+      continue;
+    }
+    switchByInstance.set(definition.componentInstanceId, definition);
+    const component = instances.get(definition.componentInstanceId);
+    const part = component ? parts.get(component.catalogPartId) : undefined;
+    if (!component || !part) {
+      issue(
+        `${path}.componentInstanceId`,
+        'UNKNOWN_SWITCH_INSTANCE',
+        'Switch definition must refer to a component in the graph.',
+      );
+      continue;
+    }
+    if (definition.contactPairs.length === 0)
+      issue(
+        `${path}.contactPairs`,
+        'EMPTY_SWITCH_CONTACTS',
+        'A switch definition requires at least one contact pair.',
+      );
+    for (const [kind, pairs] of [
+      ['alwaysConnectedPairs', definition.alwaysConnectedPairs ?? []],
+      ['contactPairs', definition.contactPairs],
+    ] as const) {
+      for (const [pairIndex, pair] of pairs.entries()) {
+        const pairPath = `${path}.${kind}.${pairIndex}`;
+        if (pair.terminalAId === pair.terminalBId)
+          issue(
+            pairPath,
+            'SWITCH_CONTACT_SELF_LOOP',
+            'A contact pair must connect two distinct terminals.',
+          );
+        for (const terminalId of [pair.terminalAId, pair.terminalBId]) {
+          if (!part.terminals.some((terminal) => terminal.id === terminalId))
+            issue(
+              pairPath,
+              'UNKNOWN_SWITCH_TERMINAL',
+              `Terminal ${terminalId} is not part of the switch component.`,
+            );
+        }
+      }
+    }
+  }
+  if (new Set(overlay.closedSwitchInstanceIds).size !== overlay.closedSwitchInstanceIds.length)
+    issue(
+      'closedSwitchInstanceIds',
+      'DUPLICATE_SWITCH_STATE',
+      'Each switch state may be specified only once.',
+    );
+  for (const [index, instanceId] of overlay.closedSwitchInstanceIds.entries()) {
+    if (!switchByInstance.has(instanceId))
+      issue(
+        `closedSwitchInstanceIds.${index}`,
+        'UNKNOWN_SWITCH_STATE',
+        'Closed state must refer to a declared switch instance.',
+      );
+  }
+  return { valid: issues.length === 0, issues };
+}
+
+/** Build an ideal-contact overlay directly from curated pushbutton catalog topology. */
+export function createTransientSwitchOverlay(
+  input: unknown,
+  catalog: CircuitCatalog,
+  closedSwitchInstanceIds: string[] = [],
+): TransientSwitchOverlay {
+  const graphResult = validateCircuitGraph(input, catalog);
+  if (!graphResult.valid)
+    throw new Error(
+      `Cannot create switch overlay from invalid graph: ${graphResult.issues[0]?.message ?? 'invalid graph'}`,
+    );
+  const graph = circuitGraphSchema.parse(input);
+  const parts = partMap(catalog.release);
+  const switches: TransientSwitchDefinition[] = [];
+  for (const component of graph.components) {
+    const part = parts.get(component.catalogPartId);
+    if (part?.category !== 'pushbutton') continue;
+    const contract = getHardwareFamilyContract(part.id);
+    if (
+      !contract ||
+      contract.terminals.stateModel !== 'discrete-interaction' ||
+      contract.simulation.mode !== 'circuit-level'
+    )
+      throw new Error(
+        `Pushbutton family ${part.id} has no compatible registered provider contract.`,
+      );
+    const groupById = new Map(part.terminalGroups.map((group) => [group.id, group]));
+    const alwaysConnectedPairs = part.terminalGroups.flatMap((group) => {
+      const [first, ...rest] = group.terminalIds;
+      return rest.map((terminalBId) => ({ terminalAId: first, terminalBId }));
+    });
+    const [leftId, rightId] = part.pressedConnection;
+    const leftTerminal = groupById.get(leftId)?.terminalIds[0];
+    const rightTerminal = groupById.get(rightId)?.terminalIds[0];
+    if (!leftTerminal || !rightTerminal)
+      throw new Error(`Pushbutton ${part.id} has an invalid pressed connection in the catalog.`);
+    switches.push({
+      componentInstanceId: component.id,
+      alwaysConnectedPairs,
+      contactPairs: [{ terminalAId: leftTerminal, terminalBId: rightTerminal }],
+    });
+  }
+  const overlay = { switches, closedSwitchInstanceIds };
+  const result = validateTransientSwitchOverlay(graph, catalog, overlay);
+  if (!result.valid)
+    throw new Error(
+      `Cannot create switch overlay: ${result.issues[0]?.message ?? 'invalid overlay'}`,
+    );
+  return overlay;
+}
+
+export function deriveNets(
+  input: unknown,
+  catalog: CircuitCatalog,
+  overlay?: TransientSwitchOverlay,
+): Net[] {
   const result = validateCircuitGraph(input, catalog);
   if (!result.valid)
     throw new Error(
       `Cannot derive nets from invalid graph: ${result.issues[0]?.message ?? 'invalid graph'}`,
     );
   const graph = circuitGraphSchema.parse(input);
+  const switchOverlay = overlay ?? createTransientSwitchOverlay(graph, catalog);
+  const overlayResult = validateTransientSwitchOverlay(graph, catalog, switchOverlay);
+  if (!overlayResult.valid)
+    throw new Error(
+      `Cannot derive nets from invalid switch overlay: ${overlayResult.issues[0]?.message ?? 'invalid overlay'}`,
+    );
   const union = new UnionFind();
   const terminalRefs = new Map<string, TerminalRef>();
   const holeRefs = new Map<string, HoleRef>();
@@ -331,6 +491,20 @@ export function deriveNets(input: unknown, catalog: CircuitCatalog): Net[] {
     if (wire.target.kind === 'terminal')
       terminalRefs.set(terminalKey(wire.target.terminal), wire.target.terminal);
     else holeRefs.set(holeKey(wire.target.hole), wire.target.hole);
+  }
+
+  const closed = new Set(switchOverlay.closedSwitchInstanceIds);
+  for (const definition of switchOverlay.switches) {
+    const pairs = [
+      ...(definition.alwaysConnectedPairs ?? []),
+      ...(closed.has(definition.componentInstanceId) ? definition.contactPairs : []),
+    ];
+    for (const pair of pairs) {
+      union.join(
+        `t\u0000${terminalKey({ componentInstanceId: definition.componentInstanceId, catalogTerminalId: pair.terminalAId })}`,
+        `t\u0000${terminalKey({ componentInstanceId: definition.componentInstanceId, catalogTerminalId: pair.terminalBId })}`,
+      );
+    }
   }
 
   const topologyById = topologyMap(catalog.release);

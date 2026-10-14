@@ -31,8 +31,8 @@ export const validationReportSchema = z
     catalogReleaseId: z.string().min(1),
     catalogDigest: z.string().regex(/^[a-f0-9]{64}$/),
     rulesetId: z.literal('schemora-phase2-basic-circuit'),
-    rulesetVersion: z.literal('1.0.0'),
-    validatorVersion: z.literal('0.1.0'),
+    rulesetVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+    validatorVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
     status: validationStatusSchema,
     findings: z.array(findingSchema).max(10_000),
   })

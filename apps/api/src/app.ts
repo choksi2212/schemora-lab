@@ -8,7 +8,7 @@ import {
   hardwareRecognitionProposalSchema,
 } from '@schemora/contracts';
 import { canonicalDigest } from '@schemora/assembly-plan';
-import { currentCatalogRelease } from './catalog.js';
+import { catalogReleaseById, catalogReleaseIndex, currentCatalogRelease } from './catalog.js';
 import {
   Repository,
   RepositoryError,
@@ -38,7 +38,7 @@ import {
   compareCircuitDesigns,
   validateCircuitGraph,
 } from '@schemora/circuit-model';
-import { getCatalogRelease } from '@schemora/catalog';
+import { getCatalogRelease, getCatalogReleaseById } from '@schemora/catalog';
 import { validateCircuit, validationReportSchema } from '@schemora/validation';
 import { AssemblyPlanBlockedError, generateAssemblyPlan } from '@schemora/assembly-plan';
 import type { ApiConfig } from './config.js';
@@ -433,12 +433,10 @@ export function buildApp(
     if (!current.graphSnapshot)
       throw new RepositoryError('FIRMWARE_GRAPH_REQUIRED', 409, current.project.revision);
     const graphResult = circuitGraphSchema.safeParse(current.graphSnapshot.graph);
-    const catalog = getCatalogRelease();
-    if (
-      !graphResult.success ||
-      graphResult.data.catalogReleaseId !== catalog.releaseId ||
-      !validateCircuitGraph(graphResult.data, { release: catalog }).valid
-    )
+    if (!graphResult.success)
+      throw new RepositoryError('FIRMWARE_TARGET_UNSUPPORTED', 409, current.project.revision);
+    const catalog = getCatalogReleaseById(graphResult.data.catalogReleaseId);
+    if (!catalog || !validateCircuitGraph(graphResult.data, { release: catalog }).valid)
       throw new RepositoryError('FIRMWARE_TARGET_UNSUPPORTED', 409, current.project.revision);
     const boards = graphResult.data.components.filter((component) =>
       catalog.parts.some(
@@ -446,6 +444,18 @@ export function buildApp(
       ),
     );
     if (boards.length !== 1)
+      throw new RepositoryError('FIRMWARE_TARGET_UNSUPPORTED', 409, current.project.revision);
+    if (
+      graphResult.data.components.length !== 3 ||
+      graphResult.data.components.some(
+        (component) =>
+          ![
+            'led.kingbright.wp7113id',
+            'resistor.yageo.cfr-25jb-52-220r',
+            boards[0]!.catalogPartId,
+          ].includes(component.catalogPartId),
+      )
+    )
       throw new RepositoryError('FIRMWARE_TARGET_UNSUPPORTED', 409, current.project.revision);
     return { boardPartId: boards[0]!.catalogPartId, catalogReleaseId: catalog.releaseId };
   };
@@ -477,7 +487,9 @@ export function buildApp(
               FIRMWARE_GRAPH_REQUIRED:
                 'Save a circuit containing one supported development board before adding firmware.',
               FIRMWARE_TARGET_UNSUPPORTED:
-                'The saved circuit must resolve to exactly one development board in the current catalog.',
+                'Firmware runs are limited to the supported ESP32 GPIO19, 220 Ω resistor, and LED reference circuit. The pushbutton model is circuit-level only.',
+              CATALOG_RELEASE_UNSUPPORTED:
+                'This design references an unavailable catalog release. Refresh and choose a supported release.',
               VISION_RECOGNITION_DISABLED:
                 'Remote hardware recognition is not enabled in this workspace.',
               VISION_CONSENT_NOTICE_STALE:
@@ -521,18 +533,10 @@ export function buildApp(
     }
   });
   app.get('/v1/catalog', async (request) => {
-    const { release, sha256 } = currentCatalogRelease();
+    const releases = catalogReleaseIndex();
     return envelope(request, {
-      releases: [
-        {
-          schemaVersion: release.schemaVersion,
-          releaseId: release.releaseId,
-          publishedOn: release.publishedOn,
-          status: release.status,
-          sha256,
-          parts: release.parts,
-        },
-      ],
+      currentReleaseId: getCatalogRelease().releaseId,
+      releases: [...releases].reverse(),
     });
   });
   app.get('/v1/catalog/:releaseId', async (request) => {
@@ -545,8 +549,9 @@ export function buildApp(
           .regex(/^[a-zA-Z0-9._-]+$/),
       })
       .parse(request.params);
-    const { release, sha256 } = currentCatalogRelease();
-    if (release.releaseId !== releaseId) throw new RepositoryError('NOT_FOUND', 404);
+    const resolved = catalogReleaseById(releaseId);
+    if (!resolved) throw new RepositoryError('NOT_FOUND', 404);
+    const { release, sha256 } = resolved;
     return envelope(request, {
       schemaVersion: release.schemaVersion,
       releaseId: release.releaseId,
@@ -604,7 +609,8 @@ export function buildApp(
       body.graph.projectRevision !== body.expectedRevision + 1
     )
       throw new RepositoryError('INVALID_GRAPH', 400);
-    const release = getCatalogRelease();
+    const release = getCatalogReleaseById(body.graph.catalogReleaseId);
+    if (!release) throw new RepositoryError('CATALOG_RELEASE_UNSUPPORTED', 400);
     if (body.graph.catalogReleaseId !== release.releaseId)
       throw new RepositoryError('INVALID_GRAPH', 400);
     const structure = validateCircuitGraph(body.graph, { release });
@@ -631,9 +637,9 @@ export function buildApp(
     if (latest.project.revision !== body.expectedRevision)
       throw new RepositoryError('REVISION_CONFLICT', 409, latest.project.revision);
     const graph = circuitGraphSchema.parse(latest.graphSnapshot.graph);
-    if (graph.projectId !== projectId || graph.catalogReleaseId !== getCatalogRelease().releaseId)
-      throw new RepositoryError('INVALID_GRAPH', 400);
-    const report = validateCircuit({ graph, catalog: getCatalogRelease() });
+    const catalog = getCatalogReleaseById(graph.catalogReleaseId);
+    if (graph.projectId !== projectId || !catalog) throw new RepositoryError('INVALID_GRAPH', 400);
+    const report = validateCircuit({ graph, catalog });
     return envelope(
       request,
       await repository.saveValidationReport(principal, projectId, body.expectedRevision, {
@@ -766,11 +772,14 @@ export function buildApp(
     const validation = await repository.latestValidationReport(principal, projectId);
     if (!validation.report || !validation.current)
       throw new RepositoryError('VALIDATION_REQUIRED', 409, latest.project.revision);
+    const graph = circuitGraphSchema.parse(latest.graphSnapshot.graph);
+    const catalog = getCatalogReleaseById(graph.catalogReleaseId);
+    if (!catalog) throw new RepositoryError('CATALOG_RELEASE_UNSUPPORTED', 409);
     let plan;
     try {
       plan = generateAssemblyPlan({
-        graph: latest.graphSnapshot.graph,
-        catalog: getCatalogRelease(),
+        graph,
+        catalog,
         report: validation.report.report,
         reportIsCurrent: validation.current,
         validationReportId: validation.report.id,
@@ -833,10 +842,11 @@ export function buildApp(
       )
         throw new RepositoryError('GRAPH_SNAPSHOT_CORRUPT', 500);
       const graph = circuitGraphSchema.parse(graphSnapshot.graph);
-      const { release: catalog, sha256: catalogDigest } = currentCatalogRelease();
+      const resolvedCatalog = catalogReleaseById(graph.catalogReleaseId);
+      if (!resolvedCatalog) throw new RepositoryError('CATALOG_RELEASE_UNSUPPORTED', 409);
+      const { release: catalog, sha256: catalogDigest } = resolvedCatalog;
       if (
         graph.projectId !== projectId ||
-        graph.catalogReleaseId !== catalog.releaseId ||
         graph.projectRevision !== graphSnapshot.project_revision ||
         canonicalDigest(graph) !== graphSnapshot.graph_digest ||
         !validateCircuitGraph(graph, { release: catalog }).valid
@@ -1561,9 +1571,8 @@ export function buildApp(
       const body = hardwareRecognitionConfirmationSchema.parse(request.body);
       const principal = owner(request);
       const inventoryId = randomUUID();
-      const catalog = currentCatalogRelease().release;
-      if (body.catalogReleaseId !== catalog.releaseId)
-        throw new RepositoryError('CATALOG_RELEASE_UNSUPPORTED', 409);
+      const catalog = getCatalogReleaseById(body.catalogReleaseId);
+      if (!catalog) throw new RepositoryError('CATALOG_RELEASE_UNSUPPORTED', 409);
       const part = catalog.parts.find((candidate) => candidate.id === body.catalogPartId);
       if (!part) throw new RepositoryError('CATALOG_PART_UNSUPPORTED', 400);
       return envelope(
@@ -1679,7 +1688,6 @@ export function buildApp(
   app.put('/v1/projects/:projectId/hardware-inventory/:itemId/link', async (request) => {
     const { projectId, itemId } = hardwareInventoryScope.parse(request.params);
     const body = hardwareInventoryLinkSchema.parse(request.body);
-    const release = getCatalogRelease();
     return envelope(
       request,
       await repository.mutate(
@@ -1718,11 +1726,10 @@ export function buildApp(
           );
           const item = itemResult.rows[0];
           if (!item) throw new RepositoryError('NOT_FOUND', 404);
-          if (
-            item.catalog_release_id !== release.releaseId ||
-            graph.catalogReleaseId !== item.catalog_release_id
-          )
+          if (graph.catalogReleaseId !== item.catalog_release_id)
             throw new RepositoryError('CATALOG_RELEASE_MISMATCH', 409);
+          const release = getCatalogReleaseById(item.catalog_release_id);
+          if (!release) throw new RepositoryError('CATALOG_RELEASE_UNSUPPORTED', 409);
           const component = graph.components.find(
             (candidate) => candidate.id === body.componentInstanceId,
           );
@@ -1873,7 +1880,8 @@ export function buildApp(
     const body = firmwareBundleUploadSchema.parse(request.body);
     const principal = owner(request);
     const targetIdentity = await firmwareTarget(principal, projectId);
-    const catalog = getCatalogRelease();
+    const catalog = getCatalogReleaseById(targetIdentity.catalogReleaseId);
+    if (!catalog) throw new RepositoryError('CATALOG_RELEASE_UNSUPPORTED', 409);
     const board = catalog.parts.find((part) => part.id === targetIdentity.boardPartId);
     if (
       body.buildSystem !== 'esp-idf' ||

@@ -1,15 +1,21 @@
 # `@schemora/catalog`
 
-This package publishes typed, versioned hardware facts. Its first release is intentionally small: one ESP32 development board configuration, one red LED, one resistor, and one exact breadboard topology. Records describe source-backed component identity and facts. They do not assert that an arbitrary assembly is electrically safe or physically compatible.
+This package publishes typed, versioned hardware facts. Its initial release is intentionally small: one ESP32 development board configuration, one red LED, one resistor, and one exact breadboard topology. Release `schemora-hw-2026.10.1` adds one source-reviewed OMRON B3F-1000 switch record. Records describe source-backed component identity and facts. They do not assert that an arbitrary assembly is electrically safe or physically compatible.
 
 ## Public interface
 
 ```ts
-import { catalogRelease2026_10, getCatalogRelease } from '@schemora/catalog';
+import {
+  catalogRelease2026_10,
+  catalogRelease2026_10_1,
+  getCatalogRelease,
+  getCatalogReleaseById,
+  getCatalogReleases,
+} from '@schemora/catalog';
 import type { BreadboardTopology, CatalogPart, CatalogRelease } from '@schemora/catalog';
 ```
 
-`catalogReleaseSchema` and the per-kind Zod schemas are exported for validation at API, persistence, and worker boundaries. Consumers should pin a `releaseId` with stored designs and validation reports. A published release is immutable: corrections or additions produce a new release and preserve the old record for historical projects. `BreadboardTopology` exposes an exact board topology, its own `id` and `version`, source references, and explicit hole connectivity sets.
+`catalogReleaseSchema` and the per-kind Zod schemas are exported for validation at API, persistence, and worker boundaries. `getCatalogRelease()` resolves the latest release; `getCatalogReleaseById(releaseId)` resolves a pinned historical release; `getCatalogReleases()` returns all curated snapshots in order. Consumers should pin a `releaseId` with stored designs and validation reports. A published release is immutable: corrections or additions produce a new release and preserve the old record for historical projects. `BreadboardTopology` exposes an exact board topology, its own `id` and `version`, source references, and explicit hole connectivity sets.
 
 `CatalogPart.id` is stable across releases for the same physical model and configuration. The release ID identifies the exact facts snapshot. Board pins map a semantic terminal ID to a manufacturer-documented header, one-based position, printed label, and functions. LED polarity uses `anodeTerminalId` and `cathodeTerminalId`; the catalog schema rejects references that do not resolve to distinct terminals with matching electrical roles. Part terminals are semantic identities; they are not 3D mesh anchors or breadboard holes.
 
@@ -27,6 +33,14 @@ The release includes **BusBoard BB400 / BB400T** topology: 60 five-hole terminal
 
 This catalog supports identity and fact lookup only. It does not include derived current limits, GPIO derating policy, circuit validation rules, a complete LED I-V curve, exact board SKU ordering identity, or a physical safety certification. Those require separately researched rules and reviewed circuit fixtures.
 
+## Immutable update: `schemora-hw-2026.10.1`
+
+The update preserves all `2026.10` records and adds exactly one `pushbutton` record, `button.omron.b3f-1000`, for the OMRON B3F-1000. Its bottom-view terminal labels are `pin-1` upper-right, `pin-2` upper-left, `pin-3` lower-right, and `pin-4` lower-left. Its top-view internal connection drawing groups `pin-2` with `pin-4` on the left side and `pin-1` with `pin-3` on the right side; pressing bridges the two groups. The part record also identifies the 6 × 6 mm flat-plunger type without a ground terminal, 4.3 mm listed height, and 0.98 N listed operating force.
+
+This is a catalog fact record, not full component support. The catalog does not implement interactive switching, debounce, electrical ratings for an assembled circuit, 2D/3D geometry, placement anchors, assembly clearance, or firmware simulation for this button. The datasheet's stated maximum bounce time is not a debounce algorithm or a timing model in Schemora.
+
+The release is derived by adding records to the initial snapshot; it does not mutate `catalogRelease2026_10`. `getCatalogReleaseById` returns `undefined` for unknown IDs so callers cannot silently substitute the latest release for a pinned project.
+
 ## Sources
 
 All records below were checked against manufacturer sources on 2026-10-13:
@@ -36,6 +50,7 @@ All records below were checked against manufacturer sources on 2026-10-13:
 - Kingbright, [WP7113ID specification](https://www.kingbrightusa.com/images/catalog/SPEC/WP7113ID.pdf), revision V.14A (2026-01-08): package, color, voltage test point, absolute ratings.
 - YAGEO, [CFR-25JB-52-220R part specification](https://www.yageogroup.com/component-documentation/download/specsheet/CFR-25JB-52-220R) and [CFR Series specification](https://yageogroup.com/content/datasheet/asset/file/YAGEO-CFR_DATASHEET), revision V.3 (2024-04-03): exact resistance/tolerance and CFR-25 series construction/rating.
 - BusBoard Prototype Systems, [BB400 product page](https://busboard.com/BB400T), [BB400 Rev 7 datasheet](https://www.busboard.com/documents/datasheets/BPS-DAT-%28BB400%29-Datasheet.pdf), and manufacturer [Rev 6 internal connection detail](https://www.busboard.com/documents/datasheets/BPS-DAT-%28BB400%29-Datasheet.pdf): orderable BB400/BB400T variants, hole count, row/rail topology, dimensions, pitch, and rating.
+- OMRON, [B3F Tactile Switch datasheet](https://omronfs.omron.com/en_US/ecb/products/pdf/en-b3f.pdf), pages 1 and 4: exact B3F-1000 model listing, nominal height and operating force, bottom-view terminal numbering, and top-view internal contact arrangement.
 
 ## Checks
 

@@ -353,6 +353,11 @@ export function generateAssemblyPlan(input: {
   const warnings = report.findings
     .filter((finding) => finding.status === 'unknown' || finding.severity === 'warning')
     .map((finding) => finding.message);
+  if (report.findings.some((finding) => finding.status === 'unknown')) {
+    warnings.push(
+      'One or more modeled behaviors remain unverified; review the unknown validation findings before assembly.',
+    );
+  }
   const withoutDigest = {
     schemaVersion: 1 as const,
     plannerId: ASSEMBLY_PLANNER_ID,

@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { SignJWT } from 'jose';
-import { getCatalogRelease } from '@schemora/catalog';
+import { getCatalogRelease, getCatalogReleaseById } from '@schemora/catalog';
 import { Repository } from '@schemora/persistence';
 import { FileStorage } from '@schemora/storage';
 import { readConfig } from '../src/config.js';
@@ -75,7 +75,9 @@ describe('immutable hardware catalog API', () => {
     const catalogData = catalog.json().data;
     const detailData = detail.json().data;
     const expectedDigest = createHash('sha256').update(canonicalJson(release)).digest('hex');
-    expect(catalogData.releases).toHaveLength(1);
+    expect(catalogData.currentReleaseId).toBe(release.releaseId);
+    expect(catalogData.releases).toHaveLength(2);
+    expect(catalogData.releases[0].releaseId).toBe(release.releaseId);
     expect(catalogData.releases[0]).toMatchObject({
       schemaVersion: release.schemaVersion,
       releaseId: release.releaseId,
@@ -93,6 +95,16 @@ describe('immutable hardware catalog API', () => {
       release,
     });
     expect(repeated.json().data).toEqual(detailData);
+
+    const historicalRelease = getCatalogReleaseById('schemora-hw-2026.10')!;
+    const historical = await app.inject({
+      method: 'GET',
+      url: `/v1/catalog/${historicalRelease.releaseId}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(historical.statusCode).toBe(200);
+    expect(historical.json().data.release).toEqual(historicalRelease);
+    expect(historicalRelease.parts.some((part) => part.category === 'pushbutton')).toBe(false);
   });
 
   it('returns 404 for an unknown release without consulting user data', async () => {

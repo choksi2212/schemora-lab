@@ -1,10 +1,10 @@
-import { getCatalogRelease } from '@schemora/catalog';
+import { getCatalogRelease, getCatalogReleaseById } from '@schemora/catalog';
 import { compareCircuitDesigns, type CircuitGraph } from '@schemora/circuit-model';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { validateCircuit } from '../src/validate.js';
 
-const catalog = getCatalogRelease();
+const catalog = getCatalogReleaseById('schemora-hw-2026.10')!;
 const topology = catalog.breadboardTopologies[0]!;
 const board = 'board.espressif.esp32-devkitc-v4.wroom-32e.male';
 const led = 'led.kingbright.wp7113id';
@@ -116,6 +116,23 @@ describe('Phase 2 deterministic validation', () => {
     ]);
     for (const fixture of phase8Fixtures.fixtures)
       expect(fixture.affectedEntityIds).toEqual([...fixture.affectedEntityIds].sort());
+  });
+
+  it('reports the ideal button model as unknown electrical behavior on the new release', () => {
+    const latest = getCatalogRelease();
+    const graph = circuit();
+    graph.catalogReleaseId = latest.releaseId;
+    graph.components.push({ id: 'button_1', catalogPartId: 'button.omron.b3f-1000' });
+    const report = validateCircuit({ graph, catalog: latest });
+    expect(report.rulesetVersion).toBe('1.1.0');
+    expect(report.validatorVersion).toBe('0.2.0');
+    expect(
+      report.findings.find((finding) => finding.ruleId === 'PUSHBUTTON_ELECTRICAL_SCOPE'),
+    ).toMatchObject({
+      status: 'unknown',
+      severity: 'warning',
+      affectedEntityIds: ['button_1'],
+    });
   });
 
   it('repeats with stable report and finding identifiers', () => {
