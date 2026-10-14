@@ -327,4 +327,142 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('project circuit API', () => {
       expect.objectContaining({ kind: 'component-added', identity: 'board_intent_test' }),
     ]);
   });
+
+  it('duplicates only the saved circuit and serves owner-authorized project exports', async () => {
+    const created = await request('POST', '/v1/projects', { title: 'Source project' }, tokenA);
+    const source = created.body.data;
+    const release = getCatalogRelease();
+    const graph = {
+      schemaVersion: 1 as const,
+      id: 'duplicate-source-graph',
+      projectId: source.id,
+      projectRevision: source.revision + 1,
+      catalogReleaseId: release.releaseId,
+      components: [
+        {
+          id: 'duplicate-board',
+          catalogPartId: 'board.espressif.esp32-devkitc-v4.wroom-32e.male',
+        },
+      ],
+      breadboards: [],
+      terminalPlacements: [],
+      wires: [],
+    };
+    const saved = await request(
+      'PUT',
+      `/v1/projects/${source.id}/circuit`,
+      { expectedRevision: source.revision, graph },
+      tokenA,
+    );
+    expect(saved.status).toBe(200);
+
+    const duplicateKey = randomUUID();
+    const duplicated = await request(
+      'POST',
+      `/v1/projects/${source.id}/duplicate`,
+      {},
+      tokenA,
+      duplicateKey,
+    );
+    expect(duplicated.status).toBe(201);
+    expect(duplicated.body.data.copied).toEqual({
+      circuitGraph: true,
+      imports: false,
+      firmware: false,
+      hardwarePhotos: false,
+      simulationRuns: false,
+    });
+    const copy = duplicated.body.data.project;
+    expect(copy.id).not.toBe(source.id);
+    expect(copy.title).toBe('Copy of Source project');
+    expect(copy.revision).toBe(2);
+    const duplicateReplay = await request(
+      'POST',
+      `/v1/projects/${source.id}/duplicate`,
+      {},
+      tokenA,
+      duplicateKey,
+    );
+    expect(duplicateReplay.body.data.project.id).toBe(copy.id);
+
+    const copyGraph = await request('GET', `/v1/projects/${copy.id}/circuit`, undefined, tokenA);
+    expect(copyGraph.body.data.graphSnapshot.graph).toMatchObject({
+      projectId: copy.id,
+      projectRevision: 2,
+      components: graph.components,
+    });
+    expect(copyGraph.body.data.graphSnapshot.graph.id).not.toBe(graph.id);
+
+    const denied = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${copy.id}/export?format=checklist`,
+      headers: { authorization: `Bearer ${tokenB}` },
+    });
+    expect(denied.statusCode).toBe(404);
+    const exportResponse = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${copy.id}/export?format=checklist`,
+      headers: { authorization: `Bearer ${tokenA}` },
+    });
+    expect(exportResponse.statusCode).toBe(200);
+    expect(exportResponse.headers['content-disposition']).toContain('wiring-checklist.md');
+    expect(exportResponse.body).toContain('## Components');
+    expect(exportResponse.body).toContain('## Connections');
+    const specificationResponse = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${copy.id}/export?format=specification`,
+      headers: { authorization: `Bearer ${tokenA}` },
+    });
+    expect(specificationResponse.statusCode).toBe(200);
+    expect(specificationResponse.headers['content-disposition']).toContain('schemora-project.json');
+    expect(JSON.parse(specificationResponse.body)).toMatchObject({
+      format: 'schemora-project-specification',
+      schemaVersion: 1,
+      project: { id: copy.id },
+      integrity: {
+        circuitGraphSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        catalogReleaseSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      },
+    });
+
+    const renamed = await request(
+      'PATCH',
+      `/v1/projects/${copy.id}`,
+      { expectedRevision: copy.revision, title: 'Changed copy title' },
+      tokenA,
+    );
+    const restoreKey = randomUUID();
+    const restored = await request(
+      'POST',
+      `/v1/projects/${copy.id}/revisions/2/restore`,
+      { expectedRevision: renamed.body.data.project.revision },
+      tokenA,
+      restoreKey,
+    );
+    expect(restored.body.data.project.title).toBe('Copy of Source project');
+    expect(restored.body.data.project.revision).toBe(4);
+    expect(restored.body.data.restored).toEqual({ title: true, circuitGraph: true });
+    const restoredGraph = await request(
+      'GET',
+      `/v1/projects/${copy.id}/circuit`,
+      undefined,
+      tokenA,
+    );
+    expect(restoredGraph.body.data.graphSnapshot.graph).toMatchObject({
+      projectId: copy.id,
+      projectRevision: 4,
+      components: graph.components,
+    });
+    expect(restoredGraph.body.data.graphSnapshot.graph.id).not.toBe(
+      copyGraph.body.data.graphSnapshot.graph.id,
+    );
+    const restoreReplay = await request(
+      'POST',
+      `/v1/projects/${copy.id}/revisions/2/restore`,
+      { expectedRevision: renamed.body.data.project.revision },
+      tokenA,
+      restoreKey,
+    );
+    expect(restoreReplay.body.data.project.revision).toBe(4);
+  });
 });

@@ -43,6 +43,7 @@ import { validateCircuit, validationReportSchema } from '@schemora/validation';
 import { AssemblyPlanBlockedError, generateAssemblyPlan } from '@schemora/assembly-plan';
 import type { ApiConfig } from './config.js';
 import { MAX_HARDWARE_PHOTO_INPUT_BYTES, normalizeHardwarePhoto } from './hardware-photo.js';
+import { buildProjectSpecification, buildWiringChecklist } from './project-export.js';
 
 const uuid = z.string().uuid();
 const expectedRevision = z.number().int().positive();
@@ -596,6 +597,88 @@ export function buildApp(
       .extend({ revision: z.coerce.number().int().positive() })
       .parse(request.params);
     return envelope(request, await repository.revisionDetail(owner(request), projectId, revision));
+  });
+  app.post('/v1/projects/:projectId/revisions/:revision/restore', async (request) => {
+    const { projectId, revision } = scope
+      .extend({ revision: z.coerce.number().int().positive() })
+      .parse(request.params);
+    const body = mutation.parse(request.body);
+    return envelope(
+      request,
+      await repository.restoreRevision(
+        owner(request),
+        projectId,
+        body.expectedRevision,
+        revision,
+        key(request),
+      ),
+    );
+  });
+  app.post('/v1/projects/:projectId/duplicate', async (request, reply) => {
+    const { projectId } = scope.parse(request.params);
+    const body = z
+      .object({ title: titleSchema.optional() })
+      .strict()
+      .parse(request.body ?? {});
+    return reply
+      .code(201)
+      .send(
+        envelope(
+          request,
+          await repository.duplicateProject(owner(request), projectId, key(request), body.title),
+        ),
+      );
+  });
+  app.get('/v1/projects/:projectId/export', async (request, reply) => {
+    const { projectId } = scope.parse(request.params);
+    const query = z.object({ format: z.enum(['specification', 'checklist']) }).parse(request.query);
+    const principal = owner(request);
+    const snapshot = await repository.projectExportSnapshot(principal, projectId);
+    const graph = snapshot.graphSnapshot
+      ? circuitGraphSchema.parse(snapshot.graphSnapshot.graph)
+      : null;
+    const catalogVersion = graph ? (catalogReleaseById(graph.catalogReleaseId) ?? null) : null;
+    const catalog = catalogVersion?.release ?? null;
+    if (graph && !catalog) throw new RepositoryError('CATALOG_RELEASE_UNSUPPORTED', 409);
+    const exportProject = {
+      id: snapshot.project.id,
+      title: snapshot.project.title,
+      revision: snapshot.project.revision,
+      createdAt: snapshot.project.createdAt,
+      updatedAt: snapshot.project.updatedAt,
+    };
+    const filename = encodeDownloadFilename(
+      snapshot.project.title.replace(/[^a-zA-Z0-9_-]+/g, '-'),
+    );
+    if (query.format === 'checklist') {
+      const checklist = buildWiringChecklist({
+        project: exportProject,
+        graph,
+        catalog,
+      });
+      return reply
+        .header('Content-Type', 'text/markdown; charset=utf-8')
+        .header('Content-Disposition', `attachment; filename="${filename}-wiring-checklist.md"`)
+        .header('Cache-Control', 'no-store')
+        .send(checklist);
+    }
+    const validationSummary = snapshot.validationReport?.report
+      ? validationReportSchema.parse(snapshot.validationReport.report)
+      : null;
+    const specification = buildProjectSpecification({
+      project: exportProject,
+      graph,
+      graphDigest: snapshot.graphSnapshot?.graphDigest ?? null,
+      catalog,
+      catalogDigest: catalogVersion?.sha256 ?? null,
+      validation: validationSummary,
+      validationDigest: snapshot.validationReport?.reportDigest ?? null,
+    });
+    return reply
+      .header('Content-Type', 'application/json; charset=utf-8')
+      .header('Content-Disposition', `attachment; filename="${filename}-schemora-project.json"`)
+      .header('Cache-Control', 'no-store')
+      .send(JSON.stringify(specification, null, 2));
   });
   app.get('/v1/projects/:projectId/circuit', async (request) => {
     const { projectId } = scope.parse(request.params);

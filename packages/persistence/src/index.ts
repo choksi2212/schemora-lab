@@ -1190,6 +1190,44 @@ export class Repository {
       return { project: publicProject(project), graphSnapshot: this.publicGraph(graph) };
     });
   }
+  async projectExportSnapshot(owner: string, projectId: string) {
+    return this.transaction(async (client) => {
+      const project = await this.project(client, owner, projectId, 'share');
+      const revision = await client.query<{
+        snapshot: { circuitGraph?: { id: string; digest: string; revision: number } | null };
+      }>('SELECT snapshot FROM revisions WHERE project_id=$1 AND revision=$2', [
+        projectId,
+        project.revision,
+      ]);
+      const graphRef = revision.rows[0]?.snapshot.circuitGraph;
+      let graphSnapshot: ReturnType<Repository['publicGraph']> | null = null;
+      let validationReport: ReturnType<Repository['publicValidation']> | null = null;
+      if (graphRef?.id) {
+        const graphResult = await client.query<CircuitGraphSnapshot>(
+          'SELECT * FROM circuit_graph_snapshots WHERE project_id=$1 AND id=$2',
+          [projectId, graphRef.id],
+        );
+        const graph = graphResult.rows[0];
+        if (
+          !graph ||
+          graph.graph_digest !== graphRef.digest ||
+          graph.project_revision !== graphRef.revision
+        )
+          throw new RepositoryError('GRAPH_SNAPSHOT_CORRUPT', 500);
+        graphSnapshot = this.publicGraph(graph);
+        const reports = await client.query<ValidationReportRow>(
+          'SELECT * FROM validation_reports WHERE project_id=$1 AND graph_snapshot_id=$2 ORDER BY created_at DESC,id DESC LIMIT 1',
+          [projectId, graph.id],
+        );
+        if (reports.rows[0]) validationReport = this.publicValidation(reports.rows[0]);
+      }
+      return {
+        project: publicProject(project),
+        graphSnapshot,
+        validationReport,
+      };
+    });
+  }
   async confirmCircuitDesignIntent(
     owner: string,
     projectId: string,
@@ -1371,6 +1409,164 @@ export class Repository {
         snapshot: row.snapshot,
         digest: row.digest,
       };
+    });
+  }
+  async duplicateProject(owner: string, sourceId: string, key: string, title?: string) {
+    return this.transaction(async (client) => {
+      const source = await this.project(client, owner, sourceId, true);
+      await client.query('INSERT INTO principals(id) VALUES($1) ON CONFLICT DO NOTHING', [owner]);
+      const scope = sourceId + ':project_duplicate';
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [owner + scope + key]);
+      const fingerprint = requestDigest({ sourceId, title: title ?? null });
+      const replay = await this.replay(client, owner, scope, key, fingerprint);
+      if (replay) return replay;
+      const duplicateTitle = title ?? [...`Copy of ${source.title}`].slice(0, 120).join('');
+
+      const result = await client.query<Project>(
+        "INSERT INTO projects(id,owner_id,title,status,revision) VALUES($1,$2,$3,'active',1) RETURNING *",
+        [randomUUID(), owner, duplicateTitle],
+      );
+      let duplicate = result.rows[0]!;
+      await this.saveRevision(client, duplicate, owner, 'project_created');
+
+      let sourceGraphId: string | null = null;
+      try {
+        sourceGraphId = await this.graphAtRevision(client, sourceId, source.revision);
+      } catch (error) {
+        if (!(error instanceof RepositoryError) || error.code !== 'GRAPH_SNAPSHOT_NOT_FOUND')
+          throw error;
+      }
+      if (sourceGraphId !== null) {
+        const graphResult = await client.query<CircuitGraphSnapshot>(
+          'SELECT * FROM circuit_graph_snapshots WHERE project_id=$1 AND id=$2',
+          [sourceId, sourceGraphId],
+        );
+        const sourceGraph = graphResult.rows[0];
+        if (!sourceGraph) throw new RepositoryError('GRAPH_SNAPSHOT_CORRUPT', 500);
+        if (!sourceGraph.graph || typeof sourceGraph.graph !== 'object')
+          throw new RepositoryError('GRAPH_SNAPSHOT_CORRUPT', 500);
+        const graph = {
+          ...(sourceGraph.graph as Record<string, unknown>),
+          id: randomUUID(),
+          projectId: duplicate.id,
+          projectRevision: 2,
+        };
+        const graphDigest = canonicalDigest(graph);
+        const graphKey = randomUUID();
+        const graphFingerprint = canonicalDigest({ expectedRevision: 1, input: { graph } });
+        await client.query(
+          'INSERT INTO circuit_graph_snapshots(id,project_id,project_revision,actor_id,graph,graph_digest,idempotency_key,request_digest) VALUES($1,$2,2,$3,$4,$5,$6,$7)',
+          [
+            graph.id,
+            duplicate.id,
+            owner,
+            canonicalJson(graph),
+            graphDigest,
+            graphKey,
+            graphFingerprint,
+          ],
+        );
+        const updated = await client.query<Project>(
+          'UPDATE projects SET revision=2,updated_at=now() WHERE id=$1 RETURNING *',
+          [duplicate.id],
+        );
+        duplicate = updated.rows[0]!;
+        await this.saveRevision(client, duplicate, owner, 'circuit_graph_saved', {
+          id: graph.id,
+          digest: graphDigest,
+          revision: 2,
+        });
+      }
+      const response = {
+        project: publicProject(duplicate),
+        copied: {
+          circuitGraph: sourceGraphId !== null,
+          imports: false,
+          firmware: false,
+          hardwarePhotos: false,
+          simulationRuns: false,
+        },
+      };
+      await this.remember(client, owner, scope, key, fingerprint, response);
+      return response;
+    });
+  }
+  async restoreRevision(
+    owner: string,
+    projectId: string,
+    expectedRevision: number,
+    sourceRevision: number,
+    key: string,
+  ) {
+    return this.transaction(async (client) => {
+      const project = await this.project(client, owner, projectId, true);
+      const scope = projectId + ':revision_restore';
+      const body = { expectedRevision, sourceRevision };
+      const fingerprint = requestDigest(body);
+      const replay = await this.replay(client, owner, scope, key, fingerprint);
+      if (replay) return replay;
+      if (project.revision !== expectedRevision)
+        throw new RepositoryError('REVISION_CONFLICT', 409, project.revision);
+      if (project.status !== 'active') throw new RepositoryError('PROJECT_ARCHIVED', 409);
+      const revisionResult = await client.query<{
+        snapshot: { project?: { title?: unknown }; circuitGraph?: { id?: unknown } | null };
+      }>('SELECT snapshot FROM revisions WHERE project_id=$1 AND revision=$2', [
+        projectId,
+        sourceRevision,
+      ]);
+      const sourceSnapshot = revisionResult.rows[0]?.snapshot;
+      const restoredTitle = sourceSnapshot?.project?.title;
+      if (typeof restoredTitle !== 'string' || restoredTitle.trim().length === 0)
+        throw new RepositoryError('NOT_FOUND', 404);
+      const sourceGraphId = sourceSnapshot.circuitGraph?.id;
+      if (sourceSnapshot.circuitGraph != null && typeof sourceGraphId !== 'string')
+        throw new RepositoryError('GRAPH_SNAPSHOT_CORRUPT', 500);
+      let graphRef: { id: string; digest: string; revision: number } | null = null;
+      const nextRevision = project.revision + 1;
+      if (typeof sourceGraphId === 'string') {
+        const graphResult = await client.query<CircuitGraphSnapshot>(
+          'SELECT * FROM circuit_graph_snapshots WHERE project_id=$1 AND id=$2',
+          [projectId, sourceGraphId],
+        );
+        const sourceGraph = graphResult.rows[0];
+        if (!sourceGraph?.graph || typeof sourceGraph.graph !== 'object')
+          throw new RepositoryError('GRAPH_SNAPSHOT_CORRUPT', 500);
+        const graph = {
+          ...(sourceGraph.graph as Record<string, unknown>),
+          id: randomUUID(),
+          projectRevision: nextRevision,
+        };
+        const graphDigest = canonicalDigest(graph);
+        const graphKey = randomUUID();
+        const graphFingerprint = canonicalDigest({ expectedRevision, input: { graph } });
+        await client.query(
+          'INSERT INTO circuit_graph_snapshots(id,project_id,project_revision,actor_id,graph,graph_digest,idempotency_key,request_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+          [
+            graph.id,
+            projectId,
+            nextRevision,
+            owner,
+            canonicalJson(graph),
+            graphDigest,
+            graphKey,
+            graphFingerprint,
+          ],
+        );
+        graphRef = { id: graph.id, digest: graphDigest, revision: nextRevision };
+      }
+      const updated = await client.query<Project>(
+        'UPDATE projects SET title=$2,revision=$3,updated_at=now() WHERE id=$1 RETURNING *',
+        [projectId, restoredTitle.trim(), nextRevision],
+      );
+      const committed = updated.rows[0]!;
+      await this.saveRevision(client, committed, owner, 'revision_restored', graphRef);
+      const response = {
+        project: publicProject(committed),
+        restoredFromRevision: sourceRevision,
+        restored: { title: true, circuitGraph: graphRef !== null },
+      };
+      await this.remember(client, owner, scope, key, fingerprint, response);
+      return response;
     });
   }
   async reviewHistory(owner: string, projectId: string, importId: string, before = 2147483647) {

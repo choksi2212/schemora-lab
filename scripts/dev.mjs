@@ -16,7 +16,11 @@ const runnerArgs = (file) =>
 const commands = [
   { directory: 'apps/api', cli: 'tsx/cli', args: runnerArgs('src/server.ts') },
   { directory: 'apps/worker', cli: 'tsx/cli', args: runnerArgs('src/main.ts') },
-  { directory: 'apps/web', cli: 'next/dist/bin/next', args: ['dev', '--hostname', '127.0.0.1'] },
+  {
+    directory: 'apps/web',
+    cli: 'next/dist/bin/next',
+    args: ['dev', '--webpack', '--hostname', '127.0.0.1'],
+  },
 ];
 const children = commands.map(({ directory, cli, args }) => {
   const cwd = resolve(directory);

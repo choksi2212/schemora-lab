@@ -44,6 +44,14 @@ Phase 6 now has provider-neutral firmware/run contracts and fail-closed coverage
 
 The project workspace can store, display, and remove consented, normalized hardware photos as private project evidence for manual review. No vision model, OCR, candidate ranking, or automatic inventory mapping is enabled. Exact hardware identity still requires user confirmation, and a photograph does not verify pinout, electrical behavior, or safety. See [Phase 7 implementation status and recognition gates](docs/Phase-7-Implementation.md).
 
+## Phase 9 — Hardware family expansion
+
+The immutable `schemora-hw-2026.10.1` release adds the exact OMRON B3F-1000 tactile switch with transient ideal-contact circuit interaction. This does not model firmware inputs, bounce/debounce, voltage/current, or physical fit. Later sensor, actuator, robotics, and advanced-physics families remain unsupported. See the [Phase 9 implementation and acceptance scope](docs/Phase-9-Implementation.md).
+
+## Phase 10 — Production readiness (in progress)
+
+Projects can export a versioned specification or wiring checklist, duplicate the saved circuit without copying private uploads, and restore an earlier title/circuit as a new immutable revision. GitHub sign-in, durable revisions, owner-scoped APIs, private storage, upload limits, deletion, and CI provide the existing foundations. Production deployment, malware and secret scanning, parser isolation, observability, performance evidence, and backup/recovery exercises remain open. See the [Phase 10 implementation status and remaining launch gates](docs/Phase-10-Implementation.md).
+
 ## Run locally
 
 Requirements: Node.js 24, pnpm 11.5.2, and Docker with Compose.

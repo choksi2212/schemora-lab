@@ -21,6 +21,9 @@ import {
   Pencil,
   GitBranch,
   CircleHelp,
+  Copy,
+  Download,
+  RotateCcw,
 } from 'lucide-react';
 import type { Candidate, Evidence, NormalizedMessage } from '@schemora/contracts';
 import {
@@ -55,6 +58,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
   const [importId, setImportId] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
   const [pollEpoch, setPollEpoch] = useState(0);
@@ -244,6 +248,46 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
       setError(cause);
     }
   }
+  async function duplicateProject() {
+    setDuplicating(true);
+    setError(null);
+    try {
+      const result = await api<{ project: Project }>(`/projects/${projectId}/duplicate`, {
+        method: 'POST',
+        body: {},
+      });
+      router.push(`/projects/${result.project.id}`);
+    } catch (cause) {
+      setError(cause);
+    } finally {
+      setDuplicating(false);
+      setMenu(false);
+    }
+  }
+  async function restoreRevision(revision: number) {
+    if (
+      !detail ||
+      !window.confirm(
+        `Restore the project title and circuit from revision ${revision}? This creates a new revision and keeps history immutable.`,
+      )
+    )
+      return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/projects/${projectId}/revisions/${revision}/restore`, {
+        method: 'POST',
+        body: { expectedRevision: detail.project.revision },
+      });
+      await load();
+      setHistory(null);
+      setSaved(true);
+    } catch (cause) {
+      setError(cause);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function loadMessages(evidence?: Evidence) {
     if (!current || !importId || loadingMessages) return;
     setLoadingMessages(true);
@@ -365,6 +409,29 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
             </button>
             {menu && (
               <div className="action-menu">
+                <button disabled={duplicating} onClick={() => void duplicateProject()}>
+                  <Copy size={15} /> {duplicating ? 'Copying project…' : 'Duplicate design'}
+                </button>
+                <button
+                  onClick={() => {
+                    window.location.assign(
+                      `/api/backend/v1/projects/${encodeURIComponent(projectId)}/export?format=specification`,
+                    );
+                    setMenu(false);
+                  }}
+                >
+                  <Download size={15} /> Export specification
+                </button>
+                <button
+                  onClick={() => {
+                    window.location.assign(
+                      `/api/backend/v1/projects/${encodeURIComponent(projectId)}/export?format=checklist`,
+                    );
+                    setMenu(false);
+                  }}
+                >
+                  <Download size={15} /> Wiring checklist
+                </button>
                 <button
                   disabled={!editable || busy}
                   onClick={() => {
@@ -464,8 +531,8 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
             </button>
           </div>
           <p className="fine-text">
-            Saved changes are retained as immutable revisions. Restoring revisions is planned for a
-            later phase.
+            Revisions stay immutable. Restoring an earlier revision creates a new revision with its
+            title and circuit graph; imports, firmware, photos, and run history stay unchanged.
           </p>
           <ol>
             {history.map((item) => (
@@ -489,6 +556,15 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
                       : JSON.stringify(item.snapshot, null, 2)}
                   </pre>
                 </details>
+                {editable && item.revision < project.revision && (
+                  <button
+                    className="button secondary"
+                    disabled={busy}
+                    onClick={() => void restoreRevision(item.revision)}
+                  >
+                    <RotateCcw size={14} /> Restore title and circuit
+                  </button>
+                )}
               </li>
             ))}
           </ol>

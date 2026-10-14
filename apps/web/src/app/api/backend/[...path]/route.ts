@@ -68,13 +68,13 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
       cache: 'no-store',
       redirect: 'error',
     });
-    return new NextResponse(response.body, {
-      status: response.status,
-      headers: {
-        'Content-Type': response.headers.get('content-type') ?? 'application/json',
-        'Cache-Control': 'no-store',
-      },
+    const responseHeaders = new Headers({
+      'Content-Type': response.headers.get('content-type') ?? 'application/json',
+      'Cache-Control': 'no-store',
     });
+    const contentDisposition = response.headers.get('content-disposition');
+    if (contentDisposition) responseHeaders.set('Content-Disposition', contentDisposition);
+    return new NextResponse(response.body, { status: response.status, headers: responseHeaders });
   } catch {
     return NextResponse.json(
       {
