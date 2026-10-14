@@ -10,6 +10,7 @@ import {
   publicFirmwareArtifact,
   publicImport,
   publicReview,
+  requestSimulationRunStop,
   requestDigest,
 } from '@schemora/persistence';
 import { MAX_SOURCE_BYTES, type PrivateBuildStorage, type PrivateStorage } from '@schemora/storage';
@@ -557,7 +558,7 @@ export function buildApp(
         idempotencyKey,
         fingerprint,
       );
-      if (replay) return replay as { run: unknown };
+      if (replay) return replay as { run: unknown; stopRequestedAt: string | null };
       if (project.status !== 'active') throw new RepositoryError('PROJECT_ARCHIVED', 409);
       if (project.revision !== body.expectedRevision)
         throw new RepositoryError('REVISION_CONFLICT', 409, project.revision);
@@ -809,12 +810,22 @@ export function buildApp(
       request,
       await repository.transaction(async (client) => {
         await repository.project(client, owner(request), projectId, 'share');
-        const result = await client.query<{ run: unknown }>(
-          'SELECT run FROM simulation_runs WHERE project_id=$1 AND id=$2',
+        const result = await client.query<{ run: unknown; stop_requested_at: Date | null }>(
+          `SELECT r.run, a.stop_requested_at
+             FROM simulation_runs r
+             LEFT JOIN LATERAL (
+               SELECT stop_requested_at FROM simulation_run_attempts
+                WHERE project_id=r.project_id AND run_id=r.id
+                ORDER BY attempt_number DESC LIMIT 1
+             ) a ON true
+            WHERE r.project_id=$1 AND r.id=$2`,
           [projectId, runId],
         );
         if (!result.rows[0]) throw new RepositoryError('NOT_FOUND', 404);
-        return { run: simulationRunSchema.parse(result.rows[0].run) };
+        return {
+          run: simulationRunSchema.parse(result.rows[0].run),
+          stopRequestedAt: result.rows[0].stop_requested_at?.toISOString() ?? null,
+        };
       }),
     );
   });
@@ -841,8 +852,8 @@ export function buildApp(
       );
       const stored = selected.rows[0];
       if (!stored) throw new RepositoryError('NOT_FOUND', 404);
-      if (stored.status === 'cancelled') {
-        const response = { run: simulationRunSchema.parse(stored.run) };
+      if (stored.status === 'cancelled' || stored.status === 'stopped') {
+        const response = { run: simulationRunSchema.parse(stored.run), stopRequestedAt: null };
         await repository.remember(
           client,
           principal,
@@ -853,26 +864,43 @@ export function buildApp(
         );
         return response;
       }
-      if (stored.status !== 'queued') throw new RepositoryError('INVALID_SIMULATION_STATE', 409);
-      const run = simulationRunSchema.parse({
-        ...(stored.run as object),
-        status: 'cancelled',
-        failure: { code: 'CANCELLED', message: 'Run cancelled before execution.' },
-        simulatedDurationMs: 0,
-      });
-      await client.query(
-        "UPDATE simulation_runs SET status='cancelled',run=$3 WHERE project_id=$1 AND id=$2 AND status='queued'",
-        [projectId, runId, JSON.stringify(run)],
-      );
-      await client.query(
-        "UPDATE jobs SET status='cancelled',lease_token=NULL,lease_until=NULL WHERE project_id=$1 AND kind='simulate_run' AND payload->>'runId'=$2 AND status='queued'",
-        [projectId, runId],
-      );
-      await client.query(
-        "UPDATE outbox SET delivered_at=COALESCE(delivered_at,now()) WHERE project_id=$1 AND kind='simulate_run' AND payload->>'runId'=$2 AND delivered_at IS NULL",
-        [projectId, runId],
-      );
-      const response = { run };
+      let run: ReturnType<typeof simulationRunSchema.parse>;
+      let stopRequestedAt: string | null = null;
+      if (stored.status === 'queued') {
+        run = simulationRunSchema.parse({
+          ...(stored.run as object),
+          status: 'cancelled',
+          failure: { code: 'CANCELLED', message: 'Run cancelled before execution.' },
+          simulatedDurationMs: 0,
+        });
+        await client.query(
+          "UPDATE simulation_runs SET status='cancelled',run=$3 WHERE project_id=$1 AND id=$2 AND status='queued'",
+          [projectId, runId, JSON.stringify(run)],
+        );
+        await client.query(
+          "UPDATE jobs SET status='cancelled',lease_token=NULL,lease_until=NULL WHERE project_id=$1 AND kind='simulate_run' AND payload->>'runId'=$2 AND status='queued'",
+          [projectId, runId],
+        );
+        await client.query(
+          "UPDATE outbox SET delivered_at=COALESCE(delivered_at,now()) WHERE project_id=$1 AND kind='simulate_run' AND payload->>'runId'=$2 AND delivered_at IS NULL",
+          [projectId, runId],
+        );
+      } else if (stored.status === 'preparing' || stored.status === 'running') {
+        const requestedAt = await requestSimulationRunStop(client, projectId, runId);
+        if (!requestedAt) throw new RepositoryError('SIMULATION_STOP_UNAVAILABLE', 409);
+        run = simulationRunSchema.parse({ ...(stored.run as object), status: 'stopping' });
+        stopRequestedAt = requestedAt.toISOString();
+        await client.query(
+          "UPDATE simulation_runs SET status='stopping',run=$3 WHERE project_id=$1 AND id=$2 AND status=$4",
+          [projectId, runId, JSON.stringify(run), stored.status],
+        );
+      } else if (stored.status === 'stopping') {
+        const requestedAt = await requestSimulationRunStop(client, projectId, runId);
+        if (!requestedAt) throw new RepositoryError('SIMULATION_STOP_UNAVAILABLE', 409);
+        run = simulationRunSchema.parse(stored.run);
+        stopRequestedAt = requestedAt.toISOString();
+      } else throw new RepositoryError('INVALID_SIMULATION_STATE', 409);
+      const response = { run, stopRequestedAt };
       await repository.remember(
         client,
         principal,

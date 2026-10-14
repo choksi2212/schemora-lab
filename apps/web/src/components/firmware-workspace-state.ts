@@ -16,6 +16,10 @@ export function canCancelQueuedRun(status: string) {
   return status === 'queued';
 }
 
+export function canRequestRunStop(status: string) {
+  return status === 'preparing' || status === 'running';
+}
+
 export type FirmwareArtifactState = {
   reviewStatus: 'accepted' | 'pending' | 'rejected';
   binding: FirmwareBinding | null;

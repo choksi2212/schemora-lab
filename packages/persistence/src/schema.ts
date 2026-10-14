@@ -252,6 +252,7 @@ export const simulationRunAttempts = pgTable(
     responseJti: uuid('response_jti'),
     responseDigest: text('response_digest'),
     responseIssuedAt: timestamp('response_issued_at', { withTimezone: true }),
+    stopRequestedAt: timestamp('stop_requested_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

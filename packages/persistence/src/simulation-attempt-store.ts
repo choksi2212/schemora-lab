@@ -60,6 +60,7 @@ export type RunnerResponseAcceptance =
 export interface CurrentSimulationRunAttempt extends SimulationAttemptIdentity {
   state: 'dispatched' | 'accepted' | 'running';
   runStatus: string;
+  stopRequestedAt: Date | null;
 }
 
 interface LockedRun extends QueryResultRow {
@@ -155,10 +156,11 @@ export async function loadCurrentSimulationRunAttempt(
     not_before: Date;
     deadline_at: Date;
     state: string;
+    stop_requested_at: Date | null;
   }>(
     `SELECT project_id,run_id,job_id,attempt_number,attempt_id,payload_digest,
             execution_profile_id,image_digest,binding_digest,request_jti,
-            requested_at,not_before,deadline_at,state
+            requested_at,not_before,deadline_at,state,stop_requested_at
        FROM simulation_run_attempts
       WHERE project_id=$1 AND run_id=$2 AND job_id=$3 AND attempt_number=$4
       FOR UPDATE`,
@@ -182,7 +184,38 @@ export async function loadCurrentSimulationRunAttempt(
     deadlineAt: attempt.deadline_at,
     state: attempt.state as CurrentSimulationRunAttempt['state'],
     runStatus: runs.rows[0].status,
+    stopRequestedAt: attempt.stop_requested_at,
   };
+}
+
+/** Record a one-way stop request against the current active attempt. */
+export async function requestSimulationRunStop(
+  client: PoolClient,
+  projectId: string,
+  runId: string,
+): Promise<Date | null> {
+  const selected = await client.query<{
+    job_id: string;
+    attempt_number: number;
+    stop_requested_at: Date | null;
+  }>(
+    `SELECT job_id,attempt_number,stop_requested_at FROM simulation_run_attempts
+      WHERE project_id=$1 AND run_id=$2 AND state IN ('dispatched','accepted','running')
+      ORDER BY attempt_number DESC LIMIT 1 FOR UPDATE`,
+    [projectId, runId],
+  );
+  const attempt = selected.rows[0];
+  if (!attempt) return null;
+  if (attempt.stop_requested_at) return attempt.stop_requested_at;
+  const updated = await client.query<{ stop_requested_at: Date }>(
+    `UPDATE simulation_run_attempts SET stop_requested_at=clock_timestamp()
+      WHERE project_id=$1 AND run_id=$2 AND job_id=$3 AND attempt_number=$4
+        AND state IN ('dispatched','accepted','running')
+        AND stop_requested_at IS NULL
+      RETURNING stop_requested_at`,
+    [projectId, runId, attempt.job_id, attempt.attempt_number],
+  );
+  return updated.rows[0]?.stop_requested_at ?? null;
 }
 
 /**
@@ -423,7 +456,8 @@ function transitionAllowed(run: string, response: string, attempt: string, next:
     );
   if (!['completed', 'failed', 'cancelled'].includes(response)) return false;
   if (!['queued', 'preparing', 'running', 'stopping'].includes(run)) return false;
-  if (response === 'completed') return run === 'running' && next === 'completed';
+  if (response === 'completed')
+    return ['running', 'stopping'].includes(run) && next === 'completed';
   if (response === 'cancelled') return next === 'cancelled';
   return ['failed', 'timed_out'].includes(next);
 }

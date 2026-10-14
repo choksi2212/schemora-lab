@@ -40,6 +40,7 @@ export {
   acceptVerifiedRunnerResponse,
   createSimulationRunAttempt,
   loadCurrentSimulationRunAttempt,
+  requestSimulationRunStop,
   type CurrentSimulationRunAttempt,
   type RunnerResponseAcceptance,
   type SimulationAttemptIdentity,

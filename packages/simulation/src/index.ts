@@ -759,7 +759,7 @@ export function runnerResponseTransitionAllowed(
   if (responseStatus === 'accepted') return ['queued', 'preparing'].includes(currentStatus);
   if (responseStatus === 'running')
     return ['queued', 'preparing', 'running'].includes(currentStatus);
-  if (responseStatus === 'completed') return currentStatus === 'running';
+  if (responseStatus === 'completed') return ['running', 'stopping'].includes(currentStatus);
   return ['completed', 'failed', 'cancelled'].includes(responseStatus);
 }
 

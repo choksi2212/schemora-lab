@@ -7,6 +7,7 @@ import { Uri } from 'monaco-editor';
 import { api, friendlyError, type Project } from '@/lib/api';
 import {
   canCancelQueuedRun,
+  canRequestRunStop,
   firmwareEntrypointError,
   firmwareGraphState,
   serialOutput,
@@ -172,6 +173,7 @@ export function FirmwareWorkspace({
   const [reason, setReason] = useState('');
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [run, setRun] = useState<StoredRun | null>(null);
+  const [stopRequestedAt, setStopRequestedAt] = useState<string | null>(null);
   const [builds, setBuilds] = useState<FirmwareBuild[]>([]);
   const [buildError, setBuildError] = useState('');
   const [pendingDiagnosticLocation, setPendingDiagnosticLocation] = useState<{
@@ -234,13 +236,17 @@ export function FirmwareWorkspace({
     if (!targetId) {
       runRequestId.current += 1;
       setRun(null);
+      setStopRequestedAt(null);
       return;
     }
     const requestId = ++runRequestId.current;
-    const detail = await api<{ run: StoredRun }>(
+    const detail = await api<{ run: StoredRun; stopRequestedAt: string | null }>(
       `/projects/${projectId}/simulation-runs/${encodeURIComponent(targetId)}`,
     );
-    if (requestId === runRequestId.current) setRun(detail.run);
+    if (requestId === runRequestId.current) {
+      setRun(detail.run);
+      setStopRequestedAt(detail.stopRequestedAt);
+    }
   }, [projectId]);
 
   useEffect(() => {
@@ -384,11 +390,14 @@ export function FirmwareWorkspace({
     const selectedRunId = run.runId;
     const selectionRequestId = runRequestId.current;
     const timer = window.setInterval(() => {
-      void api<{ run: StoredRun }>(
+      void api<{ run: StoredRun; stopRequestedAt: string | null }>(
         `/projects/${projectId}/simulation-runs/${encodeURIComponent(selectedRunId)}`,
       )
         .then((result) => {
-          if (active && runRequestId.current === selectionRequestId) setRun(result.run);
+          if (active && runRequestId.current === selectionRequestId) {
+            setRun(result.run);
+            setStopRequestedAt(result.stopRequestedAt);
+          }
         })
         .catch((cause: unknown) => setError(friendlyError(cause)));
     }, 2_000);
@@ -589,6 +598,7 @@ export function FirmwareWorkspace({
         body: { expectedRevision: project.revision, firmwareArtifactId: currentArtifact.id },
       });
       setRun(result.run);
+      setStopRequestedAt(null);
       setNotice(
         'Run record queued. This environment has no configured simulator; the worker reports SIMULATOR_UNAVAILABLE.',
       );
@@ -603,28 +613,34 @@ export function FirmwareWorkspace({
   async function selectRun(id: string) {
     const requestId = ++runRequestId.current;
     try {
-      const result = await api<{ run: StoredRun }>(
+      const result = await api<{ run: StoredRun; stopRequestedAt: string | null }>(
         `/projects/${projectId}/simulation-runs/${encodeURIComponent(id)}`,
       );
-      if (requestId === runRequestId.current) setRun(result.run);
+      if (requestId === runRequestId.current) {
+        setRun(result.run);
+        setStopRequestedAt(result.stopRequestedAt);
+      }
     } catch (cause) {
       setError(friendlyError(cause));
     }
   }
 
-  async function cancelQueuedRun() {
-    if (!run || !canCancelQueuedRun(run.status) || busy) return;
+  async function cancelRun() {
+    if (!run || (!canCancelQueuedRun(run.status) && !canRequestRunStop(run.status)) || busy) return;
     setBusy(true);
     setError('');
     setNotice('');
     try {
-      const result = await api<{ run: StoredRun }>(
+      const result = await api<{ run: StoredRun; stopRequestedAt: string | null }>(
         `/projects/${projectId}/simulation-runs/${encodeURIComponent(run.runId)}/cancel`,
         { method: 'POST', body: {}, idempotencyKey: crypto.randomUUID() },
       );
       setRun(result.run);
+      setStopRequestedAt(result.stopRequestedAt);
       setNotice(
-        'Queued run cancelled before execution. Active runs cannot be stopped by this control.',
+        result.run.status === 'cancelled'
+          ? 'Queued run cancelled before execution.'
+          : 'Stop request recorded. The run remains active until the runner confirms termination.',
       );
       void refreshRuns();
     } catch (cause) {
@@ -1168,15 +1184,12 @@ export function FirmwareWorkspace({
               Graph {run.binding.graphDigest.slice(0, 12)} · firmware{' '}
               {run.binding.firmwareDigest.slice(0, 12)}
             </span>
-            {canCancelQueuedRun(run.status) && (
-              <button
-                className="button secondary"
-                disabled={busy}
-                onClick={() => void cancelQueuedRun()}
-              >
-                Cancel queued run
+            {(canCancelQueuedRun(run.status) || canRequestRunStop(run.status)) && (
+              <button className="button secondary" disabled={busy} onClick={() => void cancelRun()}>
+                {canCancelQueuedRun(run.status) ? 'Cancel queued run' : 'Request stop'}
               </button>
             )}
+            {run.status === 'stopping' && <span className="fine-text">Stop requested</span>}
           </div>
           {run.failure && (
             <p className="warning-notice">
@@ -1185,7 +1198,9 @@ export function FirmwareWorkspace({
           )}
           {!run.failure && run.status !== 'completed' && (
             <p className="warning-notice">
-              No execution result is available. The run remains a queued or unavailable record.
+              {run.status === 'stopping'
+                ? `A stop request is pending${stopRequestedAt ? ` since ${new Date(stopRequestedAt).toLocaleTimeString()}` : ''}. The runner must confirm termination before this run is terminal.`
+                : 'No execution result is available. The run remains queued or unavailable and is not simulation evidence.'}
             </p>
           )}
           {run.limitations.map((item) => (
