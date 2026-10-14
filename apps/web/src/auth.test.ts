@@ -152,13 +152,17 @@ describe('OAuth and BFF route behavior', () => {
     expect(response.status).toBe(307);
     expect(String(fetcher.mock.calls[0]![1].body)).toContain('code_verifier=');
     const token = response.cookies.get(sessionCookie)!.value;
-    expect(
-      await identity(
-        new NextRequest('http://localhost:3000/', {
-          headers: { cookie: `${sessionCookie}=${token}` },
-        }),
-      ),
-    ).toEqual({ sub: 'github:456', name: 'builder', mode: 'github' });
+    const sessionIdentity = await identity(
+      new NextRequest('http://localhost:3000/', {
+        headers: { cookie: `${sessionCookie}=${token}` },
+      }),
+    );
+    expect(sessionIdentity).toMatchObject({
+      sub: 'github:456',
+      name: 'builder',
+      mode: 'github',
+    });
+    expect(sessionIdentity?.authTime).toEqual(expect.any(Number));
     expect(response.headers.get('set-cookie')).toContain('HttpOnly');
     expect(response.cookies.get(flowCookie)?.value).toBe('');
   });
