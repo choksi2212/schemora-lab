@@ -4,7 +4,7 @@
 
 Phase 7 is intended to help a user identify physical hardware, match it to an exact supported catalog model, confirm that identity, and use the confirmed model in the virtual workbench. A photograph can provide visual evidence; it cannot establish hidden electrical properties, pin compatibility, physical safety, or the wiring inside an assembled circuit.
 
-**Status: in progress.** This implementation delivers the private photo-evidence foundation and manual-review UI. It does not yet recognize hardware, rank catalog candidates, request clearer images based on image quality, create a confirmed inventory, or add the recognized item to the workbench. Every stored item has the fixed status `manual_review`. No image leaves the application for a model or third-party service.
+**Status: in progress.** The repository now contains private photo evidence, separately consented remote recognition, an asynchronous provider adapter and worker flow, unconfirmed catalog proposals, and explicit user confirmation into a private hardware inventory. It does not yet satisfy the phase exit criterion: there is no hardware-specific labeled benchmark, proven exact-model accuracy, live-provider acceptance evidence, or deployment evidence. Recognition remains disabled by default, and uploaded photos remain in manual review until a user explicitly submits them under the separate remote-processing consent.
 
 Phase 6 remains open for its runner, provider, compiler, licensing, and live-scene gates. Work on Phase 7 evidence intake was explicitly directed to proceed without treating Phase 6 as complete. Phase 8 work should not be represented as complete until Phase 7's recognition and confirmation exit criteria are met.
 
@@ -12,7 +12,7 @@ Phase 6 remains open for its runner, provider, compiler, licensing, and live-sce
 
 An editor can attach one or more JPEG, PNG, or WebP still images to a project. The uploader labels the selected set with one capture role: board top, board back, pin labels, module top, markings, or other. Uploads are sent sequentially. Each request records the current expected project revision, explicit storage consent, a per-photo idempotency key, and the selected role.
 
-Before submission, the interface checks the browser-reported image type and the 5 MiB per-file limit. The server independently decodes the image, checks the actual format and dimensions, rejects animated or oversized images, applies EXIF orientation, re-encodes the pixels, and strips source metadata. It keeps the normalized image in private object storage and records only bounded metadata in PostgreSQL. A reader with project share access can list the metadata and request the private image through an owner- and project-scoped endpoint. The interface labels each saved image as pending manual review and explains that no recognition, model-provider call, pinout verification, or safety check occurs.
+Before submission, the interface checks the browser-reported image type and the 5 MiB per-file limit. The server independently decodes the image, checks the actual format and dimensions, rejects animated or oversized images, applies EXIF orientation, re-encodes the pixels, and strips source metadata. It keeps the normalized image in private object storage and records only bounded metadata in PostgreSQL. A reader with project share access can list the metadata and request the private image through an owner- and project-scoped endpoint. Saved photos remain evidence awaiting manual review unless the owner explicitly requests remote recognition with separate consent. A proposal still requires confirmation and does not verify pinout, electrical behavior, or safety.
 
 ## 3. Scope boundaries
 
@@ -24,12 +24,12 @@ Before submission, the interface checks the browser-reported image type and the 
 - A 25-megapixel decoded-image limit and single-frame restriction.
 - Private storage, project authorization, revisioned metadata, idempotent writes, integrity checking, per-photo removal, and project-deletion cleanup.
 - Explicit consent version `photo-evidence-v1` recorded with each accepted image.
-- `manual_review` as the only server-side status.
+- Private photo evidence remains distinct from the recognition request, unconfirmed proposal, and user-confirmed inventory lifecycle.
 
 ### Not included
 
-- Computer-vision, OCR, image-quality scoring, model-provider calls, or candidate ranking.
-- A catalog candidate/confirmation workflow, a confirmed hardware inventory, or automatic workbench changes.
+- Automatic OCR or image-quality scoring that claims verified image readability.
+- Automatic workbench changes from a recognition proposal.
 - An automatic image-retention scheduler.
 - Any inference that visually similar boards share electrical behavior.
 - Phase 6 simulation execution or Phase 8 diagnosis.
@@ -106,7 +106,7 @@ One selected role currently applies to all files in a submission. Users should u
 - Content is returned through an authorization-checking API with no-store and nosniff headers. No direct public object access is introduced.
 - Project deletion enumerates and purges photo objects and records.
 - Users can remove an individual photo; its object removal is durable and retried by the worker. Photos otherwise remain until the user removes them or deletes the project; there is no automatic expiry policy.
-- The Vultr adapter is present but disabled by default. No uploaded photo has been transmitted to a provider during this implementation.
+- The Vultr adapter is present but disabled by default. A successful local request-adapter test is not evidence that an uploaded photo has been transmitted or that the provider identifies hardware accurately.
 
 ## 9. Failure behavior and recovery
 
@@ -120,17 +120,17 @@ The database migration must be applied before the new API version receives traff
 
 ## 11. Verification and release gates
 
-The implementation agents report that targeted API, persistence, worker, and web TypeScript checks pass. `git diff --check` passes. No test suites were run in this slice.
+The repository has unit tests for provider request construction and validation, typechecking, the full workspace unit/database integration suite, and browser workflows. The current automated suite does not exercise the photo upload or full recognition API/worker/confirmation lifecycle, nor a live provider request. Local tests do not demonstrate recognition accuracy or safe production provider operation. Do not enable remote requests in production until the gates below are closed.
 
 Before enabling recognition, complete all of the following:
 
-1. Define supported board/component identities and a labeled, consented benchmark covering lighting, angles, board revisions, clones, and unknown hardware.
-2. Select a vision/OCR execution and data-processing model only after privacy, retention, licensing, latency, and cost review. Provider access must remain disabled by default until approved.
-3. Measure per-class precision/recall and false exact-model identification. A broad family guess must not be promoted to an exact board revision.
-4. Add candidate evidence with source images/regions and calibrated uncertainty, clear unknown/unsupported states, and a user confirmation step.
-5. Bind a confirmed inventory entry to an exact catalog release and exact part identifier. Never alter the graph or pin mapping from an unconfirmed prediction.
-6. Review the explicit retention policy (photos remain until user or project deletion) against launch requirements and add scheduled expiry only if policy requires it.
-7. Exercise authorization boundaries, malformed/hostile image inputs, idempotent retry behavior, project purge, and operational cleanup using the repository's approved verification process.
+1. Define supported board/component identities and a labeled, rights-reviewed benchmark covering lighting, angles, board revisions, clones, and unknown hardware.
+2. Review provider terms, processing region, retention, licensing, latency, cost, request limits, and owner-set spend ceilings. Provider access remains disabled by default until approved.
+3. Measure per-class precision/recall, unknown detection, and false exact-model identification on a held-out set. A broad family guess must not be promoted to an exact board revision.
+4. Review candidate evidence and confirmation with hardware owners; keep exact catalog release and part ID behind explicit user confirmation.
+5. Review the explicit retention policy (photos remain until user or project deletion) against launch requirements and add scheduled expiry only if policy requires it.
+6. Apply migrations and exercise the consented provider flow only with an approved account, a rotated credential, and an explicitly consented test photo.
+7. Add isolated API, worker-race, and browser-consent tests for the photo/recognition lifecycle before treating the recognition feature as regression-covered.
 
 Phase 7 is complete only when the recognition, candidate comparison, exact-model confirmation, and confirmed inventory behavior meet the completion criterion in `context.md`: a defined supported hardware set can be identified accurately enough for the user to confirm the exact board-specific pin mapping. Upload and storage alone do not meet that criterion.
 
@@ -172,4 +172,4 @@ Provider documentation reviewed:
 
 The repository now contains a fixed-endpoint Vultr adapter, strict consent/proposal contracts, a durable recognition request and confirmed-inventory schema, revisioned request/confirmation API routes, an asynchronous worker, and per-photo consent and review controls. API and worker flags default to disabled. No photo has been transmitted during implementation. Photos can be submitted only by an explicit per-photo action once both services are configured and approved. The exact-part inventory is a separate user confirmation and can be removed independently.
 
-Phase 7 remains incomplete. The rights-reviewed, labeled hardware benchmark has not been built or run, provider/account terms and budget controls still need owner review, the new migration has not been applied to a deployment database, and the remote provider flow has not been exercised with an explicitly consented Schemora photo. TypeScript checks for contracts, persistence, intelligence, API, worker, and web passed during implementation; test suites and browser flows were not run in this slice. Do not enable remote requests in production until these gates are closed.
+Phase 7 remains incomplete. The rights-reviewed, labeled hardware benchmark has not been built or run; provider/account terms, region, retention and budget controls still need owner review; and a consented live-provider flow has not been exercised. Local migrations and automated tests cannot replace these external accuracy and operational gates. Keep remote recognition disabled in production until these gates are closed.

@@ -627,7 +627,7 @@ export function HardwarePhotoEvidence({
         <div>
           <span className="eyebrow">PHASE 7 · HARDWARE PHOTO EVIDENCE</span>
           <h2 id="hardware-photo-title">
-            <Camera size={18} /> Photos for manual review
+            <Camera size={18} /> Photos &amp; recognition
           </h2>
           <p>
             Keep reference photos with this project. A person must identify and confirm the exact

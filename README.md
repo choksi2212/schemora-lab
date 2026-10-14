@@ -42,7 +42,7 @@ Phase 6 now has provider-neutral firmware/run contracts and fail-closed coverage
 
 ## Phase 7 — Photo evidence and hardware recognition (in progress)
 
-The project workspace can store, display, and remove consented, normalized hardware photos as private project evidence for manual review. No vision model, OCR, candidate ranking, or automatic inventory mapping is enabled. Exact hardware identity still requires user confirmation, and a photograph does not verify pinout, electrical behavior, or safety. See [Phase 7 implementation status and recognition gates](docs/Phase-7-Implementation.md).
+The project workspace can store, display, and remove normalized hardware photos as private project evidence. A separately consented, explicitly configured Vultr recognition flow can create an unconfirmed catalog proposal and a user can confirm an exact catalog identity into the project inventory. Recognition is disabled by default and remains unapproved for production until a hardware-specific benchmark, provider policy review, and operational evidence pass. A photo does not verify pinout, electrical behavior, or safety. See [Phase 7 implementation status and recognition gates](docs/Phase-7-Implementation.md).
 
 ## Phase 9 — Hardware family expansion
 
