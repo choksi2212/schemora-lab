@@ -99,6 +99,18 @@ type Report = {
 };
 type GraphSnapshot = { id: string; projectRevision: number; graphDigest: string; graph: Graph };
 type GraphResponse = { project: Project; graphSnapshot: GraphSnapshot | null };
+type DesignDiffResponse = {
+  comparable: boolean;
+  reason: string | null;
+  workingGraphSnapshotId: string | null;
+  intent: {
+    versionId: string;
+    graphSnapshotId: string;
+    graphDigest: string;
+    confirmedAt: string;
+  } | null;
+  differences: { kind: string; identity: string; intended: unknown; working: unknown }[];
+};
 type ValidationResponse = { report: { report: Report } | null; current?: boolean };
 type PrePowerCheck = { id: string; title: string; detail: string };
 const starterParts = {
@@ -219,6 +231,34 @@ function relatedFaultWireIds(finding: Finding, graph: Graph): string[] {
   return [...ids].sort();
 }
 
+function describeDesignDifference(
+  difference: DesignDiffResponse['differences'][number],
+  graph: Graph,
+  parts: Map<string, Part>,
+): string {
+  const record = (difference.working ?? difference.intended) as {
+    id?: string;
+    source?: Endpoint;
+    target?: Endpoint;
+  } | null;
+  if (record?.source && record.target)
+    return `${describeEndpoint(record.source, graph, parts)} → ${describeEndpoint(record.target, graph, parts)}`;
+  if (record?.id) return record.id;
+  if (difference.kind.startsWith('placement-')) {
+    try {
+      const terminalRef = JSON.parse(difference.identity) as {
+        componentInstanceId?: string;
+        catalogTerminalId?: string;
+      };
+      if (terminalRef.componentInstanceId && terminalRef.catalogTerminalId)
+        return `${terminalRef.componentInstanceId} · ${terminalRef.catalogTerminalId}`;
+    } catch {
+      return 'Terminal placement';
+    }
+  }
+  return difference.identity;
+}
+
 function starterGraph(projectId: string, revision: number, catalog: Catalog['release']): Graph {
   const board = catalog.parts.find((p) => p.id === starterParts.board)!;
   const topology = catalog.breadboardTopologies[0]!;
@@ -272,6 +312,8 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
   const [catalog, setCatalog] = useState<Catalog['release'] | null>(null);
   const [graph, setGraph] = useState<Graph | null>(null);
   const [graphDigest, setGraphDigest] = useState<string | null>(null);
+  const [graphSnapshotId, setGraphSnapshotId] = useState<string | null>(null);
+  const [designDiff, setDesignDiff] = useState<DesignDiffResponse | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [isCurrent, setIsCurrent] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -285,21 +327,32 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
   const [completedAssemblySteps, setCompletedAssemblySteps] = useState<string[]>([]);
   const [skippedAssemblySteps, setSkippedAssemblySteps] = useState<string[]>([]);
   const [checkedPrePowerItems, setCheckedPrePowerItems] = useState<string[]>([]);
+  const [assemblyPersistenceWarning, setAssemblyPersistenceWarning] = useState(false);
   const [assemblyStale, setAssemblyStale] = useState(false);
   const [activeDesignPanel, setActiveDesignPanel] = useState<'wiring' | 'placement'>('wiring');
   const [explanationLevel, setExplanationLevel] = useState<ExplanationLevel>('beginner');
   const [teaching, setTeaching] = useState<TeachingExplanation | null>(null);
   const [sceneSimulationRun, setSceneSimulationRun] = useState<SceneSimulationRun | null>(null);
   const [sceneFirmwareDigest, setSceneFirmwareDigest] = useState<string | null>(null);
+  const refreshDesignDiff = useCallback(async () => {
+    try {
+      setDesignDiff(await api<DesignDiffResponse>(`/projects/${projectId}/circuit/design-diff`));
+    } catch {
+      setDesignDiff(null);
+    }
+  }, [projectId]);
   const load = useCallback(async () => {
     setError('');
     try {
-      const [p, catalogIndex, saved, validation] = await Promise.all([
+      const [p, catalogIndex, saved, validation, comparison] = await Promise.all([
         api<{ project: Project }>(`/projects/${projectId}`),
         api<{ releases: { releaseId: string }[] }>('/catalog'),
         api<GraphResponse>(`/projects/${projectId}/circuit`),
         api<ValidationResponse>(`/projects/${projectId}/circuit/validation`).catch(
           (): ValidationResponse => ({ report: null }),
+        ),
+        api<DesignDiffResponse>(`/projects/${projectId}/circuit/design-diff`).catch(
+          (): null => null,
         ),
       ]);
       const releaseId =
@@ -312,11 +365,13 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
         saved.graphSnapshot?.graph ?? starterGraph(projectId, p.project.revision, c.release),
       );
       setGraphDigest(saved.graphSnapshot?.graphDigest ?? null);
+      setGraphSnapshotId(saved.graphSnapshot?.id ?? null);
       setUndoStack([]);
       setRedoStack([]);
       setDirty(!saved.graphSnapshot);
       setReport(validation.report?.report ?? null);
       setIsCurrent(validation.current !== false);
+      setDesignDiff(comparison);
     } catch (cause) {
       setError(friendlyError(cause));
     }
@@ -402,11 +457,31 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
       setProject(result.project);
       setGraph(result.graphSnapshot.graph);
       setGraphDigest(result.graphSnapshot.graphDigest);
+      setGraphSnapshotId(result.graphSnapshot.id);
       setDirty(false);
       setMessage('Circuit saved.');
       setReport(null);
       setIsCurrent(false);
       setAssemblyStale(Boolean(assemblyPlan));
+      void refreshDesignDiff();
+    } catch (cause) {
+      setError(friendlyError(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function confirmCurrentAsIntended() {
+    if (!project || !graphSnapshotId || dirty || busy) return;
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      await api(`/projects/${projectId}/circuit/design-intent`, {
+        method: 'POST',
+        body: { expectedRevision: project.revision, graphSnapshotId },
+      });
+      setMessage('Saved virtual graph confirmed as the intended design.');
+      await load();
     } catch (cause) {
       setError(friendlyError(cause));
     } finally {
@@ -445,7 +520,7 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
           progress = { ...saved, prePowerChecks: saved.prePowerChecks ?? [] };
         }
       } catch {
-        /* Invalid local progress is ignored and replaced below. */
+        /* Invalid or unavailable local progress is ignored until a write is attempted. */
       }
       setAssemblyPlan(result.plan);
       setCompletedAssemblySteps(
@@ -468,10 +543,15 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
     if (!assemblyPlan) return;
     setCompletedAssemblySteps(completed);
     setSkippedAssemblySteps(skipped);
-    window.localStorage.setItem(
-      `schemora-assembly:${projectId}:${assemblyPlan.planDigest}`,
-      JSON.stringify({ completed, skipped, prePowerChecks: checkedPrePowerItems }),
-    );
+    try {
+      window.localStorage.setItem(
+        `schemora-assembly:${projectId}:${assemblyPlan.planDigest}`,
+        JSON.stringify({ completed, skipped, prePowerChecks: checkedPrePowerItems }),
+      );
+      setAssemblyPersistenceWarning(false);
+    } catch {
+      setAssemblyPersistenceWarning(true);
+    }
   }
   function togglePrePowerCheck(checkId: string, checked: boolean) {
     if (!assemblyPlan) return;
@@ -479,14 +559,19 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
       ? [...new Set([...checkedPrePowerItems, checkId])]
       : checkedPrePowerItems.filter((id) => id !== checkId);
     setCheckedPrePowerItems(next);
-    window.localStorage.setItem(
-      `schemora-assembly:${projectId}:${assemblyPlan.planDigest}`,
-      JSON.stringify({
-        completed: completedAssemblySteps,
-        skipped: skippedAssemblySteps,
-        prePowerChecks: next,
-      }),
-    );
+    try {
+      window.localStorage.setItem(
+        `schemora-assembly:${projectId}:${assemblyPlan.planDigest}`,
+        JSON.stringify({
+          completed: completedAssemblySteps,
+          skipped: skippedAssemblySteps,
+          prePowerChecks: next,
+        }),
+      );
+      setAssemblyPersistenceWarning(false);
+    } catch {
+      setAssemblyPersistenceWarning(true);
+    }
   }
   async function validate() {
     if (!project || !graph || dirty || busy) return;
@@ -863,6 +948,72 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
           complete operating conditions remain unknown in this ruleset. A passing result is not a
           safety certification.
         </p>
+        <div className={styles.designComparison}>
+          <div>
+            <h3>Intended design comparison</h3>
+            <p className="fine-text">
+              This compares saved virtual graphs. It does not observe or verify physical wiring.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="button secondary"
+            disabled={busy || dirty || !graphSnapshotId}
+            onClick={() => void confirmCurrentAsIntended()}
+          >
+            {designDiff?.intent ? 'Replace intended design' : 'Confirm saved graph as intended'}
+          </button>
+          {designDiff?.intent ? (
+            designDiff.comparable ? (
+              <>
+                <p role="status">
+                  {designDiff.differences.length === 0
+                    ? 'The current saved virtual graph matches the confirmed intended graph.'
+                    : `${designDiff.differences.length} modeled graph difference${designDiff.differences.length === 1 ? '' : 's'} found.`}
+                </p>
+                {designDiff.differences.length > 0 && (
+                  <ul className={styles.findings} aria-label="Virtual graph differences">
+                    {designDiff.differences.map((difference, index) => (
+                      <li key={`${difference.kind}-${difference.identity}-${index}`}>
+                        <div>
+                          <strong>{difference.kind.replaceAll('-', ' ')}</strong>
+                          <p>{describeDesignDifference(difference, graph, partMap)}</p>
+                          <details>
+                            <summary>View modeled values</summary>
+                            <pre>
+                              {JSON.stringify(
+                                {
+                                  identity: difference.identity,
+                                  intended: difference.intended,
+                                  working: difference.working,
+                                },
+                                null,
+                                2,
+                              )}
+                            </pre>
+                          </details>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            ) : (
+              <p className="warning-notice">
+                Comparison unavailable: {designDiff.reason?.replaceAll('_', ' ').toLowerCase()}.
+                Confirm a new intended graph from the current catalog release to compare again.
+              </p>
+            )
+          ) : (
+            <p className="fine-text">
+              Confirm a saved graph to establish a separately versioned target for later
+              comparisons.
+            </p>
+          )}
+          {dirty && (
+            <p className="warning-notice">Save edits to compare the updated virtual graph.</p>
+          )}
+        </div>
         {dirty && (
           <p className="warning-notice">Unsaved changes: save this circuit to run validation.</p>
         )}
@@ -1110,9 +1261,10 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
                     These checks record your inspection only. Schemora cannot observe physical
                     wiring or certify that the circuit is safe.
                   </p>
-                  <p className="fine-text">
-                    Checklist progress is saved in this browser for this guide. It does not sync to
-                    other devices.
+                  <p className="fine-text" aria-live="polite">
+                    {assemblyPersistenceWarning
+                      ? 'This browser could not save checklist progress. Your checks remain visible only until this page closes.'
+                      : 'Checklist progress is saved in this browser for this guide. It does not sync to other devices.'}
                   </p>
                   <ul>
                     {prePowerChecklist.map((item) => (
@@ -1181,6 +1333,7 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
                 <button
                   type="button"
                   className="button secondary"
+                  disabled={activeAssemblyStep.action === 'pre_power_checklist'}
                   onClick={() =>
                     saveAssemblyProgress(
                       completedAssemblySteps.filter((id) => id !== activeAssemblyStep.id),

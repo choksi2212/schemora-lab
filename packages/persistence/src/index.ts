@@ -1190,6 +1190,65 @@ export class Repository {
       return { project: publicProject(project), graphSnapshot: this.publicGraph(graph) };
     });
   }
+  async confirmCircuitDesignIntent(
+    owner: string,
+    projectId: string,
+    expectedRevision: number,
+    graphSnapshotId: string,
+    key: string,
+  ) {
+    return this.mutate(
+      owner,
+      projectId,
+      expectedRevision,
+      key,
+      'circuit_design_intent_confirmed',
+      { expectedRevision, graphSnapshotId },
+      async (client, project) => {
+        const currentGraphId = await this.graphAtRevision(client, projectId, expectedRevision);
+        if (currentGraphId !== graphSnapshotId)
+          throw new RepositoryError('GRAPH_REVISION_CONFLICT', 409, project.revision - 1);
+        const versionId = randomUUID();
+        await client.query(
+          'INSERT INTO circuit_design_intent_versions(project_id,version_id,graph_snapshot_id,confirmed_by,confirmed_project_revision) VALUES($1,$2,$3,$4,$5)',
+          [projectId, versionId, graphSnapshotId, owner, project.revision],
+        );
+        await client.query(
+          `INSERT INTO project_circuit_design_intents(project_id,version_id) VALUES($1,$2)
+           ON CONFLICT(project_id) DO UPDATE SET version_id=EXCLUDED.version_id`,
+          [projectId, versionId],
+        );
+        return { intentVersionId: versionId, graphSnapshotId };
+      },
+    );
+  }
+  async currentCircuitDesignIntent(owner: string, projectId: string) {
+    return this.transaction(async (client) => {
+      await this.project(client, owner, projectId, 'share');
+      const result = await client.query(
+        `SELECT v.version_id,v.graph_snapshot_id,v.confirmed_by,v.confirmed_project_revision,
+          v.created_at,g.graph,g.graph_digest,g.project_revision AS graph_project_revision
+         FROM project_circuit_design_intents i
+         JOIN circuit_design_intent_versions v USING(project_id,version_id)
+         JOIN circuit_graph_snapshots g ON g.project_id=v.project_id AND g.id=v.graph_snapshot_id
+         WHERE i.project_id=$1`,
+        [projectId],
+      );
+      const row = result.rows[0];
+      return row
+        ? {
+            versionId: row.version_id,
+            graphSnapshotId: row.graph_snapshot_id,
+            graphProjectRevision: row.graph_project_revision,
+            confirmedProjectRevision: row.confirmed_project_revision,
+            confirmedBy: row.confirmed_by,
+            confirmedAt: row.created_at.toISOString(),
+            graph: row.graph,
+            graphDigest: row.graph_digest,
+          }
+        : null;
+    });
+  }
   private publicGraph(graph: CircuitGraphSnapshot) {
     return {
       id: graph.id,

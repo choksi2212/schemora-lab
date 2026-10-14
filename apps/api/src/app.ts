@@ -33,7 +33,11 @@ import {
   simulationBindingSchema,
   simulationRunSchema,
 } from '@schemora/simulation';
-import { circuitGraphSchema, validateCircuitGraph } from '@schemora/circuit-model';
+import {
+  circuitGraphSchema,
+  compareCircuitDesigns,
+  validateCircuitGraph,
+} from '@schemora/circuit-model';
 import { getCatalogRelease } from '@schemora/catalog';
 import { validateCircuit, validationReportSchema } from '@schemora/validation';
 import { AssemblyPlanBlockedError, generateAssemblyPlan } from '@schemora/assembly-plan';
@@ -75,6 +79,7 @@ const hardwareInventoryLinkSchema = z
 const simulationRunCreateSchema = z.object({ expectedRevision, firmwareArtifactId: uuid }).strict();
 const emptyBodySchema = z.object({}).strict();
 const circuitGraphWrite = z.object({ expectedRevision, graph: circuitGraphSchema }).strict();
+const circuitDesignIntentWrite = z.object({ expectedRevision, graphSnapshotId: uuid }).strict();
 const titleSchema = z.string().trim().min(1).max(120);
 const encodeDownloadFilename = (value: string) =>
   encodeURIComponent(value).replace(
@@ -647,6 +652,108 @@ export function buildApp(
   app.get('/v1/projects/:projectId/circuit/validation', async (request) => {
     const { projectId } = scope.parse(request.params);
     return envelope(request, await repository.latestValidationReport(owner(request), projectId));
+  });
+  app.post('/v1/projects/:projectId/circuit/design-intent', async (request) => {
+    const { projectId } = scope.parse(request.params);
+    const body = circuitDesignIntentWrite.parse(request.body);
+    const principal = owner(request);
+    const graph = await repository.latestCircuitGraph(principal, projectId);
+    if (!graph.graphSnapshot) throw new RepositoryError('GRAPH_SNAPSHOT_NOT_FOUND', 404);
+    if (graph.project.revision !== body.expectedRevision)
+      throw new RepositoryError('REVISION_CONFLICT', 409, graph.project.revision);
+    if (graph.graphSnapshot.id !== body.graphSnapshotId)
+      throw new RepositoryError('GRAPH_REVISION_CONFLICT', 409, graph.project.revision);
+    return envelope(
+      request,
+      await repository.confirmCircuitDesignIntent(
+        principal,
+        projectId,
+        body.expectedRevision,
+        body.graphSnapshotId,
+        key(request),
+      ),
+    );
+  });
+  app.get('/v1/projects/:projectId/circuit/design-diff', async (request) => {
+    const { projectId } = scope.parse(request.params);
+    const principal = owner(request);
+    const [current, intent] = await Promise.all([
+      repository.latestCircuitGraph(principal, projectId),
+      repository.currentCircuitDesignIntent(principal, projectId),
+    ]);
+    if (!current.graphSnapshot)
+      return envelope(request, {
+        comparisonBasis: 'saved-virtual-graphs',
+        comparisonVersion: 1,
+        intent: intent
+          ? {
+              versionId: intent.versionId,
+              graphSnapshotId: intent.graphSnapshotId,
+              graphProjectRevision: intent.graphProjectRevision,
+              confirmedProjectRevision: intent.confirmedProjectRevision,
+              confirmedBy: intent.confirmedBy,
+              confirmedAt: intent.confirmedAt,
+              graphDigest: intent.graphDigest,
+            }
+          : null,
+        workingGraphSnapshotId: null,
+        differences: [],
+        comparable: false,
+        reason: 'CURRENT_GRAPH_NOT_FOUND',
+      });
+    if (!intent)
+      return envelope(request, {
+        comparisonBasis: 'saved-virtual-graphs',
+        comparisonVersion: 1,
+        intent: null,
+        workingGraphSnapshotId: current.graphSnapshot.id,
+        differences: [],
+        comparable: false,
+        reason: 'DESIGN_INTENT_NOT_CONFIRMED',
+      });
+    const currentGraph = circuitGraphSchema.parse(current.graphSnapshot.graph);
+    const intendedGraph = circuitGraphSchema.parse(intent.graph);
+    let differences;
+    try {
+      differences = compareCircuitDesigns(intendedGraph, currentGraph);
+    } catch (cause) {
+      if (cause instanceof Error && cause.message === 'DESIGN_DIFF_CATALOG_RELEASE_MISMATCH')
+        return envelope(request, {
+          comparisonBasis: 'saved-virtual-graphs',
+          comparisonVersion: 1,
+          intent: {
+            versionId: intent.versionId,
+            graphSnapshotId: intent.graphSnapshotId,
+            graphProjectRevision: intent.graphProjectRevision,
+            confirmedProjectRevision: intent.confirmedProjectRevision,
+            confirmedBy: intent.confirmedBy,
+            confirmedAt: intent.confirmedAt,
+            graphDigest: intent.graphDigest,
+          },
+          workingGraphSnapshotId: current.graphSnapshot.id,
+          differences: [],
+          comparable: false,
+          reason: 'CATALOG_RELEASE_MISMATCH',
+        });
+      throw cause;
+    }
+    return envelope(request, {
+      comparisonBasis: 'saved-virtual-graphs',
+      comparisonVersion: 1,
+      intent: {
+        versionId: intent.versionId,
+        graphSnapshotId: intent.graphSnapshotId,
+        graphProjectRevision: intent.graphProjectRevision,
+        confirmedProjectRevision: intent.confirmedProjectRevision,
+        confirmedBy: intent.confirmedBy,
+        confirmedAt: intent.confirmedAt,
+        graphDigest: intent.graphDigest,
+      },
+      workingGraphSnapshotId: current.graphSnapshot.id,
+      differences,
+      comparable: true,
+      reason: null,
+    });
   });
   app.post('/v1/projects/:projectId/assembly-plan', async (request) => {
     const { projectId } = scope.parse(request.params);

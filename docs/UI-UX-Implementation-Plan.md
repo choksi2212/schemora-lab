@@ -257,6 +257,8 @@ Panel widths, collapse behavior, and default pane selection must be validated at
 
 Findings are grouped by blocking status and then affected object. Each finding includes: a short title, what was observed, why it matters, the object or endpoints involved, and an available action. Supported Phase 8 findings provide a rule-specific correction path and affected virtual wires when the validator can derive them. “Fix” must not imply an automatic safe repair if the correct answer depends on user intent. A result is tied to a graph revision; any graph change marks it stale until rerun.
 
+The Phase 8 intended-design panel lets a user explicitly confirm the current saved graph as a target and compares later saved graphs with it. It calls these saved **virtual** graphs and does not imply that the physical assembly was observed. It shows typed additions, removals, and changes and disables comparison for catalog-release mismatch. Unsaved edits are not presented as a current comparison. The pre-power checklist requires every generated item to be acknowledged, cannot be skipped, and tells the user when browser storage cannot retain progress.
+
 The screen distinguishes a rule check from a physical safety guarantee. The user sees what the validator covers and can inspect unsupported or unmodeled conditions. A service error is not shown as “passed” or “no issues.”
 
 ### 6.7 UI-S08 — Assembly guide

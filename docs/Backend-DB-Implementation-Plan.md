@@ -215,6 +215,10 @@ Use a deterministic cache key containing every semantic input. Cached reports ar
 
 Generate typed, immutable steps from the validated graph and selected procedure version. Each step has stable identity, operation, target components/terminals, prerequisites, camera/highlight targets, safety note, and completion predicate. Reject cycles and unresolved target IDs. The server evaluates progress from current graph state or explicit user evidence. A “Next” click is not completion. On graph changes, invalidate only the progress whose predicates depend on affected inputs and retain its history.
 
+### Phase 8 design intent persistence
+
+The current implementation adds append-only `circuit_design_intent_versions` rows that reference immutable `circuit_graph_snapshots`; `project_circuit_design_intents` selects the active confirmed target. Confirmation is an expected-revision, idempotent project mutation and can reference only the graph snapshot current at that revision. Re-confirmation appends a new version and advances the pointer. Comparison is computed from immutable intent/current graph identities and is versioned at the API boundary. Checklist acknowledgements remain browser-local and are not represented as an auditable server record; adding cross-device audit requires a product retention and consent decision.
+
 ### Verification and exit
 
 Use known-good circuits and deliberately faulty variants as golden fixtures. Test every rule’s input requirements and unknown handling. Verify stable report ordering for identical inputs and stale marking after graph change. Validate assembly prerequisite ordering, predicate evaluation, undo, skip, and invalidation. Conduct a novice task session before calling the assembly flow ready.

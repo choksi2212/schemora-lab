@@ -1,0 +1,58 @@
+{
+  "fixtureSchemaVersion": 1,
+  "rulesetId": "schemora-phase2-basic-circuit",
+  "rulesetVersion": "1.0.0",
+  "validatorVersion": "0.1.0",
+  "catalogReleaseId": "schemora-hw-2026.10",
+  "fixtures": [
+    {
+      "id": "direct-short",
+      "ruleId": "POWER_GROUND_SHORT",
+      "status": "fail",
+      "affectedEntityIds": ["board_1", "wire:wire_direct_short"]
+    },
+    {
+      "id": "reversed-led",
+      "ruleId": "LED_POLARITY",
+      "status": "fail",
+      "affectedEntityIds": ["led_1", "wire:wire_anode_ground", "wire:wire_source_cathode"]
+    },
+    {
+      "id": "led-same-net",
+      "ruleId": "LED_POLARITY",
+      "status": "fail",
+      "affectedEntityIds": ["led_1", "wire:wire_led_same_net"]
+    },
+    {
+      "id": "missing-return",
+      "ruleId": "LED_SERIES_RESISTOR",
+      "status": "unknown",
+      "affectedEntityIds": ["led_1", "resistor_1"]
+    },
+    {
+      "id": "invalid-topology",
+      "ruleId": "GRAPH_INTEGRITY",
+      "status": "fail",
+      "affectedEntityIds": [
+        "breadboards.0",
+        "graph_validation",
+        "terminalPlacements.0.hole",
+        "terminalPlacements.1.hole",
+        "terminalPlacements.2.hole",
+        "terminalPlacements.3.hole",
+        "wires.0.target",
+        "wires.1.target"
+      ]
+    }
+  ],
+  "comparisonFixtures": [
+    {
+      "id": "missing-return-wire",
+      "expectedDifferenceKinds": ["wire-removed"]
+    },
+    {
+      "id": "wrong-destination",
+      "expectedDifferenceKinds": ["wire-removed", "wire-added"]
+    }
+  ]
+}

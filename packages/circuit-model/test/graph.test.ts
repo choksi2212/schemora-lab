@@ -2,6 +2,7 @@ import { getCatalogRelease } from '@schemora/catalog';
 import { describe, expect, it } from 'vitest';
 import {
   deriveNets,
+  compareCircuitDesigns,
   mapReviewedConnectionCandidate,
   validateCircuitGraph,
   type CircuitCatalog,
@@ -56,6 +57,66 @@ const graph: CircuitGraph = {
     },
   ],
 };
+
+describe('intended design comparison', () => {
+  it('reports stable graph changes while ignoring array order and wire IDs', () => {
+    const intended = structuredClone(graph);
+    const working = structuredClone(graph);
+    working.wires[0] = {
+      ...working.wires[0]!,
+      id: 'different_wire_id',
+      source: working.wires[0]!.target,
+      target: working.wires[0]!.source,
+    };
+    working.components.reverse();
+    expect(compareCircuitDesigns(intended, working)).toEqual([]);
+
+    working.wires[0] = {
+      ...working.wires[0]!,
+      target: { kind: 'hole', hole: { breadboardInstanceId: 'breadboard_1', holeId: 'J24' } },
+    };
+    const diff = compareCircuitDesigns(intended, working);
+    expect(diff).toHaveLength(2);
+    expect(diff.map((entry) => entry.kind)).toEqual(['wire-added', 'wire-removed']);
+    expect(diff).toEqual(compareCircuitDesigns(intended, working));
+  });
+
+  it('reports component, placement, and breadboard topology changes', () => {
+    const intended = structuredClone(graph);
+    const working = structuredClone(graph);
+    working.components[0]!.catalogPartId = 'board.unknown';
+    working.terminalPlacements[0]!.hole.holeId = 'C24';
+    working.breadboards[0]!.topologyVersion += 1;
+    expect(compareCircuitDesigns(intended, working).map((entry) => entry.kind)).toEqual([
+      'component-changed',
+      'breadboard-changed',
+      'placement-changed',
+    ]);
+  });
+
+  it('reports an additional parallel wire even when its endpoint pair already exists', () => {
+    const working = structuredClone(graph);
+    working.wires.push({ ...working.wires[0]!, id: 'wire_gpio_duplicate' });
+    expect(compareCircuitDesigns(graph, working)).toEqual([
+      expect.objectContaining({ kind: 'wire-added', intended: null }),
+    ]);
+  });
+
+  it('ignores order-only changes in the selected rail variants', () => {
+    const intended = structuredClone(graph);
+    const working = structuredClone(graph);
+    working.breadboards[0]!.railVariants.reverse();
+    expect(compareCircuitDesigns(intended, working)).toEqual([]);
+  });
+
+  it('refuses to compare graphs from different catalog releases', () => {
+    const working = structuredClone(graph);
+    working.catalogReleaseId = 'different-release';
+    expect(() => compareCircuitDesigns(graph, working)).toThrow(
+      'DESIGN_DIFF_CATALOG_RELEASE_MISMATCH',
+    );
+  });
+});
 
 describe('circuit model', () => {
   it('maps a reviewed Phase 1 connection only through an explicit endpoint resolver', () => {

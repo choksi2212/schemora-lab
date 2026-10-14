@@ -24,5 +24,7 @@ export type { BreadboardTopology } from '@schemora/catalog';
 export { deriveNets, validateCircuitGraph } from './graph.js';
 export type { CircuitCatalog, CircuitGraphIssue, CircuitValidationResult } from './graph.js';
 export { deriveStableId } from './stable-id.js';
+export { compareCircuitDesigns } from './design-diff.js';
+export type { CircuitDesignDifference } from './design-diff.js';
 export { mapReviewedConnectionCandidate } from './candidate-adapter.js';
 export type { ReviewedCandidateDecision } from './candidate-adapter.js';

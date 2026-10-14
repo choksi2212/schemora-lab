@@ -67,6 +67,14 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('project circuit API', () => {
         [[userA, userB]],
       );
       await client.query(
+        'DELETE FROM project_circuit_design_intents WHERE project_id IN (SELECT id FROM projects WHERE owner_id=ANY($1))',
+        [[userA, userB]],
+      );
+      await client.query(
+        'DELETE FROM circuit_design_intent_versions WHERE project_id IN (SELECT id FROM projects WHERE owner_id=ANY($1))',
+        [[userA, userB]],
+      );
+      await client.query(
         'DELETE FROM circuit_graph_snapshots WHERE project_id IN (SELECT id FROM projects WHERE owner_id=ANY($1))',
         [[userA, userB]],
       );
@@ -238,5 +246,83 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('project circuit API', () => {
       tokenB,
     );
     expect(unauthorizedValidation.status).toBe(404);
+  });
+
+  it('confirms an immutable intended graph and compares later saved virtual graphs', async () => {
+    const created = await request(
+      'POST',
+      '/v1/projects',
+      { title: 'Design intent API test' },
+      tokenA,
+    );
+    expect(created.status).toBe(201);
+    const project = created.body.data;
+    const release = getCatalogRelease();
+    const firstGraph = {
+      schemaVersion: 1 as const,
+      id: 'intent_graph_1',
+      projectId: project.id,
+      projectRevision: project.revision + 1,
+      catalogReleaseId: release.releaseId,
+      components: [],
+      breadboards: [],
+      terminalPlacements: [],
+      wires: [],
+    };
+    const firstSave = await request(
+      'PUT',
+      `/v1/projects/${project.id}/circuit`,
+      { expectedRevision: project.revision, graph: firstGraph },
+      tokenA,
+    );
+    expect(firstSave.status).toBe(200);
+    const confirmed = await request(
+      'POST',
+      `/v1/projects/${project.id}/circuit/design-intent`,
+      {
+        expectedRevision: firstSave.body.data.project.revision,
+        graphSnapshotId: firstSave.body.data.graphSnapshot.id,
+      },
+      tokenA,
+    );
+    expect(confirmed.status).toBe(200);
+    const initialDiff = await request(
+      'GET',
+      `/v1/projects/${project.id}/circuit/design-diff`,
+      undefined,
+      tokenA,
+    );
+    expect(initialDiff.body.data.comparisonVersion).toBe(1);
+    expect(initialDiff.body.data.comparable).toBe(true);
+    expect(initialDiff.body.data.differences).toEqual([]);
+
+    const updatedGraph = {
+      ...firstGraph,
+      id: 'intent_graph_2',
+      projectRevision: confirmed.body.data.project.revision + 1,
+      components: [
+        {
+          id: 'board_intent_test',
+          catalogPartId: 'board.espressif.esp32-devkitc-v4.wroom-32e.male',
+        },
+      ],
+    };
+    const secondSave = await request(
+      'PUT',
+      `/v1/projects/${project.id}/circuit`,
+      { expectedRevision: confirmed.body.data.project.revision, graph: updatedGraph },
+      tokenA,
+    );
+    expect(secondSave.status).toBe(200);
+    const updatedDiff = await request(
+      'GET',
+      `/v1/projects/${project.id}/circuit/design-diff`,
+      undefined,
+      tokenA,
+    );
+    expect(updatedDiff.body.data.comparable).toBe(true);
+    expect(updatedDiff.body.data.differences).toEqual([
+      expect.objectContaining({ kind: 'component-added', identity: 'board_intent_test' }),
+    ]);
   });
 });
