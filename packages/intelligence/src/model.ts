@@ -9,6 +9,53 @@ export type ModelConfig = {
   maxInputCharacters?: number;
   fetch?: typeof fetch;
 };
+
+/**
+ * Make a provider-safe copy of conversation messages. Replacement uses one BMP
+ * code point per UTF-16 code unit so evidence offsets for surrounding text stay
+ * stable. The original conversation is retained locally and is never returned
+ * from this helper.
+ */
+export function redactProviderSecrets(conversation: NormalizedConversation): {
+  conversation: NormalizedConversation;
+  redacted: boolean;
+} {
+  const patterns = [
+    /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/gi,
+    /\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|password|passwd|secret|authorization)\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)/gi,
+    /\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi,
+    /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g,
+    /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g,
+    /\bsk-[A-Za-z0-9_-]{20,}\b/g,
+  ];
+  let redacted = false;
+  const messages = conversation.messages.map((message) => {
+    const spans: Array<[number, number]> = [];
+    for (const pattern of patterns) {
+      pattern.lastIndex = 0;
+      for (const match of message.content.matchAll(pattern)) {
+        if (match.index !== undefined && match[0].length > 0)
+          spans.push([match.index, match.index + match[0].length]);
+      }
+    }
+    if (spans.length === 0) return message;
+    spans.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const merged: Array<[number, number]> = [];
+    for (const span of spans) {
+      const previous = merged.at(-1);
+      if (previous && span[0] <= previous[1]) previous[1] = Math.max(previous[1], span[1]);
+      else merged.push([...span]);
+    }
+    let content = message.content;
+    for (const [start, end] of merged.reverse()) {
+      content = content.slice(0, start) + '█'.repeat(end - start) + content.slice(end);
+    }
+    redacted = true;
+    return { ...message, content };
+  });
+  return { conversation: { ...conversation, messages }, redacted };
+}
+
 /** Configure only from server policy; never accept endpoint, credentials, or model from an upload. */
 export function createModelExtractor(
   config: ModelConfig,

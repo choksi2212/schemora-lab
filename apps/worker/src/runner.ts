@@ -7,7 +7,12 @@ import {
   type ExtractionResult,
   type NormalizedConversation,
 } from '@schemora/contracts';
-import { extractCandidates, createModelExtractor } from '@schemora/intelligence';
+import {
+  extractCandidates,
+  createModelExtractor,
+  redactProviderSecrets,
+  validateExternalExtraction,
+} from '@schemora/intelligence';
 import {
   createVultrHardwareRecognizer,
   type VisionImage,
@@ -267,7 +272,15 @@ export class Worker {
               model: this.extraction.model!,
               timeoutMs: 30_000,
             });
-          extracted = await extractor(conversation);
+          const prepared = redactProviderSecrets(conversation);
+          if (prepared.redacted)
+            conversation.warnings.push(
+              'Credential-like text was redacted from the remote extraction request. Review any affected source passages locally; redaction is pattern-based and cannot detect every secret.',
+            );
+          extracted = validateExternalExtraction(
+            conversation,
+            await extractor(prepared.conversation),
+          );
           actualMode = 'provider';
         } catch {
           extracted = extractCandidates(conversation);

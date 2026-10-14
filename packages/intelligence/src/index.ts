@@ -6,7 +6,7 @@ export {
   type ParserLimits,
 } from './parse.js';
 export { extractCandidates, validateExternalExtraction } from './extract.js';
-export { createModelExtractor, type ModelConfig } from './model.js';
+export { createModelExtractor, redactProviderSecrets, type ModelConfig } from './model.js';
 export {
   createVultrHardwareRecognizer,
   type VisionImage,
