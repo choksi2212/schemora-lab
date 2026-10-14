@@ -10,16 +10,17 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@schemora/assembly-plan": "workspace:*",
     "@schemora/catalog": "workspace:*",
     "@schemora/circuit-model": "workspace:*",
-    "@schemora/assembly-plan": "workspace:*",
     "@schemora/contracts": "workspace:*",
-    "@schemora/simulation": "workspace:*",
     "@schemora/persistence": "workspace:*",
+    "@schemora/simulation": "workspace:*",
     "@schemora/storage": "workspace:*",
     "@schemora/validation": "workspace:*",
     "fastify": "5.12.7",
     "jose": "6.2.12",
+    "sharp": "0.35.5",
     "zod": "4.3.6"
   },
   "devDependencies": {

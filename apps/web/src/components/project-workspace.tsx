@@ -36,6 +36,7 @@ import {
   type Revision,
 } from '@/lib/api';
 import { ErrorNotice, Loading, SaveState } from './feedback';
+import { HardwarePhotoEvidence } from './hardware-photo-evidence';
 
 type MutationResult = { project: Project; import?: ImportRecord; review?: Review };
 const statusLabel: Record<ImportRecord['status'], string> = {
@@ -425,6 +426,16 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
           </Link>
         </div>
       </section>
+      <HardwarePhotoEvidence
+        projectId={projectId}
+        revision={project.revision}
+        editable={editable}
+        onRevision={(revision) =>
+          setDetail((previous) =>
+            previous ? { ...previous, project: { ...previous.project, revision } } : previous,
+          )
+        }
+      />
       <ErrorNotice
         error={error}
         onRetry={() => {

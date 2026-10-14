@@ -8,6 +8,7 @@ import {
   Repository,
   RepositoryError,
   publicFirmwareArtifact,
+  publicHardwarePhoto,
   publicImport,
   publicReview,
   requestSimulationRunStop,
@@ -31,12 +32,14 @@ import { getCatalogRelease } from '@schemora/catalog';
 import { validateCircuit, validationReportSchema } from '@schemora/validation';
 import { AssemblyPlanBlockedError, generateAssemblyPlan } from '@schemora/assembly-plan';
 import type { ApiConfig } from './config.js';
+import { MAX_HARDWARE_PHOTO_INPUT_BYTES, normalizeHardwarePhoto } from './hardware-photo.js';
 
 const uuid = z.string().uuid();
 const expectedRevision = z.number().int().positive();
 const scope = z.object({ projectId: uuid });
 const importScope = scope.extend({ importId: uuid });
 const firmwareArtifactScope = scope.extend({ artifactId: uuid });
+const hardwarePhotoScope = scope.extend({ photoId: uuid });
 const firmwareBuildScope = firmwareArtifactScope.extend({ buildId: uuid });
 const firmwareBuildArtifactScope = firmwareBuildScope.extend({
   role: z.enum(['application', 'bootloader', 'partition_table']),
@@ -65,6 +68,18 @@ const uploadSchema = z
       .string()
       .min(4)
       .max(Math.ceil(MAX_SOURCE_BYTES / 3) * 4)
+      .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+  })
+  .strict();
+const hardwarePhotoUploadSchema = z
+  .object({
+    expectedRevision,
+    shotRole: z.enum(['board-top', 'board-back', 'pin-labels', 'module-top', 'markings', 'other']),
+    consentVersion: z.literal('photo-evidence-v1'),
+    contentBase64: z
+      .string()
+      .min(4)
+      .max(Math.ceil(MAX_HARDWARE_PHOTO_INPUT_BYTES / 3) * 4)
       .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
   })
   .strict();
@@ -1135,6 +1150,110 @@ export function buildApp(
           .catch(() => {});
       throw error;
     }
+  });
+  app.get('/v1/projects/:projectId/hardware-photos', async (request) => {
+    const { projectId } = scope.parse(request.params);
+    return envelope(request, {
+      items: await repository.hardwarePhotos(owner(request), projectId),
+    });
+  });
+  app.post('/v1/projects/:projectId/hardware-photos', async (request, reply) => {
+    const { projectId } = scope.parse(request.params);
+    const body = hardwarePhotoUploadSchema.parse(request.body);
+    const principal = owner(request);
+    const encoded = Buffer.from(body.contentBase64, 'base64');
+    if (
+      !encoded.length ||
+      encoded.length > MAX_HARDWARE_PHOTO_INPUT_BYTES ||
+      encoded.toString('base64') !== body.contentBase64
+    )
+      throw new RepositoryError('INVALID_PHOTO', 400);
+
+    const objectKey = randomUUID();
+    const photoId = randomUUID();
+    await repository.registerUploadIntent(principal, projectId, objectKey);
+    let normalized: Awaited<ReturnType<typeof normalizeHardwarePhoto>>;
+    try {
+      normalized = await normalizeHardwarePhoto(encoded);
+    } catch {
+      await repository.discardUploadIntent(objectKey).catch(() => {});
+      throw new RepositoryError('INVALID_PHOTO', 400);
+    }
+    let photoCommitted = false;
+    try {
+      const sha256 = await storage.put(objectKey, normalized.bytes);
+      const result = await repository.mutate(
+        principal,
+        projectId,
+        body.expectedRevision,
+        key(request),
+        'hardware_photo_uploaded',
+        {
+          shotRole: body.shotRole,
+          consentVersion: body.consentVersion,
+          sha256,
+          byteLength: normalized.bytes.length,
+          format: normalized.format,
+          width: normalized.width,
+          height: normalized.height,
+        },
+        async (client, project) => {
+          const count = await client.query(
+            'SELECT count(*)::int AS count FROM hardware_photos WHERE project_id=$1',
+            [projectId],
+          );
+          if (count.rows[0].count >= 100) throw new RepositoryError('PHOTO_LIMIT', 429);
+          await repository.consumeUploadIntent(client, projectId, objectKey);
+          const inserted = await client.query<import('@schemora/persistence').HardwarePhotoRow>(
+            `INSERT INTO hardware_photos
+              (id,project_id,project_revision,actor_id,object_key,sha256,byte_length,format,
+               width,height,shot_role,consent_version,status)
+             VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'manual_review') RETURNING *`,
+            [
+              photoId,
+              projectId,
+              project.revision,
+              principal,
+              objectKey,
+              sha256,
+              normalized.bytes.length,
+              normalized.format,
+              normalized.width,
+              normalized.height,
+              body.shotRole,
+              body.consentVersion,
+            ],
+          );
+          return { photo: publicHardwarePhoto(inserted.rows[0]!) };
+        },
+      );
+      photoCommitted = result.photo.id === photoId;
+      if (!photoCommitted) {
+        await storage.delete(objectKey);
+        await repository.discardUploadIntent(objectKey);
+      }
+      return reply.code(photoCommitted ? 201 : 200).send(envelope(request, result));
+    } catch (error) {
+      if (!photoCommitted)
+        await storage
+          .delete(objectKey)
+          .then(() => repository.discardUploadIntent(objectKey))
+          .catch(() => {});
+      throw error;
+    }
+  });
+  app.get('/v1/projects/:projectId/hardware-photos/:photoId/content', async (request, reply) => {
+    const { projectId, photoId } = hardwarePhotoScope.parse(request.params);
+    const photo = await repository.hardwarePhotoRecord(owner(request), projectId, photoId);
+    const bytes = await storage.read(photo.object_key, photo.sha256);
+    const contentType =
+      photo.format === 'jpeg' ? 'image/jpeg' : photo.format === 'png' ? 'image/png' : 'image/webp';
+    return reply
+      .header('Cache-Control', 'private, no-store')
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Content-Security-Policy', "default-src 'none'; sandbox")
+      .type(contentType)
+      .send(bytes);
   });
   app.get('/v1/projects/:projectId/firmware-artifacts', async (request) => {
     const { projectId } = scope.parse(request.params);

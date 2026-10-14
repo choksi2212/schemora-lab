@@ -140,6 +140,37 @@ export interface FirmwareArtifactRow extends QueryResultRow {
     isEntrypoint: boolean;
   }>;
 }
+export interface HardwarePhotoRow extends QueryResultRow {
+  id: string;
+  project_id: string;
+  project_revision: number;
+  actor_id: string;
+  object_key: string;
+  sha256: string;
+  byte_length: number;
+  format: 'jpeg' | 'png' | 'webp';
+  width: number;
+  height: number;
+  shot_role: 'board-top' | 'board-back' | 'pin-labels' | 'module-top' | 'markings' | 'other';
+  consent_version: 'photo-evidence-v1';
+  status: 'manual_review';
+  created_at: Date;
+}
+export function publicHardwarePhoto(row: HardwarePhotoRow) {
+  return {
+    id: row.id,
+    projectRevision: row.project_revision,
+    sha256: row.sha256,
+    byteLength: row.byte_length,
+    format: row.format,
+    width: row.width,
+    height: row.height,
+    shotRole: row.shot_role,
+    consentVersion: row.consent_version,
+    status: row.status,
+    createdAt: row.created_at.toISOString(),
+  };
+}
 export interface FirmwareArtifactFileRow extends QueryResultRow {
   project_id: string;
   artifact_id: string;
@@ -513,6 +544,27 @@ export class Repository {
         [projectId],
       );
       return result.rows.map(publicFirmwareArtifact);
+    });
+  }
+  async hardwarePhotos(owner: string, projectId: string) {
+    return this.transaction(async (client) => {
+      await this.project(client, owner, projectId, 'share');
+      const result = await client.query<HardwarePhotoRow>(
+        'SELECT * FROM hardware_photos WHERE project_id=$1 ORDER BY created_at DESC,id DESC LIMIT 100',
+        [projectId],
+      );
+      return result.rows.map(publicHardwarePhoto);
+    });
+  }
+  async hardwarePhotoRecord(owner: string, projectId: string, photoId: string) {
+    return this.transaction(async (client) => {
+      await this.project(client, owner, projectId, 'share');
+      const result = await client.query<HardwarePhotoRow>(
+        'SELECT * FROM hardware_photos WHERE project_id=$1 AND id=$2',
+        [projectId, photoId],
+      );
+      if (!result.rows[0]) throw new RepositoryError('NOT_FOUND', 404);
+      return result.rows[0];
     });
   }
   async firmwareArtifactRecord(owner: string, projectId: string, artifactId: string) {
@@ -946,6 +998,12 @@ export class Repository {
       WHERE a.project_id=$1 ORDER BY a.created_at,a.id`,
       [project.id],
     );
+    const hardwarePhotos = await client.query(
+      `SELECT id,project_revision,sha256,byte_length,format,width,height,shot_role,
+        consent_version,status,created_at FROM hardware_photos
+       WHERE project_id=$1 ORDER BY created_at,id`,
+      [project.id],
+    );
     let associatedGraph = graphRef;
     if (associatedGraph === undefined) {
       const graph = await client.query<{
@@ -966,6 +1024,7 @@ export class Repository {
       project: publicProject(project),
       imports: imports.rows,
       firmwareArtifacts: firmwareArtifacts.rows,
+      hardwarePhotos: hardwarePhotos.rows,
       reviewThroughRevision: project.revision,
       circuitGraph: associatedGraph,
     };
@@ -1338,7 +1397,7 @@ export class Repository {
         );
         if (!intent.rows[0]) return;
         const accepted = await client.query(
-          'SELECT id FROM imports WHERE object_key=$1 UNION ALL SELECT id FROM firmware_artifacts WHERE object_key=$1 UNION ALL SELECT artifact_id AS id FROM firmware_artifact_files WHERE object_key=$1 UNION ALL SELECT build_id AS id FROM firmware_build_artifacts WHERE object_key=$1 LIMIT 1',
+          'SELECT id FROM imports WHERE object_key=$1 UNION ALL SELECT id FROM firmware_artifacts WHERE object_key=$1 UNION ALL SELECT id FROM hardware_photos WHERE object_key=$1 UNION ALL SELECT artifact_id AS id FROM firmware_artifact_files WHERE object_key=$1 UNION ALL SELECT build_id AS id FROM firmware_build_artifacts WHERE object_key=$1 LIMIT 1',
           [item.object_key],
         );
         if (!accepted.rows[0]) await removeObject(item.object_key);

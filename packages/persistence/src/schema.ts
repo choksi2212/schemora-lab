@@ -67,6 +67,30 @@ export const imports = pgTable('imports', {
   promptVersion: text('prompt_version'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+export const hardwarePhotos = pgTable(
+  'hardware_photos',
+  {
+    id: uuid('id').notNull(),
+    projectId: uuid('project_id').notNull(),
+    projectRevision: integer('project_revision').notNull(),
+    actorId: text('actor_id').notNull(),
+    objectKey: uuid('object_key').notNull(),
+    sha256: text('sha256').notNull(),
+    byteLength: integer('byte_length').notNull(),
+    format: text('format').notNull(),
+    width: integer('width').notNull(),
+    height: integer('height').notNull(),
+    shotRole: text('shot_role').notNull(),
+    consentVersion: text('consent_version').notNull(),
+    status: text('status').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projectId, table.id] }),
+    uniqueIndex('hardware_photos_object_key').on(table.objectKey),
+    index('hardware_photos_project_latest').on(table.projectId, table.createdAt, table.id),
+  ],
+);
 export const uploadIntents = pgTable('upload_intents', {
   objectKey: uuid('object_key').primaryKey(),
   projectId: uuid('project_id')

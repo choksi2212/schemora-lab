@@ -370,7 +370,7 @@ export class Worker {
       }
       return (
         await client.query<{ object_key: string }>(
-          'SELECT object_key FROM imports WHERE project_id=$1 UNION SELECT object_key FROM firmware_artifacts WHERE project_id=$1 UNION SELECT object_key FROM firmware_artifact_files WHERE project_id=$1 UNION SELECT object_key FROM firmware_build_artifacts WHERE project_id=$1 UNION SELECT object_key FROM upload_intents WHERE project_id=$1',
+          'SELECT object_key FROM imports WHERE project_id=$1 UNION SELECT object_key FROM firmware_artifacts WHERE project_id=$1 UNION SELECT object_key FROM hardware_photos WHERE project_id=$1 UNION SELECT object_key FROM firmware_artifact_files WHERE project_id=$1 UNION SELECT object_key FROM firmware_build_artifacts WHERE project_id=$1 UNION SELECT object_key FROM upload_intents WHERE project_id=$1',
           [job.project_id],
         )
       ).rows;
@@ -389,6 +389,7 @@ export class Worker {
       ]);
       await client.query('DELETE FROM simulation_runs WHERE project_id=$1', [job.project_id]);
       await client.query('DELETE FROM firmware_reviews WHERE project_id=$1', [job.project_id]);
+      await client.query('DELETE FROM hardware_photos WHERE project_id=$1', [job.project_id]);
       await client.query('DELETE FROM firmware_builds WHERE project_id=$1', [job.project_id]);
       await client.query('DELETE FROM firmware_artifacts WHERE project_id=$1', [job.project_id]);
       await client.query('DELETE FROM validation_reports WHERE project_id=$1', [job.project_id]);
