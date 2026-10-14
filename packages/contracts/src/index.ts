@@ -1,4 +1,14 @@
 import { z } from 'zod';
+export {
+  HARDWARE_RECOGNITION_CONSENT_VERSION,
+  hardwareImageRegionSchema,
+  hardwareRecognitionObservationSchema,
+  hardwareRecognitionCandidateSchema,
+  hardwareRecognitionProposalSchema,
+  hardwareRecognitionConsentSchema,
+  type HardwareRecognitionProposal,
+  type HardwareRecognitionConsent,
+} from './hardware-recognition.js';
 
 export const evidenceSchema = z
   .object({
