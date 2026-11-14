@@ -514,6 +514,16 @@ The repository contains firmware source/bundle persistence, review, run request 
 - Browser scene changes are driven by verified output from an actual run and are rejected when stale, malformed, or mismatched.
 - Unsupported behavior remains explicit; simulation is not presented as electrical or physical safety evidence.
 
+### 11.7 Current execution record
+
+**Phase status:** Open. Product execution remains unavailable; no provider or isolated runner has been approved.
+
+**P6-A reference contract:** The [Phase 6 reference profile](Phase-6-Reference-Profile.md) now pins the internal proof-of-concept contract to catalog `schemora-hw-2026.10.1`, the ESP32-DevKitC V4 / ESP32-WROOM-32E original ESP32 profile, ESP-IDF target `esp32`, and the exact GPIO19 → 220 Ω resistor → WP7113ID LED → board ground graph. It distinguishes fixture UART requests, host-observed GPIO callbacks, ideal graph-derived LED events, and simulated time (unavailable from the callback ABI). It enumerates unsupported behavior and records the no-provider-selection disposition. Current unit coverage exercises trace normalization and graph mapping; it is contract evidence, not production execution evidence.
+
+**Provider decision:** No production provider is selected. The pinned PICSimLab QEMU fork remains an internal engineering POC pending source/binary inventory, legal review, rights, maintenance ownership, and operational approval. Espressif's current `esp-emulator` target list does not include the original ESP32; official ESP-IDF QEMU documentation establishes emulation capabilities generally but does not close the required graph-to-external-LED behavior. Research is recorded in the profile and the detailed [Phase 6 implementation record](Phase-6-Implementation.md).
+
+**Still blocked on external capability/evidence:** Dedicated Linux isolation and hostile cleanup evidence; approved profile/image and signer; live worker-to-runner dispatch and cancellation; execution of accepted user firmware; persisted provider output; and a current-run browser scene update from actual output. Keep the feature unavailable until these dependencies pass their gates. Local CI remains disabled per the user's repository instruction; no hosted CI result is claimed.
+
 ---
 
 ## 12. Phase 7 — Photo recognition and confirmed inventory

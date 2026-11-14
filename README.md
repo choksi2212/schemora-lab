@@ -38,7 +38,7 @@ See [Phase 5 implementation status and remaining work](docs/Phase-5-Implementati
 
 ## Phase 6 — Firmware and simulation (in progress)
 
-Phase 6 now has provider-neutral firmware/run contracts and fail-closed coverage checks. No provider is approved, so the app does not claim to compile or execute firmware. See [Phase 6 implementation status, provider research, and remaining gates](docs/Phase-6-Implementation.md).
+Phase 6 now has provider-neutral firmware/run contracts and fail-closed coverage checks. The [reference profile](docs/Phase-6-Reference-Profile.md) fixes the narrow internal GPIO19 proof boundary. No provider is approved, so the app does not claim to compile or execute firmware. See [Phase 6 implementation status, provider research, and remaining gates](docs/Phase-6-Implementation.md).
 
 ## Phase 7 — Photo evidence and hardware recognition (in progress)
 
