@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { getWorkbenchHoleTargets, pointForBb400Hole } from './workbench-topology';
+import {
+  getWorkbenchHoleTargets,
+  pointForBb400Hole,
+  resolveWorkbenchHoleAtPoint,
+} from './workbench-topology';
 
 const breadboard = {
   id: 'breadboard-1',
@@ -33,5 +37,15 @@ describe('BB400 workbench topology projection', () => {
   it('rejects labels outside the declared coordinate convention', () => {
     for (const holeId of ['A0', 'A31', 'K1', 'rail-0:1', 'rail-1:26', 'not-a-hole'])
       expect(pointForBb400Hole(holeId)).toBeNull();
+  });
+
+  it('resolves scene hits only inside the bounded, unambiguous hole radius', () => {
+    const targets = getWorkbenchHoleTargets('schemora-hw-2026.10.1', [breadboard]);
+    const a1 = pointForBb400Hole('A1')!;
+    expect(resolveWorkbenchHoleAtPoint(targets, a1[0], a1[2])?.holeId).toBe('A1');
+    expect(
+      resolveWorkbenchHoleAtPoint(targets, (a1[0] + pointForBb400Hole('A2')![0]) / 2, a1[2]),
+    ).toBeNull();
+    expect(resolveWorkbenchHoleAtPoint(targets, Number.NaN, a1[2])).toBeNull();
   });
 });

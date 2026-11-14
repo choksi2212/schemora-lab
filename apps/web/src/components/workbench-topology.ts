@@ -63,3 +63,19 @@ export function getWorkbenchHoleTargets(
     });
   });
 }
+
+/** Resolves a bounded scene hit; clicks between declared holes intentionally select none. */
+export function resolveWorkbenchHoleAtPoint(
+  targets: WorkbenchHoleTarget[],
+  x: number,
+  z: number,
+  maximumDistance = 0.08,
+): WorkbenchHoleTarget | null {
+  if (!Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(maximumDistance)) return null;
+  let nearest: { target: WorkbenchHoleTarget; distance: number } | undefined;
+  for (const target of targets) {
+    const distance = Math.hypot(target.position[0] - x, target.position[2] - z);
+    if (!nearest || distance < nearest.distance) nearest = { target, distance };
+  }
+  return nearest && nearest.distance <= maximumDistance ? nearest.target : null;
+}

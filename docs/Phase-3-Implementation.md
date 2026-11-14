@@ -430,7 +430,7 @@ Release gates should record first meaningful scene display, interaction responsi
 
 ## 14. Verification plan
 
-This plan defines verification required before release; it does not assert that Phase 3 code or its tests already exist. Follow the repository’s current test conventions and run only the checks needed for the implementation changes.
+This matrix defines the complete verification required before release. Phase 3 code and automated tests now cover the graph-pinned BB400 target projection, bounded scene hole picking, keyboard hole selection, confirmed terminal/hole wire editing, and save/reload behavior. It does not represent completed evidence for every row or release gate; manual asset, accessibility, failure-recovery, and performance review remain required.
 
 | Verification layer       | Required cases                                                                                                                                          |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |

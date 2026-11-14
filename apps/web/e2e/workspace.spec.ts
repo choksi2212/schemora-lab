@@ -250,6 +250,37 @@ test('connects exact terminals in the 3D workbench and persists graph edits', as
   await expect(page.getByRole('status').filter({ hasText: 'Circuit saved.' })).toBeVisible();
   await page.reload();
   await expect(page.getByText(/Wire 4:.*Anode.*hole A1/)).toBeVisible();
+
+  const workbench = page.getByRole('region', { name: /Illustrative circuit workbench/ });
+  await expect(workbench).toHaveAttribute('data-scene-ready', 'true');
+  const canvas = workbench.locator('canvas');
+  const bounds = await canvas.boundingBox();
+  expect(bounds).not.toBeNull();
+  if (!bounds) throw new Error('The workbench canvas has no measurable bounds.');
+  const [worldX, worldY, worldZ] = [-3.4, -0.105, 0.55];
+  const root85 = Math.sqrt(85);
+  const viewX = (7 * worldX - 6 * worldZ) / root85;
+  const viewY = (-36 * worldX + 85 * worldY - 42 * worldZ) / (11 * root85);
+  const depth = 11 - (6 * worldX + 6 * worldY + 7 * worldZ) / 11;
+  const tanHalfFov = Math.tan((42 * Math.PI) / 360);
+  const ndcX = viewX / (depth * tanHalfFov * (bounds.width / bounds.height));
+  const ndcY = viewY / (depth * tanHalfFov);
+  await canvas.click({
+    position: {
+      x: ((ndcX + 1) / 2) * bounds.width,
+      y: ((1 - ndcY) / 2) * bounds.height,
+    },
+  });
+  await expect(
+    page.getByText(/Selected endpoint: Breadboard breadboard-1 · hole A2/),
+  ).toBeVisible();
+  await page
+    .getByRole('list', { name: 'Connectable circuit terminals' })
+    .getByRole('button', { name: /ESP32-DevKitC V4.*J3 GND position 1/ })
+    .click();
+  await expect(page.getByText(/Proposed connection:.*hole A2.*J3 GND/)).toBeVisible();
+  await page.getByRole('button', { name: 'Confirm wire' }).click();
+  await expect(page.getByText('5 graph wires')).toBeVisible();
 });
 
 test('keeps file validation local and exposes keyboard-operable import', async ({ page }) => {

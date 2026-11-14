@@ -4,6 +4,7 @@ import {
   Component,
   Suspense,
   useEffect,
+  useCallback,
   useMemo,
   useRef,
   useState,
@@ -14,7 +15,11 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { resolveSimulationLedStates, type SceneSimulationRun } from './simulation-scene-state';
-import { getWorkbenchHoleTargets, type WorkbenchHoleTarget } from './workbench-topology';
+import {
+  getWorkbenchHoleTargets,
+  resolveWorkbenchHoleAtPoint,
+  type WorkbenchHoleTarget,
+} from './workbench-topology';
 import styles from './circuit-scene.module.css';
 
 type Endpoint =
@@ -283,9 +288,11 @@ function Wire({
 function PickableHoles({
   targets,
   onSelect,
+  onTargetsReady,
 }: {
   targets: WorkbenchHoleTarget[];
   onSelect: (endpoint: WorkbenchEndpoint) => void;
+  onTargetsReady: () => void;
 }) {
   const instanceRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
@@ -298,7 +305,8 @@ function PickableHoles({
       mesh.setMatrixAt(index, dummy.matrix);
     });
     mesh.instanceMatrix.needsUpdate = true;
-  }, [targets, dummy]);
+    onTargetsReady();
+  }, [targets, dummy, onTargetsReady]);
   return (
     <instancedMesh
       ref={instanceRef}
@@ -333,6 +341,8 @@ function BoardScene({
   onSelect,
   holeTargets,
   onSelectHole,
+  onSelectHoleAtPoint,
+  onHolesReady,
   onRemoveWire,
   onSelectComponent,
 }: {
@@ -343,6 +353,8 @@ function BoardScene({
   onSelect: (terminal: TerminalRef) => void;
   holeTargets: WorkbenchHoleTarget[];
   onSelectHole: (endpoint: WorkbenchEndpoint) => void;
+  onSelectHoleAtPoint: (x: number, z: number) => void;
+  onHolesReady: () => void;
   onRemoveWire: (wireId: string) => void;
   onSelectComponent: (componentId: string) => void;
 }) {
@@ -365,7 +377,21 @@ function BoardScene({
           <boxGeometry args={[7.85, 0.08, 5.0]} />
           <meshStandardMaterial color="#fdfefe" roughness={0.72} />
         </mesh>
-        <PickableHoles targets={holeTargets} onSelect={onSelectHole} />
+        <mesh
+          position={[0, 0.176, 0]}
+          onClick={(event) => {
+            event.stopPropagation();
+            onSelectHoleAtPoint(event.point.x, event.point.z);
+          }}
+        >
+          <boxGeometry args={[7.85, 0.005, 5.0]} />
+          <meshBasicMaterial transparent opacity={0} colorWrite={false} depthWrite={false} />
+        </mesh>
+        <PickableHoles
+          targets={holeTargets}
+          onSelect={onSelectHole}
+          onTargetsReady={onHolesReady}
+        />
         <mesh position={[0, 0.178, 0]}>
           <boxGeometry args={[7.8, 0.015, 0.08]} />
           <meshStandardMaterial color="#d0d9dd" />
@@ -586,6 +612,7 @@ export function CircuitScene({
 }: Props) {
   const [webgl, setWebgl] = useState<boolean | null>(null);
   const [resetKey, setResetKey] = useState(0);
+  const [sceneReady, setSceneReady] = useState(false);
   const [selected, setSelected] = useState<WorkbenchEndpoint | null>(null);
   const [pendingWire, setPendingWire] = useState<{
     source: WorkbenchEndpoint;
@@ -604,9 +631,11 @@ export function CircuitScene({
     setWebgl(isWebGLAvailable());
   }, []);
   function retryRenderer() {
+    setSceneReady(false);
     setWebgl(isWebGLAvailable());
     setResetKey((value) => value + 1);
   }
+  const markSceneReady = useCallback(() => setSceneReady(true), []);
   const aria =
     graph.components
       .map((part) => `${partNames[part.catalogPartId] ?? part.catalogPartId} (${part.id})`)
@@ -699,6 +728,23 @@ export function CircuitScene({
       return;
     }
     selectEndpoint(endpoint);
+  }
+  function selectHoleAtPoint(x: number, z: number) {
+    // 0.08 scene units is below half the smallest declared BB400 hole spacing.
+    const target = resolveWorkbenchHoleAtPoint(holeTargets, x, z);
+    if (!target) {
+      setEditMessage(
+        'No BB400 hole is close enough to select here. Choose a labeled hole instead.',
+      );
+      return;
+    }
+    selectSceneHole({
+      kind: 'hole',
+      hole: {
+        breadboardInstanceId: target.breadboardInstanceId,
+        holeId: target.holeId,
+      },
+    });
   }
   function cancelPendingWire() {
     setPendingWire(null);
@@ -911,6 +957,7 @@ export function CircuitScene({
       <div
         className={styles.viewport}
         role="region"
+        data-scene-ready={sceneReady}
         aria-label={`Illustrative circuit workbench containing: ${aria}. Rotate with the mouse or touch; zoom with the wheel or pinch.`}
       >
         {webgl === null ? (
@@ -947,6 +994,8 @@ export function CircuitScene({
                   onSelect={(terminal) => selectEndpoint({ kind: 'terminal', terminal })}
                   holeTargets={holeTargets}
                   onSelectHole={selectSceneHole}
+                  onSelectHoleAtPoint={selectHoleAtPoint}
+                  onHolesReady={markSceneReady}
                   onRemoveWire={removeWire}
                   onSelectComponent={setSelectedComponentId}
                 />
