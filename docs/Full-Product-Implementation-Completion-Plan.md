@@ -387,7 +387,7 @@ The browser renders a graph-derived illustrative scene with camera controls, sel
 
 ### 9.1 Current baseline
 
-The API generates deterministic versioned plans from a saved graph, pinned catalog, and current validation report. The browser presents ordered instructions and keeps completion/skip progress locally. The current guide is a semantic checklist; camera targeting, animation, in-scene execution, and server-side durable progress remain open.
+The API generates deterministic versioned plans from a saved graph, pinned catalog, and current validation report. The browser presents ordered instructions and persists owner-scoped guide progress as append-only project events. Progress is restored across signed-in devices; it is user-reported workflow state, not proof that a physical step occurred. Camera targeting, animation, and in-scene execution remain open.
 
 ### 9.2 Workstream P4-A — Plan provenance and durable history
 
@@ -583,7 +583,7 @@ The app stores normalized private photo evidence and has a separately consented,
 
 ### 13.1 Current baseline
 
-The product compares an explicitly confirmed intended graph with the saved virtual graph, has version-pinned fixtures for a bounded set of digital faults, shows rule-specific corrective guidance, and provides a pre-power checklist. It does not observe a physical circuit. The checklist is browser-local, and hardware-owner, accessibility, and beginner review remain outstanding.
+The product compares an explicitly confirmed intended graph with the saved virtual graph, has version-pinned fixtures for a bounded set of digital faults, shows rule-specific corrective guidance, and provides a pre-power checklist. It does not observe a physical circuit. Checklist acknowledgements are owner-scoped append-only project events bound to the plan digest and revision, but they remain self-reported and non-auditable as physical work. Hardware-owner, accessibility, and beginner review remain outstanding.
 
 ### 13.2 Workstream P8-A — Fault-corpus and rule review
 
@@ -593,12 +593,16 @@ The product compares an explicitly confirmed intended graph with the saved virtu
 - Measure false positives, false negatives, and unknown rates against predeclared thresholds; do not claim “detects shorts” without specifying the modeled graph classes and exclusions.
 - Keep deterministic validation separate from self-reported intended design, simulator evidence, and physical inspection.
 
-### 13.3 Workstream P8-B — Checklist persistence decision
+### 13.3 Workstream P8-B — Checklist persistence and semantics
 
-- Decide whether checklist progress is a personal browser convenience, project-shared collaboration state, or auditable project history. Each has different privacy, retention, and authorization consequences.
-- If local convenience remains: define storage versioning, cross-browser limitations, reset behavior, stale-plan invalidation, and data-loss message.
-- If server persistence is selected: add owner-scoped append-only events, project revision/plan digest binding, conflict behavior, consent/retention, deletion integration, and tests for unauthorized reads/writes.
-- Regardless of persistence, label a checked item as “you confirmed” rather than a sensor-observed condition.
+**Decision implemented:** persist progress as owner-scoped, append-only project events bound to the assembly-plan digest and project revision. Restore it across signed-in devices and remove it with the owning project/plan. Acknowledgements express only that the user marked an inspection item; they do not certify safety, establish physical correctness, or constitute a verified audit of physical work. Failed writes do not advance the checkbox state.
+
+- Keep read/write authorization owner-scoped and reject checklist item IDs not present in the current plan.
+- Reject stale plan/revision mutations; use idempotency keys to make safe retries deterministic and reject conflicting replays.
+- Preserve append-only event semantics for changes; do not rewrite old checked events as if they never occurred.
+- Verify project deletion cascades to plan progress and keep the deletion behavior aligned with the product's data-retention policy.
+- Existing API integration tests cover cross-session restore, append-only events, idempotent replay/conflict, owner authorization, invalid checklist targets, and stale-plan rejection. Rerun with a reachable PostgreSQL test database before release.
+- Do not describe this as a server-side audit of physical work; the product has no sensor or independent witness for an actual inspection.
 
 ### 13.4 Workstream P8-C — Accessibility and user study
 
@@ -806,23 +810,23 @@ Every check should publish exact command, commit, environment, output count, pas
 
 These decisions are deliberately listed in one place. They should be made before the dependent scope is coded, not inferred from a temporary implementation choice.
 
-| Decision                        | Needed by  | Options or minimum answer                                                               | If unresolved                                                     |
-| ------------------------------- | ---------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Next.js security target         | Gate 0     | Current patched stable 16.x release, verified against advisories on upgrade day         | Production build stays blocked.                                   |
-| Phase 1 corpus rights           | Phase 1    | Owner-provided/synthetic licensed corpus; consent and allowed use for any real examples | No broad accuracy claim.                                          |
-| Phase 2 catalog scope           | Phase 2/9  | Exact current supported set and policy for adding revisions                             | New models stay unsupported.                                      |
-| Phase 3 asset/fit promise       | Phase 3    | Illustrative layout only or hardware-reviewed dimensioned placement for named parts     | No fit claim; keep illustrative scene.                            |
-| Phase 4 progress storage        | Phase 4    | Local convenience or account-synchronized project progress                              | Cross-device/audit behavior cannot be accepted.                   |
-| Phase 6 provider/runtime        | Phase 6    | Approved simulator/compiler, product rights, isolated Linux hosting and operator        | Execution stays unavailable and phase open.                       |
-| Phase 7 provider/account terms  | Phase 7    | Current region/retention/contract, budget owner, rotated key in secret store            | Keep recognition disabled.                                        |
-| Phase 8 checklist semantics     | Phase 8    | Local self-report or durable project audit, with privacy/retention                      | Keep local and explicitly non-auditable.                          |
-| Phase 9 next family             | Phase 9    | One named family and reference project                                                  | No broad expansion; existing switch slice remains the only claim. |
-| Sharing scope                   | Phase 10   | No sharing or invited reader/editor model with expiry/revocation                        | Keep projects owner-only.                                         |
-| Account deletion identity       | Phase 10   | Retain disclosed pseudonymous tombstone or migrate to internal ID mapping               | Broad launch remains blocked.                                     |
-| Retention policy                | Phase 10   | Per-data-class active and backup deletion windows                                       | Do not enable production uploads.                                 |
-| Hosting and operations          | Phase 10   | Provider, region, domain, DB, storage, scanner, telemetry, backup, operators            | Production remains unprovisioned.                                 |
-| RPO/RTO and performance budgets | Phase 10   | Owner-approved numeric targets and baseline machine/browser                             | No measurable production readiness claim.                         |
-| User/hardware reviewers         | Phases 2–9 | Named reviewers/participants and access to target parts                                 | Related human/hardware acceptance remains open.                   |
+| Decision                        | Needed by  | Options or minimum answer                                                                                                                       | If unresolved                                                                         |
+| ------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Next.js security target         | Gate 0     | Current patched stable 16.x release, verified against advisories on upgrade day                                                                 | Production build stays blocked.                                                       |
+| Phase 1 corpus rights           | Phase 1    | Owner-provided/synthetic licensed corpus; consent and allowed use for any real examples                                                         | No broad accuracy claim.                                                              |
+| Phase 2 catalog scope           | Phase 2/9  | Exact current supported set and policy for adding revisions                                                                                     | New models stay unsupported.                                                          |
+| Phase 3 asset/fit promise       | Phase 3    | Illustrative layout only or hardware-reviewed dimensioned placement for named parts                                                             | No fit claim; keep illustrative scene.                                                |
+| Phase 4 progress storage        | Phase 4    | **Resolved in implementation:** owner-scoped, append-only project events restored across signed-in devices; user-reported workflow state        | Rerun database integration tests before release; not proof of physical work.          |
+| Phase 6 provider/runtime        | Phase 6    | Approved simulator/compiler, product rights, isolated Linux hosting and operator                                                                | Execution stays unavailable and phase open.                                           |
+| Phase 7 provider/account terms  | Phase 7    | Current region/retention/contract, budget owner, rotated key in secret store                                                                    | Keep recognition disabled.                                                            |
+| Phase 8 checklist semantics     | Phase 8    | **Resolved in implementation:** owner-scoped, append-only, plan-digest/revision-bound self-reported acknowledgements; project deletion cascades | Keep explicit that this is not a physical audit; rerun DB integration before release. |
+| Phase 9 next family             | Phase 9    | One named family and reference project                                                                                                          | No broad expansion; existing switch slice remains the only claim.                     |
+| Sharing scope                   | Phase 10   | No sharing or invited reader/editor model with expiry/revocation                                                                                | Keep projects owner-only.                                                             |
+| Account deletion identity       | Phase 10   | Retain disclosed pseudonymous tombstone or migrate to internal ID mapping                                                                       | Broad launch remains blocked.                                                         |
+| Retention policy                | Phase 10   | Per-data-class active and backup deletion windows                                                                                               | Do not enable production uploads.                                                     |
+| Hosting and operations          | Phase 10   | Provider, region, domain, DB, storage, scanner, telemetry, backup, operators                                                                    | Production remains unprovisioned.                                                     |
+| RPO/RTO and performance budgets | Phase 10   | Owner-approved numeric targets and baseline machine/browser                                                                                     | No measurable production readiness claim.                                             |
+| User/hardware reviewers         | Phases 2–9 | Named reviewers/participants and access to target parts                                                                                         | Related human/hardware acceptance remains open.                                       |
 
 ---
 

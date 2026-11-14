@@ -108,6 +108,7 @@ describe('Phase 2 deterministic validation', () => {
       'reversed-led',
       'led-same-net',
       'missing-return',
+      'resistor-bypass',
       'invalid-topology',
     ]);
     expect(phase8Fixtures.comparisonFixtures.map((fixture) => fixture.id)).toEqual([
@@ -158,7 +159,12 @@ describe('Phase 2 deterministic validation', () => {
         terminal: { componentInstanceId: 'board_1', catalogTerminalId: 'gnd-j3-1' },
       },
     });
-    expect(status(graph, 'LED_SERIES_RESISTOR')).toBe('fail');
+    const finding = validateCircuit({ graph, catalog }).findings.find(
+      (item) => item.ruleId === 'LED_SERIES_RESISTOR',
+    )!;
+    const fixture = phase8Fixtures.fixtures.find((item) => item.id === 'resistor-bypass')!;
+    expect(finding.status).toBe(fixture.status);
+    expect(finding.affectedEntityIds).toEqual(fixture.affectedEntityIds);
   });
 
   it('detects a direct modeled power-to-ground net and keeps electrical limits unknown', () => {

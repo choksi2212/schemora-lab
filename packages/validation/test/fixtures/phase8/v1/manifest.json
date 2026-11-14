@@ -30,6 +30,12 @@
       "affectedEntityIds": ["led_1", "resistor_1"]
     },
     {
+      "id": "resistor-bypass",
+      "ruleId": "LED_SERIES_RESISTOR",
+      "status": "fail",
+      "affectedEntityIds": ["led_1"]
+    },
+    {
       "id": "invalid-topology",
       "ruleId": "GRAPH_INTEGRITY",
       "status": "fail",
