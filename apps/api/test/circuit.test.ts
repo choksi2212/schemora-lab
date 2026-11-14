@@ -65,6 +65,14 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('project circuit API', () => {
     if (app) await app.close();
     await repository.transaction(async (client) => {
       await client.query(
+        'DELETE FROM assembly_plan_progress_events WHERE project_id IN (SELECT id FROM projects WHERE owner_id=ANY($1))',
+        [[userA, userB]],
+      );
+      await client.query(
+        'DELETE FROM assembly_plan_snapshots WHERE project_id IN (SELECT id FROM projects WHERE owner_id=ANY($1))',
+        [[userA, userB]],
+      );
+      await client.query(
         'DELETE FROM validation_reports WHERE project_id IN (SELECT id FROM projects WHERE owner_id=ANY($1))',
         [[userA, userB]],
       );
@@ -248,6 +256,182 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('project circuit API', () => {
       tokenB,
     );
     expect(unauthorizedValidation.status).toBe(404);
+  });
+
+  it('stores owner-scoped assembly plans and append-only cross-session progress', async () => {
+    const created = await request('POST', '/v1/projects', { title: 'Assembly guide test' }, tokenA);
+    const project = created.body.data;
+    const release = getCatalogRelease();
+    const graph = {
+      schemaVersion: 1 as const,
+      id: 'assembly_api_graph',
+      projectId: project.id,
+      projectRevision: project.revision + 1,
+      catalogReleaseId: release.releaseId,
+      components: [
+        {
+          id: 'assembly_board',
+          catalogPartId: 'board.espressif.esp32-devkitc-v4.wroom-32e.male',
+        },
+        { id: 'assembly_resistor', catalogPartId: 'resistor.yageo.cfr-25jb-52-220r' },
+      ],
+      breadboards: [],
+      terminalPlacements: [],
+      wires: [
+        {
+          id: 'assembly_wire',
+          source: {
+            kind: 'terminal' as const,
+            terminal: { componentInstanceId: 'assembly_board', catalogTerminalId: 'gpio19' },
+          },
+          target: {
+            kind: 'terminal' as const,
+            terminal: { componentInstanceId: 'assembly_resistor', catalogTerminalId: 'lead-a' },
+          },
+        },
+      ],
+    };
+    const saved = await request(
+      'PUT',
+      `/v1/projects/${project.id}/circuit`,
+      { expectedRevision: project.revision, graph },
+      tokenA,
+    );
+    expect(saved.status).toBe(200);
+    const revision = saved.body.data.project.revision;
+    const validation = await request(
+      'POST',
+      `/v1/projects/${project.id}/circuit/validate`,
+      { expectedRevision: revision },
+      tokenA,
+    );
+    expect(validation.status).toBe(200);
+    const generated = await request(
+      'POST',
+      `/v1/projects/${project.id}/assembly-plan`,
+      { expectedRevision: revision },
+      tokenA,
+    );
+    expect(generated.status, JSON.stringify(generated.body)).toBe(200);
+    expect(generated.body.data.current).toBe(true);
+    const plan = generated.body.data.plan;
+    const identifySteps = plan.steps.filter(
+      (step: { action: string }) => step.action === 'identify_component',
+    );
+    const wireStep = plan.steps.find((step: { action: string }) => step.action === 'connect_wire');
+    expect(identifySteps.length).toBe(2);
+    expect(wireStep).toBeDefined();
+
+    const early = await request(
+      'POST',
+      `/v1/projects/${project.id}/assembly-plan/${plan.planDigest}/progress`,
+      {
+        expectedRevision: revision,
+        event: { target: 'step', targetId: wireStep.id, state: 'confirmed' },
+      },
+      tokenA,
+    );
+    expect(early.status).toBe(409);
+
+    for (const step of identifySteps) {
+      const confirmed = await request(
+        'POST',
+        `/v1/projects/${project.id}/assembly-plan/${plan.planDigest}/progress`,
+        {
+          expectedRevision: revision,
+          event: { target: 'step', targetId: step.id, state: 'confirmed' },
+        },
+        tokenA,
+      );
+      expect(confirmed.status).toBe(200);
+    }
+    const eventKey = randomUUID();
+    const wireConfirmation = {
+      expectedRevision: revision,
+      event: { target: 'step', targetId: wireStep.id, state: 'confirmed' },
+    };
+    const confirmedWire = await request(
+      'POST',
+      `/v1/projects/${project.id}/assembly-plan/${plan.planDigest}/progress`,
+      wireConfirmation,
+      tokenA,
+      eventKey,
+    );
+    const replay = await request(
+      'POST',
+      `/v1/projects/${project.id}/assembly-plan/${plan.planDigest}/progress`,
+      wireConfirmation,
+      tokenA,
+      eventKey,
+    );
+    expect(confirmedWire.status).toBe(200);
+    expect(replay.body.data.progress.completed).toContain(wireStep.id);
+    const collision = await request(
+      'POST',
+      `/v1/projects/${project.id}/assembly-plan/${plan.planDigest}/progress`,
+      {
+        expectedRevision: revision,
+        event: { target: 'step', targetId: wireStep.id, state: 'skipped' },
+      },
+      tokenA,
+      eventKey,
+    );
+    expect(collision.status).toBe(409);
+
+    const foreign = await request(
+      'GET',
+      `/v1/projects/${project.id}/assembly-plan/${plan.planDigest}/progress`,
+      undefined,
+      tokenB,
+    );
+    expect(foreign.status).toBe(404);
+    const restored = await request(
+      'GET',
+      `/v1/projects/${project.id}/assembly-plan/${plan.planDigest}/progress`,
+      undefined,
+      tokenA,
+    );
+    expect(restored.body.data.progress.completed).toEqual(
+      expect.arrayContaining([
+        ...identifySteps.map((step: { id: string }) => step.id),
+        wireStep.id,
+      ]),
+    );
+    const invalidChecklistTarget = await request(
+      'POST',
+      `/v1/projects/${project.id}/assembly-plan/${plan.planDigest}/progress`,
+      {
+        expectedRevision: revision,
+        event: { target: 'pre_power_check', targetId: 'wire-not-in-graph', state: 'checked' },
+      },
+      tokenA,
+    );
+    expect(invalidChecklistTarget.status).toBe(400);
+    const renamed = await request(
+      'PATCH',
+      `/v1/projects/${project.id}`,
+      { expectedRevision: revision, title: 'Assembly guide test renamed' },
+      tokenA,
+    );
+    expect(renamed.status).toBe(200);
+    const staleHistory = await request(
+      'GET',
+      `/v1/projects/${project.id}/assembly-plan/${plan.planDigest}/progress`,
+      undefined,
+      tokenA,
+    );
+    expect(staleHistory.body.data.current).toBe(false);
+    expect(staleHistory.body.data.progress.completed).toContain(wireStep.id);
+    const staleMutation = await request(
+      'POST',
+      `/v1/projects/${project.id}/assembly-plan/${plan.planDigest}/progress`,
+      {
+        expectedRevision: renamed.body.data.project.revision,
+        event: { target: 'step', targetId: wireStep.id, state: 'skipped' },
+      },
+      tokenA,
+    );
+    expect(staleMutation.status).toBe(409);
   });
 
   it('creates a new immutable revision for a compatible additive catalog upgrade', async () => {

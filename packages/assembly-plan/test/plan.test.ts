@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { getCatalogRelease } from '@schemora/catalog';
 import { validateCircuit } from '@schemora/validation';
-import { canonicalDigest, generateAssemblyPlan } from '../src/index.js';
+import {
+  assemblyProgressEventSchema,
+  canonicalDigest,
+  generateAssemblyPlan,
+} from '../src/index.js';
 
 const catalog = getCatalogRelease();
 const graph = {
@@ -44,6 +48,30 @@ const generate = (input: { graph?: unknown; report?: unknown; reportIsCurrent?: 
 };
 
 describe('deterministic assembly planner', () => {
+  it('accepts only progress states that match their target type', () => {
+    expect(
+      assemblyProgressEventSchema.safeParse({
+        target: 'step',
+        targetId: 'step_1',
+        state: 'confirmed',
+      }).success,
+    ).toBe(true);
+    expect(
+      assemblyProgressEventSchema.safeParse({
+        target: 'pre_power_check',
+        targetId: 'power-disconnected',
+        state: 'checked',
+      }).success,
+    ).toBe(true);
+    expect(
+      assemblyProgressEventSchema.safeParse({
+        target: 'step',
+        targetId: 'step_1',
+        state: 'checked',
+      }).success,
+    ).toBe(false);
+  });
+
   it('creates a repeatable dependency-ordered procedure from exact graph endpoints', () => {
     const first = generate();
     const second = generate();

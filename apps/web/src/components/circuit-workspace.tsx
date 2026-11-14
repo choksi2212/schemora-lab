@@ -18,7 +18,11 @@ import { CircuitScene } from './circuit-scene';
 import { FirmwareWorkspace } from './firmware-workspace';
 import type { SceneSimulationRun } from './simulation-scene-state';
 import styles from './circuit-workspace.module.css';
-import type { AssemblyPlan } from '@schemora/assembly-plan';
+import type {
+  AssemblyPlan,
+  AssemblyProgress,
+  AssemblyProgressEvent,
+} from '@schemora/assembly-plan';
 import { assessCatalogUpgrade, type CatalogRelease } from '@schemora/catalog';
 import {
   createTransientSwitchOverlay,
@@ -324,6 +328,7 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
   const [skippedAssemblySteps, setSkippedAssemblySteps] = useState<string[]>([]);
   const [checkedPrePowerItems, setCheckedPrePowerItems] = useState<string[]>([]);
   const [assemblyPersistenceWarning, setAssemblyPersistenceWarning] = useState(false);
+  const [assemblyProgressBusy, setAssemblyProgressBusy] = useState(false);
   const [assemblyStale, setAssemblyStale] = useState(false);
   const [activeDesignPanel, setActiveDesignPanel] = useState<'wiring' | 'placement'>('wiring');
   const [explanationLevel, setExplanationLevel] = useState<ExplanationLevel>('beginner');
@@ -546,42 +551,23 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
     setError('');
     setMessage('');
     try {
-      const result = await api<{ plan: AssemblyPlan; current: boolean }>(
-        `/projects/${projectId}/assembly-plan`,
-        { method: 'POST', body: { expectedRevision: project.revision } },
-      );
+      const result = await api<{
+        plan: AssemblyPlan;
+        progress: AssemblyProgress;
+        current: boolean;
+      }>(`/projects/${projectId}/assembly-plan`, {
+        method: 'POST',
+        body: { expectedRevision: project.revision },
+      });
       if (!result.current) throw new Error('The assembly guide is no longer current.');
-      const storageKey = `schemora-assembly:${projectId}:${result.plan.planDigest}`;
-      let progress: { completed: string[]; skipped: string[]; prePowerChecks: string[] } = {
-        completed: [],
-        skipped: [],
-        prePowerChecks: [],
-      };
-      try {
-        const saved = JSON.parse(window.localStorage.getItem(storageKey) ?? 'null');
-        if (
-          saved &&
-          Array.isArray(saved.completed) &&
-          Array.isArray(saved.skipped) &&
-          (saved.prePowerChecks === undefined || Array.isArray(saved.prePowerChecks)) &&
-          saved.completed.every((id: unknown) => typeof id === 'string') &&
-          saved.skipped.every((id: unknown) => typeof id === 'string') &&
-          (saved.prePowerChecks === undefined ||
-            saved.prePowerChecks.every((id: unknown) => typeof id === 'string'))
-        ) {
-          progress = { ...saved, prePowerChecks: saved.prePowerChecks ?? [] };
-        }
-      } catch {
-        /* Invalid or unavailable local progress is ignored until a write is attempted. */
-      }
       setAssemblyPlan(result.plan);
       setCompletedAssemblySteps(
-        progress.completed.filter((id) => result.plan.steps.some((step) => step.id === id)),
+        result.progress.completed.filter((id) => result.plan.steps.some((step) => step.id === id)),
       );
       setSkippedAssemblySteps(
-        progress.skipped.filter((id) => result.plan.steps.some((step) => step.id === id)),
+        result.progress.skipped.filter((id) => result.plan.steps.some((step) => step.id === id)),
       );
-      setCheckedPrePowerItems(progress.prePowerChecks);
+      setCheckedPrePowerItems(result.progress.prePowerChecks);
       setAssemblyStepIndex(0);
       setAssemblyStale(false);
       setMessage('Deterministic assembly guide generated from the current saved circuit.');
@@ -591,39 +577,36 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
       setBusy(false);
     }
   }
-  function saveAssemblyProgress(completed: string[], skipped: string[]) {
-    if (!assemblyPlan) return;
-    setCompletedAssemblySteps(completed);
-    setSkippedAssemblySteps(skipped);
+  async function recordAssemblyProgress(event: AssemblyProgressEvent) {
+    if (!assemblyPlan || !project || assemblyProgressBusy) return;
+    setAssemblyProgressBusy(true);
     try {
-      window.localStorage.setItem(
-        `schemora-assembly:${projectId}:${assemblyPlan.planDigest}`,
-        JSON.stringify({ completed, skipped, prePowerChecks: checkedPrePowerItems }),
+      const result = await api<{ progress: AssemblyProgress; current: boolean }>(
+        `/projects/${projectId}/assembly-plan/${assemblyPlan.planDigest}/progress`,
+        {
+          method: 'POST',
+          body: { expectedRevision: project.revision, event },
+        },
       );
+      if (!result.current)
+        throw new Error('This assembly guide is no longer current. Regenerate it.');
+      setCompletedAssemblySteps(result.progress.completed);
+      setSkippedAssemblySteps(result.progress.skipped);
+      setCheckedPrePowerItems(result.progress.prePowerChecks);
       setAssemblyPersistenceWarning(false);
-    } catch {
+    } catch (cause) {
       setAssemblyPersistenceWarning(true);
+      setError(friendlyError(cause));
+    } finally {
+      setAssemblyProgressBusy(false);
     }
   }
   function togglePrePowerCheck(checkId: string, checked: boolean) {
-    if (!assemblyPlan) return;
-    const next = checked
-      ? [...new Set([...checkedPrePowerItems, checkId])]
-      : checkedPrePowerItems.filter((id) => id !== checkId);
-    setCheckedPrePowerItems(next);
-    try {
-      window.localStorage.setItem(
-        `schemora-assembly:${projectId}:${assemblyPlan.planDigest}`,
-        JSON.stringify({
-          completed: completedAssemblySteps,
-          skipped: skippedAssemblySteps,
-          prePowerChecks: next,
-        }),
-      );
-      setAssemblyPersistenceWarning(false);
-    } catch {
-      setAssemblyPersistenceWarning(true);
-    }
+    void recordAssemblyProgress({
+      target: 'pre_power_check',
+      targetId: checkId,
+      state: checked ? 'checked' : 'unchecked',
+    });
   }
   async function validate() {
     if (!project || !graph || dirty || busy) return;
@@ -1490,8 +1473,8 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
                   </p>
                   <p className="fine-text" aria-live="polite">
                     {assemblyPersistenceWarning
-                      ? 'This browser could not save checklist progress. Your checks remain visible only until this page closes.'
-                      : 'Checklist progress is saved in this browser for this guide. It does not sync to other devices.'}
+                      ? 'The server could not save this checklist change. The displayed checks may be out of date; retry after reconnecting.'
+                      : 'Checklist changes are saved to this project and follow your account across devices.'}
                   </p>
                   <ul>
                     {prePowerChecklist.map((item) => (
@@ -1500,6 +1483,7 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
                           <input
                             type="checkbox"
                             checked={checkedPrePowerItems.includes(item.id)}
+                            disabled={assemblyProgressBusy}
                             onChange={(event) => togglePrePowerCheck(item.id, event.target.checked)}
                           />
                           <span>
@@ -1544,15 +1528,17 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
                   type="button"
                   className="button primary"
                   disabled={
+                    assemblyProgressBusy ||
                     !prerequisitesComplete ||
                     !prePowerReviewComplete ||
                     completedSet.has(activeAssemblyStep.id)
                   }
                   onClick={() =>
-                    saveAssemblyProgress(
-                      [...completedAssemblySteps, activeAssemblyStep.id],
-                      skippedAssemblySteps.filter((id) => id !== activeAssemblyStep.id),
-                    )
+                    void recordAssemblyProgress({
+                      target: 'step',
+                      targetId: activeAssemblyStep.id,
+                      state: 'confirmed',
+                    })
                   }
                 >
                   I completed this step
@@ -1560,12 +1546,15 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
                 <button
                   type="button"
                   className="button secondary"
-                  disabled={activeAssemblyStep.action === 'pre_power_checklist'}
+                  disabled={
+                    assemblyProgressBusy || activeAssemblyStep.action === 'pre_power_checklist'
+                  }
                   onClick={() =>
-                    saveAssemblyProgress(
-                      completedAssemblySteps.filter((id) => id !== activeAssemblyStep.id),
-                      [...new Set([...skippedAssemblySteps, activeAssemblyStep.id])],
-                    )
+                    void recordAssemblyProgress({
+                      target: 'step',
+                      targetId: activeAssemblyStep.id,
+                      state: 'skipped',
+                    })
                   }
                 >
                   Skip for now
@@ -1573,7 +1562,9 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
                 <button
                   type="button"
                   className="button secondary"
-                  disabled={assemblyStepIndex >= assemblyPlan.steps.length - 1}
+                  disabled={
+                    assemblyProgressBusy || assemblyStepIndex >= assemblyPlan.steps.length - 1
+                  }
                   onClick={() =>
                     setAssemblyStepIndex((index) =>
                       Math.min(assemblyPlan.steps.length - 1, index + 1),
@@ -1585,7 +1576,8 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
               </div>
               <p className="fine-text">
                 Next only changes the selected step. Completion and skip status are separate.
-                Progress is saved in this browser and is not a physical verification.
+                Progress is stored as project history. Confirmation is self-reported and is not
+                physical verification.
               </p>
             </article>
             {assemblyPlan.warnings.map((warning) => (

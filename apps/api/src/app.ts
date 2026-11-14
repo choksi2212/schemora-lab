@@ -40,7 +40,12 @@ import {
 } from '@schemora/circuit-model';
 import { assessCatalogUpgrade, getCatalogRelease, getCatalogReleaseById } from '@schemora/catalog';
 import { validateCircuit, validationReportSchema } from '@schemora/validation';
-import { AssemblyPlanBlockedError, generateAssemblyPlan } from '@schemora/assembly-plan';
+import {
+  AssemblyPlanBlockedError,
+  assemblyPlanSchema,
+  assemblyProgressEventSchema,
+  generateAssemblyPlan,
+} from '@schemora/assembly-plan';
 import type { ApiConfig } from './config.js';
 import { MAX_HARDWARE_PHOTO_INPUT_BYTES, normalizeHardwarePhoto } from './hardware-photo.js';
 import { buildProjectSpecification, buildWiringChecklist } from './project-export.js';
@@ -64,6 +69,7 @@ const firmwareBuildArtifactScope = firmwareBuildScope.extend({
 });
 const firmwareFileQuery = z.object({ path: z.string().min(1).max(240) }).strict();
 const simulationRunScope = scope.extend({ runId: uuid });
+const assemblyProgressScope = scope.extend({ planDigest: z.string().regex(/^[a-f0-9]{64}$/) });
 const mutation = z.object({ expectedRevision }).strict();
 const hardwareRecognitionRequestSchema = z
   .object({ expectedRevision, consent: hardwareRecognitionConsentSchema })
@@ -1127,7 +1133,34 @@ export function buildApp(
         throw new RepositoryError(cause.reason, 409, latest.project.revision);
       throw cause;
     }
-    return envelope(request, { plan, current: true });
+    const saved = await repository.saveAssemblyPlan(
+      principal,
+      projectId,
+      body.expectedRevision,
+      plan,
+    );
+    return envelope(request, { ...saved, plan: assemblyPlanSchema.parse(saved.plan) });
+  });
+  app.get('/v1/projects/:projectId/assembly-plan/:planDigest/progress', async (request) => {
+    const { projectId, planDigest } = assemblyProgressScope.parse(request.params);
+    const result = await repository.assemblyPlanProgress(owner(request), projectId, planDigest);
+    return envelope(request, { ...result, plan: assemblyPlanSchema.parse(result.plan) });
+  });
+  app.post('/v1/projects/:projectId/assembly-plan/:planDigest/progress', async (request) => {
+    const { projectId, planDigest } = assemblyProgressScope.parse(request.params);
+    const body = z
+      .object({ expectedRevision, event: assemblyProgressEventSchema })
+      .strict()
+      .parse(request.body);
+    const result = await repository.recordAssemblyProgress(
+      owner(request),
+      projectId,
+      body.expectedRevision,
+      planDigest,
+      key(request),
+      body.event,
+    );
+    return envelope(request, result);
   });
   app.post('/v1/projects/:projectId/simulation-runs', async (request, reply) => {
     const { projectId } = scope.parse(request.params);

@@ -88,6 +88,26 @@ export const assemblyPlanSchema = z
 
 export type AssemblyStep = z.infer<typeof assemblyStepSchema>;
 export type AssemblyPlan = z.infer<typeof assemblyPlanSchema>;
+export const assemblyProgressEventSchema = z
+  .object({
+    target: z.enum(['step', 'pre_power_check']),
+    targetId: z.string().min(1).max(240),
+    state: z.enum(['confirmed', 'skipped', 'not_started', 'checked', 'unchecked']),
+  })
+  .strict()
+  .superRefine((event, context) => {
+    const valid =
+      (event.target === 'step' && ['confirmed', 'skipped', 'not_started'].includes(event.state)) ||
+      (event.target === 'pre_power_check' && ['checked', 'unchecked'].includes(event.state));
+    if (!valid)
+      context.addIssue({ code: 'custom', message: 'State does not match progress target.' });
+  });
+export type AssemblyProgressEvent = z.infer<typeof assemblyProgressEventSchema>;
+export type AssemblyProgress = {
+  completed: string[];
+  skipped: string[];
+  prePowerChecks: string[];
+};
 export class AssemblyPlanBlockedError extends Error {
   constructor(
     public readonly reason: 'VALIDATION_REQUIRED' | 'CHECKS_FAILED',

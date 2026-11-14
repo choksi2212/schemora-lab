@@ -1,6 +1,6 @@
 # Schemora Phase 4 — Automatic Assembly Generation
 
-**Status:** In progress — deterministic plan generation and a guided checklist are available for the supported catalog profile; durable server-side plan history, scene camera focus/animation, and in-scene execution remain open.
+**Status:** In progress — deterministic plan generation, owner-scoped immutable plan snapshots, append-only cross-device progress events, and a guided checklist are available for the supported catalog profile; camera focus/animation, in-scene execution, and physical evidence remain open.
 
 **Product phase:** Phase 4 — Automatic assembly generation.
 
@@ -25,16 +25,16 @@ flowchart LR
   V[Current validation report] --> A
   A --> P[Versioned deterministic plan]
   P --> U[Assembly guide in circuit workspace]
-  U --> X[Browser-local step confirmations]
+  U --> X[Owner-scoped append-only progress events]
   G -. graph edit .-> S[Guide marked stale]
   S --> A
 ```
 
 The generator runs on the API server. It parses the strict graph, catalog-release, and validation-report schemas, then checks that the report is current and describes the exact project, revision, graph identity, graph digest, and catalog release. It requires `GRAPH_INTEGRITY` to pass and refuses any report containing a failed or error finding. Unknown and warning findings are preserved in the generated guide.
 
-The deterministic generator lives in [`packages/assembly-plan/src/index.ts`](../packages/assembly-plan/src/index.ts). The route in [`apps/api/src/app.ts`](../apps/api/src/app.ts) exposes `POST /v1/projects/:projectId/assembly-plan`. Generation is read-only and does not increment the project revision. The plan includes a schema version, planner ID/version, graph/report provenance, ordered steps, and a canonical SHA-256 digest.
+The deterministic generator lives in [`packages/assembly-plan/src/index.ts`](../packages/assembly-plan/src/index.ts). The route in [`apps/api/src/app.ts`](../apps/api/src/app.ts) exposes `POST /v1/projects/:projectId/assembly-plan`. Generation does not increment the project revision. Immutable plan snapshots include schema version, planner ID/version, graph/report provenance, ordered steps, and a canonical SHA-256 digest.
 
-Step progress is currently browser-local and keyed by project ID and plan digest. `Next` only changes the selected step. `Skip for now` records a distinct incomplete state. `I completed this step` records an explicit user confirmation and is enabled only after the plan's prerequisite steps are confirmed. Every graph edit, including undo and redo, marks the displayed plan stale; the user must regenerate from a current validation report. Server-side immutable plan history and append-only progress events are a later persistence increment.
+Generated plans are persisted as immutable, owner-scoped snapshots keyed by project and plan digest. Progress is stored as append-only events keyed to the exact plan: step confirmation, skip, reset, and individual pre-power checklist changes remain attributable to the account and can be loaded on another signed-in device. Event idempotency keys reject conflicting retries, and the API enforces plan currentness, target membership, and prerequisites independently of the browser. `Next` only changes the selected step. Every graph edit, including undo and redo, marks the displayed plan stale; progress remains in the historical plan but cannot be changed as if it applied to the new graph.
 
 ## 3. Deterministic planner contract
 
@@ -105,7 +105,7 @@ stateDiagram-v2
 
 The guide displays the active step, sequence position, exact target anchors, prerequisites, step warnings, completed count, and plan provenance. Users can select any step to revisit it. `Next` and `Previous` are navigation only. A skipped step stays incomplete. A later step cannot be confirmed while any prerequisite remains incomplete.
 
-Progress is stored in browser local storage using the plan digest as its namespace. Invalid or obsolete local state is ignored. A new plan uses a new progress namespace. Progress is not synchronized across browsers or accounts in this slice and must not be described as durable project history.
+Progress is server-side and scoped by owner, project, and immutable plan digest. A regenerated identical plan loads its prior progress; a changed plan has a separate history. Progress events are append-only and are not copied when a project is duplicated. Account closure and project deletion remove associated guide data through project-scoped foreign keys. This records the signed-in user's confirmations; it is not independent observation of physical work.
 
 ## 6. API contract
 
@@ -119,7 +119,9 @@ Request body:
 }
 ```
 
-The route reads the owner-scoped current graph and report, checks `expectedRevision`, confirms the report belongs to the exact current graph, and runs the deterministic planner. It returns `{ "plan": AssemblyPlan, "current": true }` in the standard API envelope. No submitted graph, validation result, or plan is trusted from the browser. The endpoint accepts the existing idempotency header for uniform write-origin handling, but generation has no persistence side effect to replay.
+The route reads the owner-scoped current graph and report, checks `expectedRevision`, confirms the report belongs to the exact current graph, and runs the deterministic planner. It persists or returns the immutable plan snapshot and current progress as `{ "plan": AssemblyPlan, "progress": AssemblyProgress, "current": true }` in the standard API envelope. No submitted graph, validation result, or plan is trusted from the browser. Repeated deterministic generation resolves to the same snapshot by digest.
+
+`GET /v1/projects/:projectId/assembly-plan/:planDigest/progress` returns the owner-authorized plan, its reduced progress projection, and whether its exact project revision and graph remain current. `POST` to the same path accepts `{ "expectedRevision": number, "event": AssemblyProgressEvent }` and appends one idempotent progress event. The API rejects unknown steps/checklist targets, invalid state/target pairs, stale plans, unmet prerequisites, and idempotency-key reuse with a different event.
 
 Expected failures are a missing graph, revision conflict, missing/stale validation report, graph/report provenance mismatch, graph-integrity failure, or any failed/error circuit finding. Such failures do not return a partial plan.
 
@@ -134,11 +136,10 @@ Expected failures are a missing graph, revision conflict, missing/stale validati
 
 ## 8. Verification
 
-The package tests verify deterministic output, stable plan digest, exact terminal labels, dependency ordering, current-report provenance, failure gating, and preservation of unknown-scope warnings. API integration coverage should verify that a failed report blocks generation and that a current valid report permits it. Browser coverage should verify guide generation, navigation without implicit completion, explicit confirmation, local progress reload, and stale-plan handling after graph edits.
+The package tests verify deterministic output, stable plan digest, exact terminal labels, dependency ordering, current-report provenance, failure gating, and preservation of unknown-scope warnings. Database-backed API integration coverage verifies owner scoping, durable plan/progress reload, prerequisite enforcement, event replay/conflict handling, and confirmed step state. Browser coverage verifies guide generation, navigation without implicit completion, explicit confirmation, server progress reload after page reload, and stale-plan handling after graph edits.
 
 ## 9. Known limits and remaining Phase 4 work
 
-- Current plan and progress are not immutable server-side artifacts. Add owner-scoped plan snapshots and append-only completion/skip events before claiming cross-device persistence or audit history.
 - User confirmations are self-reported; no physical device, sensor, or image verifies the real assembly.
 - The plan supports the current exact catalog release only. Unsupported or ambiguous part identity must block pin-specific instruction generation.
 - Steps do not yet execute graph edits in the 3D scene. Current graph wire steps are instructions for reproducing the saved target circuit on physical hardware.

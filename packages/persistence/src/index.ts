@@ -118,6 +118,18 @@ export interface CircuitGraphSnapshot extends QueryResultRow {
   request_digest: string;
   created_at: Date;
 }
+
+export interface AssemblyProgressEventInput {
+  target: 'step' | 'pre_power_check';
+  targetId: string;
+  state: 'confirmed' | 'skipped' | 'not_started' | 'checked' | 'unchecked';
+}
+
+type AssemblyProgressState = {
+  completed: string[];
+  skipped: string[];
+  prePowerChecks: string[];
+};
 export interface ValidationReportRow extends QueryResultRow {
   id: string;
   project_id: string;
@@ -1393,6 +1405,250 @@ export class Repository {
         current: report !== undefined && report.graph_snapshot_id === currentGraphId,
       };
     });
+  }
+  async saveAssemblyPlan<
+    T extends {
+      planDigest: string;
+      projectId: string;
+      projectRevision: number;
+      graphId: string;
+      graphDigest: string;
+      validationReportId: string;
+      validationReportDigest: string;
+    },
+  >(owner: string, projectId: string, expectedRevision: number, plan: T) {
+    return this.transaction(async (client) => {
+      const project = await this.project(client, owner, projectId, true);
+      if (project.revision !== expectedRevision)
+        throw new RepositoryError('REVISION_CONFLICT', 409, project.revision);
+      if (plan.projectId !== projectId || plan.projectRevision !== expectedRevision)
+        throw new RepositoryError('ASSEMBLY_PLAN_PROVENANCE_MISMATCH', 409, project.revision);
+      const graphId = await this.graphAtRevision(client, projectId, expectedRevision);
+      const graph = await client.query<{ graph_digest: string; graph: { id?: string } }>(
+        'SELECT graph_digest,graph FROM circuit_graph_snapshots WHERE project_id=$1 AND id=$2',
+        [projectId, graphId],
+      );
+      if (
+        graph.rows[0]?.graph_digest !== plan.graphDigest ||
+        graph.rows[0]?.graph.id !== plan.graphId
+      )
+        throw new RepositoryError('ASSEMBLY_PLAN_PROVENANCE_MISMATCH', 409, project.revision);
+      const report = await client.query<{ report_digest: string; graph_snapshot_id: string }>(
+        'SELECT report_digest,graph_snapshot_id FROM validation_reports WHERE project_id=$1 AND id=$2',
+        [projectId, plan.validationReportId],
+      );
+      if (
+        report.rows[0]?.report_digest !== plan.validationReportDigest ||
+        report.rows[0]?.graph_snapshot_id !== graphId
+      )
+        throw new RepositoryError('ASSEMBLY_PLAN_PROVENANCE_MISMATCH', 409, project.revision);
+      await client.query(
+        `INSERT INTO assembly_plan_snapshots
+           (project_id,id,graph_snapshot_id,validation_report_id,project_revision,plan_digest,plan,actor_id)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT(project_id,plan_digest) DO NOTHING RETURNING id`,
+        [
+          projectId,
+          randomUUID(),
+          graphId,
+          plan.validationReportId,
+          expectedRevision,
+          plan.planDigest,
+          canonicalJson(plan),
+          owner,
+        ],
+      );
+      const stored = await client.query<{ id: string; plan: unknown }>(
+        'SELECT id,plan FROM assembly_plan_snapshots WHERE project_id=$1 AND plan_digest=$2',
+        [projectId, plan.planDigest],
+      );
+      const storedPlan = stored.rows[0]?.plan as Record<string, unknown> | undefined;
+      this.assertAssemblyPlanIntegrity(storedPlan, plan.planDigest);
+      const progress = await this.assemblyProgress(client, projectId, stored.rows[0].id);
+      return {
+        plan: storedPlan,
+        progress,
+        current: project.revision === expectedRevision,
+      };
+    });
+  }
+  async assemblyPlanProgress(owner: string, projectId: string, planDigest: string) {
+    return this.transaction(async (client) => {
+      const project = await this.project(client, owner, projectId, 'share');
+      const result = await client.query<{
+        id: string;
+        project_revision: number;
+        graph_snapshot_id: string;
+        plan: unknown;
+      }>(
+        'SELECT id,project_revision,graph_snapshot_id,plan FROM assembly_plan_snapshots WHERE project_id=$1 AND plan_digest=$2',
+        [projectId, planDigest],
+      );
+      const stored = result.rows[0];
+      if (!stored) throw new RepositoryError('ASSEMBLY_PLAN_NOT_FOUND', 404);
+      this.assertAssemblyPlanIntegrity(stored.plan, planDigest);
+      const currentGraphId = await this.graphAtRevision(client, projectId, project.revision).catch(
+        (error) => {
+          if (error instanceof RepositoryError && error.code === 'GRAPH_SNAPSHOT_NOT_FOUND')
+            return null;
+          throw error;
+        },
+      );
+      return {
+        plan: stored.plan,
+        progress: await this.assemblyProgress(client, projectId, stored.id),
+        current:
+          project.revision === stored.project_revision &&
+          currentGraphId === stored.graph_snapshot_id,
+      };
+    });
+  }
+  async recordAssemblyProgress(
+    owner: string,
+    projectId: string,
+    expectedRevision: number,
+    planDigest: string,
+    idempotencyKey: string,
+    event: AssemblyProgressEventInput,
+  ) {
+    return this.transaction(async (client) => {
+      const project = await this.project(client, owner, projectId, true);
+      if (project.revision !== expectedRevision)
+        throw new RepositoryError('REVISION_CONFLICT', 409, project.revision);
+      const planResult = await client.query<{
+        id: string;
+        project_revision: number;
+        graph_snapshot_id: string;
+        plan: { steps?: { id: string; prerequisites: string[] }[] };
+      }>(
+        'SELECT id,project_revision,graph_snapshot_id,plan FROM assembly_plan_snapshots WHERE project_id=$1 AND plan_digest=$2 FOR UPDATE',
+        [projectId, planDigest],
+      );
+      const stored = planResult.rows[0];
+      if (!stored) throw new RepositoryError('ASSEMBLY_PLAN_NOT_FOUND', 404);
+      const graphId = await this.graphAtRevision(client, projectId, expectedRevision);
+      if (stored.project_revision !== expectedRevision || stored.graph_snapshot_id !== graphId)
+        throw new RepositoryError('ASSEMBLY_PLAN_STALE', 409, project.revision);
+      const allowed =
+        event.target === 'step'
+          ? stored.plan.steps?.some((step) => step.id === event.targetId) === true
+          : event.target === 'pre_power_check' &&
+            (await this.validPrePowerCheckTarget(
+              client,
+              projectId,
+              stored.graph_snapshot_id,
+              event.targetId,
+            ));
+      if (!allowed) throw new RepositoryError('ASSEMBLY_PROGRESS_TARGET_INVALID', 400);
+      const currentProgress = await this.assemblyProgress(client, projectId, stored.id);
+      const selectedStep = stored.plan.steps?.find((step) => step.id === event.targetId);
+      if (
+        event.target === 'step' &&
+        event.state === 'confirmed' &&
+        !selectedStep?.prerequisites.every((required) =>
+          currentProgress.completed.includes(required),
+        )
+      )
+        throw new RepositoryError('ASSEMBLY_PROGRESS_PREREQUISITES_INCOMPLETE', 409);
+      const requestDigest = canonicalDigest({ planDigest, event });
+      const existingEvent = await client.query<{ request_digest: string }>(
+        'SELECT request_digest FROM assembly_plan_progress_events WHERE project_id=$1 AND idempotency_key=$2',
+        [projectId, idempotencyKey],
+      );
+      if (existingEvent.rows[0] && existingEvent.rows[0].request_digest !== requestDigest)
+        throw new RepositoryError('IDEMPOTENCY_CONFLICT', 409);
+      await client.query(
+        `INSERT INTO assembly_plan_progress_events
+           (project_id,id,plan_id,actor_id,idempotency_key,request_digest,target,target_id,state)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         ON CONFLICT(project_id,idempotency_key) DO NOTHING`,
+        [
+          projectId,
+          randomUUID(),
+          stored.id,
+          owner,
+          idempotencyKey,
+          requestDigest,
+          event.target,
+          event.targetId,
+          event.state,
+        ],
+      );
+      const persistedEvent = await client.query<{ request_digest: string }>(
+        'SELECT request_digest FROM assembly_plan_progress_events WHERE project_id=$1 AND idempotency_key=$2',
+        [projectId, idempotencyKey],
+      );
+      if (persistedEvent.rows[0]?.request_digest !== requestDigest)
+        throw new RepositoryError('IDEMPOTENCY_CONFLICT', 409);
+      return { progress: await this.assemblyProgress(client, projectId, stored.id), current: true };
+    });
+  }
+  private async assemblyProgress(
+    client: PoolClient,
+    projectId: string,
+    planId: string,
+  ): Promise<AssemblyProgressState> {
+    const result = await client.query<{ target: string; target_id: string; state: string }>(
+      `SELECT DISTINCT ON (target,target_id) target,target_id,state
+       FROM assembly_plan_progress_events
+       WHERE project_id=$1 AND plan_id=$2
+       ORDER BY target,target_id,event_sequence DESC`,
+      [projectId, planId],
+    );
+    const progress: AssemblyProgressState = { completed: [], skipped: [], prePowerChecks: [] };
+    for (const event of result.rows) {
+      if (event.target === 'step' && event.state === 'confirmed')
+        progress.completed.push(event.target_id);
+      if (event.target === 'step' && event.state === 'skipped')
+        progress.skipped.push(event.target_id);
+      if (event.target === 'pre_power_check' && event.state === 'checked')
+        progress.prePowerChecks.push(event.target_id);
+    }
+    progress.completed.sort();
+    progress.skipped.sort();
+    progress.prePowerChecks.sort();
+    return progress;
+  }
+  private assertAssemblyPlanIntegrity(plan: unknown, expectedDigest: string) {
+    if (!plan || typeof plan !== 'object' || Array.isArray(plan))
+      throw new RepositoryError('ASSEMBLY_PLAN_RECORD_CORRUPT', 500);
+    const record = plan as Record<string, unknown>;
+    const digest = record.planDigest;
+    if (
+      digest !== expectedDigest ||
+      canonicalDigest(
+        Object.fromEntries(Object.entries(record).filter(([key]) => key !== 'planDigest')),
+      ) !== expectedDigest
+    )
+      throw new RepositoryError('ASSEMBLY_PLAN_RECORD_CORRUPT', 500);
+  }
+  private async validPrePowerCheckTarget(
+    client: PoolClient,
+    projectId: string,
+    graphSnapshotId: string,
+    targetId: string,
+  ) {
+    const result = await client.query<{
+      graph: {
+        wires?: { id?: string }[];
+        terminalPlacements?: {
+          terminal?: { componentInstanceId?: string; catalogTerminalId?: string };
+        }[];
+      };
+    }>('SELECT graph FROM circuit_graph_snapshots WHERE project_id=$1 AND id=$2', [
+      projectId,
+      graphSnapshotId,
+    ]);
+    const graph = result.rows[0]?.graph;
+    const targets = new Set(['power-disconnected', 'physical-identities', 'board-power']);
+    for (const wire of graph?.wires ?? [])
+      if (typeof wire.id === 'string') targets.add(`wire-${wire.id}`);
+    for (const placement of graph?.terminalPlacements ?? []) {
+      const terminal = placement.terminal;
+      if (terminal?.componentInstanceId && terminal.catalogTerminalId)
+        targets.add(`placement-${terminal.componentInstanceId}-${terminal.catalogTerminalId}`);
+    }
+    return targets.has(targetId);
   }
   private publicValidation(report: ValidationReportRow) {
     return {
