@@ -207,7 +207,7 @@ Run in order on the final dependency tree:
 
 ### 5.5 Gate 0 execution record
 
-**Status:** Local acceptance passed on the `dev` worktree. Hosted CI is still required on the pushed implementation commit; Gate 0 remains in progress until that result is checked.
+**Status:** All local acceptance checks passed on `dev`. Hosted CI is blocked by an account-level billing restriction; Gate 0 remains open until GitHub Actions can start and pass the workflow for the implementation commit.
 
 #### Dependency and advisory disposition
 
@@ -218,22 +218,22 @@ Run in order on the final dependency tree:
 
 #### Verification evidence
 
-| Gate 0 check                   | Result  | Environment/evidence                                                                                                      |
-| ------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Frozen dependency install      | Pass    | Node `24.16.0`, pnpm `11.5.2`; `pnpm install --frozen-lockfile`.                                                          |
-| Formatting                     | Pass    | `pnpm format:check`.                                                                                                      |
-| Type checking                  | Pass    | `pnpm typecheck`; all workspace projects completed.                                                                       |
-| Development database migration | Pass    | `pnpm db:migrate` against the Compose PostgreSQL 17 service.                                                              |
-| Full workspace suite           | Pass    | `pnpm test`; 246 tests passed, no failures or skipped tests. The test harness uses the separate `schemora_test` database. |
-| Production build               | Pass    | `pnpm build`; Next.js `16.4.6` compiled and generated all routes.                                                         |
-| Production dependency audit    | Pass    | `pnpm audit --prod`; no known vulnerabilities.                                                                            |
-| Full dependency audit          | Pass    | `pnpm audit`; no known vulnerabilities.                                                                                   |
-| Container builds               | Pass    | `Dockerfile.web`, `Dockerfile.api`, and `Dockerfile.worker` built successfully from the final lockfile.                   |
-| Chromium browser workflow      | Pass    | `pnpm test:e2e`; all 4 Playwright tests passed.                                                                           |
-| Repository hygiene             | Pending | Run `git diff --check`, confirm a clean `dev` worktree after commit, and verify `main` remains README-only.               |
-| Hosted CI                      | Pending | Verify the `Verify development` workflow for the pushed implementation commit.                                            |
+| Gate 0 check                   | Result  | Environment/evidence                                                                                                                                                                                                                                                                |
+| ------------------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frozen dependency install      | Pass    | Node `24.16.0`, pnpm `11.5.2`; `pnpm install --frozen-lockfile`.                                                                                                                                                                                                                    |
+| Formatting                     | Pass    | `pnpm format:check`.                                                                                                                                                                                                                                                                |
+| Type checking                  | Pass    | `pnpm typecheck`; all workspace projects completed.                                                                                                                                                                                                                                 |
+| Development database migration | Pass    | `pnpm db:migrate` against the Compose PostgreSQL 17 service.                                                                                                                                                                                                                        |
+| Full workspace suite           | Pass    | `pnpm test`; 246 tests passed, no failures or skipped tests. The test harness uses the separate `schemora_test` database.                                                                                                                                                           |
+| Production build               | Pass    | `pnpm build`; Next.js `16.4.6` compiled and generated all routes.                                                                                                                                                                                                                   |
+| Production dependency audit    | Pass    | `pnpm audit --prod`; no known vulnerabilities.                                                                                                                                                                                                                                      |
+| Full dependency audit          | Pass    | `pnpm audit`; no known vulnerabilities.                                                                                                                                                                                                                                             |
+| Container builds               | Pass    | `Dockerfile.web`, `Dockerfile.api`, and `Dockerfile.worker` built successfully from the final lockfile.                                                                                                                                                                             |
+| Chromium browser workflow      | Pass    | `pnpm test:e2e`; all 4 Playwright tests passed.                                                                                                                                                                                                                                     |
+| Repository hygiene             | Pass    | `git diff --check` passed; committed `dev` worktree is clean; `origin/main` contains only `README.md`.                                                                                                                                                                              |
+| Hosted CI                      | Blocked | [Run #84](https://github.com/choksi2212/schemora-lab/actions/runs/43572847908) could not start: GitHub reports the account is locked due to a billing issue. No runner steps executed. Clear the account restriction, then rerun `Verify development` on the implementation commit. |
 
-The browser run emitted existing Three.js deprecation warnings for `THREE.Clock` and `PCFSoftShadowMap`; these did not fail the workflow and are recorded for a later rendering maintenance pass. Hosted CI and repository hygiene remain explicit gates rather than inferred from local success.
+The browser run emitted existing Three.js deprecation warnings for `THREE.Clock` and `PCFSoftShadowMap`; these did not fail the workflow and are recorded for a later rendering maintenance pass. The hosted workflow failure is an account billing block, not a code result, so local verification is not substituted for remote CI acceptance.
 
 ---
 
