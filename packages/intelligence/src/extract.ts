@@ -59,6 +59,15 @@ function sourceDetails(
     };
   }
   if (kind === 'connection') {
+    const changedTarget = value.match(
+      /\b(?:LED\s*(?:anode|cathode)|resistor\s*(?:terminal\s*)?[ab12]|(?:DHT\d+|BME280|sensor)\s*(?:SDA|SCL|data|VCC|GND))\b/i,
+    )?.[0];
+    const lastGpio = [...value.matchAll(/\bGPIO\s*\d+\b/gi)].at(-1)?.[0];
+    if (/\b(?:change|replace|move|use)\b/i.test(value) && changedTarget && lastGpio)
+      return {
+        from: { label: lastGpio.trim(), componentRef: null },
+        to: { label: changedTarget.trim(), componentRef: null },
+      };
     const pair = value.match(/\b(?:connect|wire|attach)\s+(.+?)\s+to\s+(.+?)(?:[.!]\s*$|$)/i);
     const terminal = (label: string | undefined) =>
       label &&
@@ -208,7 +217,7 @@ export function extractCandidates(conversation: NormalizedConversation): Extract
           const previous = wiring.get(target);
           if (previous && previous.id !== connection.id) {
             const previousPin = previous.value.match(/\bGPIO\s*(\d+)\b/i)?.[1];
-            const currentPin = value.match(/\bGPIO\s*(\d+)\b/i)?.[1];
+            const currentPin = [...value.matchAll(/\bGPIO\s*(\d+)\b/gi)].at(-1)?.[1];
             if (previousPin && currentPin && previousPin !== currentPin) {
               if (/\b(?:instead|change|replace|move|correction|actually|rather)\b/i.test(value)) {
                 previous.status = 'superseded';

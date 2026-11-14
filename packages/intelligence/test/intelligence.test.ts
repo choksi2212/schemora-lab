@@ -4,6 +4,7 @@ import {
   extractCandidates,
   validateExternalExtraction,
   createModelExtractor,
+  redactProviderSecrets,
 } from '../src/index.js';
 import { benchmarkCases } from './fixtures.js';
 
@@ -65,21 +66,22 @@ function textPdf(content: string): Uint8Array {
   return bytes(doc);
 }
 
-describe('28 synthetic hardware benchmark fixtures', () => {
+describe('synthetic hardware benchmark fixtures', () => {
   for (const fixture of benchmarkCases)
     it(fixture.name, async () => {
       const conversation = await parse(fixture.text);
       const result = extractCandidates(conversation);
-      for (const expected of fixture.expected)
-        expect(
-          result.candidates.some(
-            (c) =>
-              c.kind === expected.kind &&
-              c.value.includes(expected.includes) &&
-              c.status === (expected.status ?? 'candidate'),
-          ),
-          `${expected.kind}: ${expected.includes}`,
-        ).toBe(true);
+      for (const expected of fixture.expected) {
+        const candidate = result.candidates.find(
+          (c) =>
+            c.kind === expected.kind &&
+            c.value === expected.value &&
+            c.status === (expected.status ?? 'candidate'),
+        );
+        expect(candidate, `${expected.kind}: ${expected.value}`).toBeDefined();
+        if (candidate && expected.details !== undefined)
+          expect(candidate.details).toEqual(expected.details);
+      }
       if (fixture.missing)
         expect(result.missingInformation.some((s) => s.includes(fixture.missing!))).toBe(true);
       if (fixture.conflicts !== undefined) expect(result.conflicts).toHaveLength(fixture.conflicts);
@@ -360,6 +362,52 @@ describe('normalization and source safety', () => {
 });
 
 describe('external extraction trust boundary', () => {
+  it('redacts provider-bound secrets without shifting later UTF-16 evidence offsets', async () => {
+    const token = `ghp_${'A'.repeat(32)}`;
+    const original = await parse(`User: Before 🔧 token=${token}; after GPIO 18.`);
+    const originalText = original.messages[0]!.content;
+    const prepared = redactProviderSecrets(original);
+    const redactedText = prepared.conversation.messages[0]!.content;
+    const marker = 'after GPIO 18.';
+    expect(prepared.redacted).toBe(true);
+    expect(redactedText).not.toContain(token);
+    expect(redactedText.length).toBe(originalText.length);
+    expect(redactedText.indexOf(marker)).toBe(originalText.indexOf(marker));
+    expect(original.messages[0]!.content).toContain(token);
+
+    let requestBody = '';
+    const extractor = createModelExtractor({
+      endpoint: 'https://provider.invalid/chat/completions',
+      model: 'approved',
+      apiKey: 'fake',
+      fetch: async (_, init) => {
+        requestBody = String(init?.body);
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                finish_reason: 'stop',
+                message: {
+                  content: JSON.stringify({
+                    schemaVersion: 1,
+                    summary: 'Review required.',
+                    candidates: [],
+                    missingInformation: [],
+                    conflicts: [],
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      },
+    });
+    await extractor(prepared.conversation);
+    expect(requestBody).not.toContain(token);
+    expect(requestBody).toContain(marker);
+  });
+
   it('rejects absent messages and incorrect quote offsets', async () => {
     const c = await parse('User: ESP32');
     const r = extractCandidates(c);

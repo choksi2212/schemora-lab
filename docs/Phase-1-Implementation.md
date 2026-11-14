@@ -51,24 +51,26 @@ The implementation uses the following primary documentation, with installed vers
 - Parser-specific dependency research and limits: [intelligence research](../packages/intelligence/RESEARCH.md).
 - Backend infrastructure sources and operational details: the backend package runbook.
 
+## Phase 1 implementation status
+
+The implementation slice and local regression work below are delivered on `dev`. Phase 1 is **not accepted as complete**: production identity/storage/provider deployment and representative, rights-cleared, independently annotated benchmark evidence remain open. User direction defers hosted CI while work proceeds; a deferred remote run is neither a pass nor a waiver of the release gate. No real-user accuracy or production readiness is claimed.
+
 ## Verification record
 
 Final executed checks and remaining external deployment gates are recorded at handoff in this file. Synthetic fixtures are used for regression and provenance testing; their score must not be presented as accuracy on real user exports or a live model.
 
-| Check                                        | Executed result                                                                                                                                                         |
-| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Frozen dependency installation               | Passed with pnpm 11.5.2                                                                                                                                                 |
-| Strict type checking                         | Passed for root tooling and all workspace packages; generated Next.js route types first                                                                                 |
-| Parser, extraction, and resource-limit suite | 58 tests passed                                                                                                                                                         |
-| Authentication, BFF, and client error suite  | 12 tests passed, including mocked PKCE callback exchange and domain-specific conflict messages                                                                          |
-| API, database, storage, and worker suite     | 27 tests passed against isolated PostgreSQL, including concurrent edits, lease fencing, active cancellation/deletion, upload-intent cleanup, and 201-message pagination |
-| Browser workflow                             | 3 tests passed with automatic clean stack startup; no uncaught browser exceptions                                                                                       |
-| Production web compilation                   | Passed with Next.js 16.4.0                                                                                                                                              |
-| Formatting                                   | Passed                                                                                                                                                                  |
-| Synthetic extraction benchmark               | 28 fixture conversations; complete expected sets and source spans checked; detailed scope in BENCHMARK.md                                                               |
+| Check                          | Executed result                                                                                                                                                                                              |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Frozen dependency installation | Passed with pnpm 11.5.2                                                                                                                                                                                      |
+| Strict type checking           | Passed through `pnpm check` for root tooling and all applicable workspace packages; generated Next.js route types first                                                                                      |
+| Workspace test suites          | 248 tests passed across workspace packages, including 64 intelligence, 45 API, 17 persistence, 27 worker, and 22 web tests                                                                                   |
+| Browser workflow               | 3 tests passed with automatic clean stack startup; no uncaught browser exceptions                                                                                                                            |
+| Production workspace build     | Passed through `pnpm check`; Next.js 16.4.6 web build and configured workspace builds                                                                                                                        |
+| Changed-file formatting        | Passed with Prettier check after formatting touched files                                                                                                                                                    |
+| Synthetic extraction benchmark | 29 cases (20 development / 9 lineage-held-out), 22 lineages; exact parser snapshots, complete expected extraction, structured labels, source spans, conflicts and decisions checked; details in BENCHMARK.md |
 
 The browser harness sets a noninteractive CI environment and disables API/worker watch reloads. Development watchers exclude runtime data and generated scene/web output; writing a source upload must not restart a running job process. Parser time/memory limits and strict output budgets remain active in both modes.
 
-Live GitHub OAuth credentials, actual S3 account/bucket policy, chosen model accuracy/retention, an operating-system parser sandbox, and production restore/service objectives require external deployment evidence. They were not simulated as completed cloud integrations. The original planning conversation is retained verbatim in context.md; current implementation choices are recorded here and in the revised technical documents.
+Live GitHub OAuth credentials, actual S3 account/bucket policy, chosen model accuracy/retention, an operating-system parser sandbox, and production restore/service objectives require external deployment evidence. The benchmark also needs an approved annotation guide, independent labeling/adjudication, and a rights-cleared representative corpus before Phase 1 can claim broad quality. Hosted CI is intentionally deferred by the user while phase work continues; its last run did not execute because the repository's GitHub billing lock prevented a runner from starting. It must be re-enabled and pass before release. These are not simulated as completed integrations or approvals. The original planning conversation is retained verbatim in context.md; current implementation choices are recorded here and in the revised technical documents.
 
 The implemented candidate schema preserves a display value alongside typed board identity, component quantity/resistance, connection endpoint labels, and firmware language/content. Missing values remain null. User review is a separate immutable action; a textual correction does not silently rewrite the original source's structured metadata or certify electrical correctness. Catalog mapping and graph compilation consume reviewed intent in Phase 2.

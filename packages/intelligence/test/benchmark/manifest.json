@@ -1,0 +1,212 @@
+{
+  "schemaVersion": 1,
+  "corpusVersion": "1.0.0",
+  "createdOn": "2026-11-14",
+  "scope": "Conversation parsing and local deterministic extraction regression corpus",
+  "source": {
+    "class": "repository-authored synthetic examples",
+    "externalDataset": false,
+    "realUserContent": false,
+    "thirdPartyCopiedContent": false,
+    "intendedRights": "Created for internal Schemora regression testing; no third-party license or user-data permission is relied upon."
+  },
+  "annotation": {
+    "status": "single-author labels",
+    "independentSecondAnnotator": false,
+    "adjudication": "Not performed. Human agreement evidence remains an open Phase 1 acceptance item."
+  },
+  "splitPolicy": {
+    "unit": "conversation/project lineage",
+    "nearDuplicatesAcrossSplits": "Prohibited; scorer enforces one split per lineage.",
+    "groupsAreImmutableWithinVersion": true
+  },
+  "preregisteredRegressionThresholds": {
+    "exactNormalizedTranscriptRate": 1,
+    "sourceEvidenceSpanValidity": 1,
+    "exactExtractionPrecision": 1,
+    "exactExtractionRecall": 1,
+    "conflictAndSupersessionDecisionAccuracy": 1,
+    "note": "These are regression thresholds for the bounded synthetic contract only. They are not product accuracy claims or release thresholds for real conversations or a live provider."
+  },
+  "splits": {
+    "development": 20,
+    "heldout": 9
+  },
+  "caseCount": 29,
+  "cases": [
+    {
+      "id": "P1-001",
+      "name": "ESP32 family",
+      "lineage": "basic-esp32-led",
+      "split": "development"
+    },
+    {
+      "id": "P1-002",
+      "name": "missing resistor",
+      "lineage": "resistor-unspecified",
+      "split": "development"
+    },
+    {
+      "id": "P1-003",
+      "name": "explicit resistance",
+      "lineage": "resistor-units",
+      "split": "development"
+    },
+    {
+      "id": "P1-004",
+      "name": "kilohm resistance",
+      "lineage": "resistor-units",
+      "split": "development"
+    },
+    {
+      "id": "P1-005",
+      "name": "exact GPIO",
+      "lineage": "basic-gpio-led",
+      "split": "development"
+    },
+    {
+      "id": "P1-006",
+      "name": "explicit correction",
+      "lineage": "gpio-led-revision",
+      "split": "development"
+    },
+    {
+      "id": "P1-007",
+      "name": "ambiguous correction",
+      "lineage": "gpio-led-revision",
+      "split": "development"
+    },
+    {
+      "id": "P1-008",
+      "name": "ground connection",
+      "lineage": "led-ground-return",
+      "split": "development"
+    },
+    {
+      "id": "P1-009",
+      "name": "board conflict",
+      "lineage": "board-choice-conflict",
+      "split": "heldout"
+    },
+    {
+      "id": "P1-010",
+      "name": "Arduino revision",
+      "lineage": "arduino-revision",
+      "split": "development"
+    },
+    {
+      "id": "P1-011",
+      "name": "Pico wireless",
+      "lineage": "pico-w-board",
+      "split": "heldout"
+    },
+    {
+      "id": "P1-012",
+      "name": "ESP32 S3",
+      "lineage": "esp32-s3-sensor",
+      "split": "development"
+    },
+    {
+      "id": "P1-013",
+      "name": "sensor data",
+      "lineage": "dht22-data-line",
+      "split": "heldout"
+    },
+    {
+      "id": "P1-014",
+      "name": "I2C SDA",
+      "lineage": "bme280-i2c-bus",
+      "split": "development"
+    },
+    {
+      "id": "P1-015",
+      "name": "I2C SCL",
+      "lineage": "bme280-i2c-bus",
+      "split": "development"
+    },
+    {
+      "id": "P1-016",
+      "name": "negative instruction",
+      "lineage": "negative-wiring-constraint",
+      "split": "heldout"
+    },
+    {
+      "id": "P1-029",
+      "name": "remove wiring pending review",
+      "lineage": "stop-pending-review",
+      "split": "development"
+    },
+    {
+      "id": "P1-017",
+      "name": "firmware",
+      "lineage": "firmware-sketch-revision",
+      "split": "development"
+    },
+    {
+      "id": "P1-018",
+      "name": "code role markers",
+      "lineage": "quoted-role-marker-in-code",
+      "split": "heldout"
+    },
+    {
+      "id": "P1-019",
+      "name": "firmware changes",
+      "lineage": "firmware-sketch-revision",
+      "split": "development"
+    },
+    {
+      "id": "P1-020",
+      "name": "quantities",
+      "lineage": "stated-bill-of-materials",
+      "split": "development"
+    },
+    {
+      "id": "P1-021",
+      "name": "no wiring",
+      "lineage": "project-without-wiring",
+      "split": "heldout"
+    },
+    {
+      "id": "P1-022",
+      "name": "polarity missing",
+      "lineage": "led-connection-without-polarity",
+      "split": "development"
+    },
+    {
+      "id": "P1-023",
+      "name": "unknown board",
+      "lineage": "custom-controller-unknown",
+      "split": "heldout"
+    },
+    {
+      "id": "P1-024",
+      "name": "injection remains data",
+      "lineage": "imported-instruction-as-data",
+      "split": "heldout"
+    },
+    {
+      "id": "P1-025",
+      "name": "Unicode evidence",
+      "lineage": "unicode-gpio-evidence",
+      "split": "heldout"
+    },
+    {
+      "id": "P1-026",
+      "name": "unicode kilo resistance",
+      "lineage": "resistor-units",
+      "split": "development"
+    },
+    {
+      "id": "P1-027",
+      "name": "unicode micro resistance",
+      "lineage": "resistor-units",
+      "split": "development"
+    },
+    {
+      "id": "P1-028",
+      "name": "unspecified numeric units",
+      "lineage": "resistor-units",
+      "split": "development"
+    }
+  ]
+}

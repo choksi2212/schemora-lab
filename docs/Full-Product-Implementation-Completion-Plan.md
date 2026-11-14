@@ -756,7 +756,7 @@ Phase 10 is complete only when:
 | Hardware review      | Exact identities, mappings, geometry/anchors, physical instructions, fault expectations                                               | 2–5, 7–9          | Reviewer signoff per catalog/family.                |
 | Operations           | Deployment, scanner, restore, alert routing, incident response, migration/rollback                                                    | 10                | Staging then production evidence.                   |
 
-Every check should publish exact command, commit, environment, output count, pass/fail/skip status, and retained artifacts. Tests that did not run must not be reported as passing.
+Every check should publish exact command, commit, environment, output count, pass/fail/skip status, and retained artifacts. Tests that did not run must not be reported as passing. Hosted CI is currently deferred at the user's direction so phase implementation can proceed; this sequencing choice does not convert the blocked run documented in Gate 0 into a pass or waive the release gate. Re-enable and pass hosted CI before release.
 
 ---
 
