@@ -187,6 +187,30 @@ test('connects exact terminals in the 3D workbench and persists graph edits', as
     .getByRole('button', { name: /Identify ESP32-DevKitC V4/ })
     .click();
   await expect(page.getByText('Why this step?')).toBeVisible();
+  await page.evaluate(() => {
+    const subtle = window.crypto.subtle as SubtleCrypto & {
+      __savedDigest?: SubtleCrypto['digest'];
+    };
+    subtle.__savedDigest = subtle.digest.bind(subtle);
+    Object.defineProperty(subtle, 'digest', {
+      configurable: true,
+      value: () => Promise.reject(new Error('simulated teaching resolver failure')),
+    });
+  });
+  await page.getByRole('button', { name: 'Quick' }).click();
+  await expect(page.getByText(/This explanation could not be loaded/)).toBeVisible();
+  await expect(page.getByText(/saved guide and exact targets remain authoritative/)).toBeVisible();
+  await page.evaluate(() => {
+    const subtle = window.crypto.subtle as SubtleCrypto & {
+      __savedDigest?: SubtleCrypto['digest'];
+    };
+    if (subtle.__savedDigest)
+      Object.defineProperty(subtle, 'digest', {
+        configurable: true,
+        value: subtle.__savedDigest,
+      });
+    delete subtle.__savedDigest;
+  });
   await page.getByRole('button', { name: 'Detailed' }).click();
   await expect(page.getByText(/J3 position 8/)).toBeVisible();
   await expect(
@@ -199,7 +223,7 @@ test('connects exact terminals in the 3D workbench and persists graph edits', as
   await expect(page.getByText(/Use the exact GPIO label shown in this step/)).toBeVisible();
   await page.getByRole('list', { name: 'Assembly steps' }).getByRole('button').first().click();
   await page.getByRole('button', { name: 'Next', exact: true }).click();
-  await expect(page.getByText(/Step 2 of/)).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: /Step 2 of/ })).toBeVisible();
   await expect(page.getByText(/0 of .* steps confirmed/)).toBeVisible();
   await page.getByRole('button', { name: 'I completed this step' }).click();
   await expect(page.getByText(/1 of .* steps confirmed/)).toBeVisible();

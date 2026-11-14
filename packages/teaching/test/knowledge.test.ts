@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { getCatalogRelease } from '@schemora/catalog';
 import { validateCircuit } from '@schemora/validation';
+import { circuitGraphSchema } from '@schemora/circuit-model';
 import { generateAssemblyPlan, canonicalDigest } from '@schemora/assembly-plan';
 import { explainAssemblyStep, listTeachingLessons, validateTeachingContent } from '../src/index.js';
+import { phase5ReferenceGraph } from './fixtures/phase5-reference-graph.js';
 
 const catalog = getCatalogRelease();
 const graph = {
@@ -64,6 +66,63 @@ const plan = generateAssemblyPlan({
 });
 
 describe('curated beginner teaching engine', () => {
+  it('keeps the moderated-study fixture valid and its physical scoring key exact', () => {
+    const fixture = circuitGraphSchema.parse(phase5ReferenceGraph);
+    const fixtureReport = validateCircuit({ graph: fixture, catalog });
+    expect(
+      fixtureReport.findings.find((finding) => finding.ruleId === 'GRAPH_INTEGRITY')?.status,
+    ).toBe('pass');
+    expect(
+      fixtureReport.findings.some((finding) => ['fail', 'error'].includes(finding.status)),
+    ).toBe(false);
+    expect(fixture.terminalPlacements).toEqual([]);
+    expect(fixture.wires.map((wire) => [wire.id, wire.source, wire.target])).toEqual([
+      [
+        'wire-gpio-resistor',
+        {
+          kind: 'terminal',
+          terminal: { componentInstanceId: 'board-1', catalogTerminalId: 'gpio19' },
+        },
+        {
+          kind: 'terminal',
+          terminal: { componentInstanceId: 'resistor-1', catalogTerminalId: 'lead-a' },
+        },
+      ],
+      [
+        'wire-resistor-led',
+        {
+          kind: 'terminal',
+          terminal: { componentInstanceId: 'resistor-1', catalogTerminalId: 'lead-b' },
+        },
+        {
+          kind: 'terminal',
+          terminal: { componentInstanceId: 'led-1', catalogTerminalId: 'anode' },
+        },
+      ],
+      [
+        'wire-led-ground',
+        {
+          kind: 'terminal',
+          terminal: { componentInstanceId: 'led-1', catalogTerminalId: 'cathode' },
+        },
+        {
+          kind: 'terminal',
+          terminal: { componentInstanceId: 'board-1', catalogTerminalId: 'gnd-j3-1' },
+        },
+      ],
+    ]);
+    expect(() =>
+      generateAssemblyPlan({
+        graph: fixture,
+        catalog,
+        report: fixtureReport,
+        reportIsCurrent: true,
+        validationReportId: 'phase5-study-validation',
+        validationReportDigest: canonicalDigest(fixtureReport),
+      }),
+    ).not.toThrow();
+  });
+
   it('validates every source, exact part and catalog claim against the selected release', () => {
     expect(() => validateTeachingContent(catalog)).not.toThrow();
     for (const lesson of listTeachingLessons()) {
@@ -165,5 +224,48 @@ describe('curated beginner teaching engine', () => {
           finding.explanation.includes('remain unverified'),
       ),
     ).toBe(true);
+  });
+
+  it('never explains unknown, inapplicable, or errored validation as a passing result', async () => {
+    const step = plan.steps.find((item) => item.action === 'review_checks')!;
+    const statuses = ['unknown', 'not_applicable', 'error'] as const;
+    const ruleIds = [
+      'GRAPH_INTEGRITY',
+      'POWER_GROUND_SHORT',
+      'LED_POLARITY',
+      'LED_SERIES_RESISTOR',
+      'ELECTRICAL_SCOPE_LIMIT',
+    ];
+    for (const ruleId of ruleIds) {
+      expect(report.findings.some((finding) => finding.ruleId === ruleId)).toBe(true);
+      for (const status of statuses) {
+        const alteredReport = {
+          ...report,
+          findings: report.findings.map((finding) =>
+            finding.ruleId === ruleId ? { ...finding, status } : finding,
+          ),
+        };
+        const result = await explainAssemblyStep({
+          step,
+          graph,
+          catalog,
+          report: alteredReport,
+          level: 'beginner',
+          expectedGraphDigest: plan.graphDigest,
+        });
+        const finding = result.findings.find((item) => item.ruleId === ruleId);
+        expect(finding?.status).toBe(status);
+        expect(finding?.explanation).toMatch(
+          status === 'unknown'
+            ? /cannot|could not|does not establish|remain unverified/i
+            : status === 'not_applicable'
+              ? /does not apply/i
+              : /returned an error/i,
+        );
+        expect(finding?.explanation).not.toMatch(
+          /resolve|oriented from|contains a modeled resistor/i,
+        );
+      }
+    }
   });
 });

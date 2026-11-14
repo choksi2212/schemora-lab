@@ -333,6 +333,8 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
   const [activeDesignPanel, setActiveDesignPanel] = useState<'wiring' | 'placement'>('wiring');
   const [explanationLevel, setExplanationLevel] = useState<ExplanationLevel>('beginner');
   const [teaching, setTeaching] = useState<TeachingExplanation | null>(null);
+  const [teachingStatus, setTeachingStatus] = useState<'idle' | 'loading' | 'unavailable'>('idle');
+  const [teachingRetry, setTeachingRetry] = useState(0);
   const [sceneSimulationRun, setSceneSimulationRun] = useState<SceneSimulationRun | null>(null);
   const [sceneFirmwareDigest, setSceneFirmwareDigest] = useState<string | null>(null);
   const [closedSwitchInstanceIds, setClosedSwitchInstanceIds] = useState<string[]>([]);
@@ -639,10 +641,12 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
       assemblyStale
     ) {
       setTeaching(null);
+      setTeachingStatus('idle');
       return;
     }
     let active = true;
     setTeaching(null);
+    setTeachingStatus('loading');
     void explainAssemblyStep({
       step: activeAssemblyStep,
       graph,
@@ -652,10 +656,16 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
       expectedGraphDigest: assemblyPlan.graphDigest,
     })
       .then((result) => {
-        if (active) setTeaching(result);
+        if (active) {
+          setTeaching(result);
+          setTeachingStatus('idle');
+        }
       })
       .catch(() => {
-        if (active) setTeaching(null);
+        if (active) {
+          setTeaching(null);
+          setTeachingStatus('unavailable');
+        }
       });
     return () => {
       active = false;
@@ -669,6 +679,7 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
     isCurrent,
     assemblyStale,
     explanationLevel,
+    teachingRetry,
   ]);
   if (!catalog || !graph || !project)
     return (
@@ -1368,12 +1379,16 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
                 );
               })}
             </ol>
-            <article className={styles.activeAssemblyStep} aria-live="polite">
+            <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+              Step {activeAssemblyStep.order} of {assemblyPlan.steps.length}:{' '}
+              {activeAssemblyStep.title}
+            </p>
+            <article className={styles.activeAssemblyStep}>
               <span className="eyebrow">{activeAssemblyStep.action.replaceAll('_', ' ')}</span>
               <h3>{activeAssemblyStep.title}</h3>
               <p>{activeAssemblyStep.instruction}</p>
               <p className="fine-text">{activeAssemblyStep.explanation}</p>
-              {teaching && (
+              {(teaching || teachingStatus !== 'idle') && (
                 <section className={styles.teaching} aria-label="Contextual teaching">
                   <div className={styles.teachingHeading}>
                     <div>
@@ -1395,33 +1410,51 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
                       ))}
                     </div>
                   </div>
-                  {teaching.lessons.length ? (
-                    teaching.lessons.map((lesson) => (
-                      <article className={styles.lesson} key={lesson.id}>
-                        <h4>{lesson.title}</h4>
-                        <p>{lesson.text}</p>
-                        {lesson.limitations.map((limitation) => (
-                          <p className="fine-text" key={limitation}>
-                            Limit: {limitation}
-                          </p>
-                        ))}
-                        <div className={styles.citations} aria-label={`${lesson.title} sources`}>
-                          {lesson.sources.map((source) => (
-                            <a key={source.id} href={source.url} target="_blank" rel="noreferrer">
-                              {source.title}
-                              {source.locator ? ` · ${source.locator}` : ''}
-                            </a>
-                          ))}
-                        </div>
-                      </article>
-                    ))
-                  ) : (
-                    <p className="fine-text">
-                      No curated teaching card matches this exact step yet. The guide’s saved
-                      targets remain authoritative.
+                  {teachingStatus === 'loading' && (
+                    <p role="status" aria-live="polite">
+                      Loading contextual explanations…
                     </p>
                   )}
-                  {teaching.findings.length > 0 && (
+                  {teachingStatus === 'unavailable' && (
+                    <p role="status" className="fine-text">
+                      This explanation could not be loaded. The saved guide and exact targets remain
+                      authoritative.{' '}
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() => setTeachingRetry((value) => value + 1)}
+                      >
+                        Retry explanation
+                      </button>
+                    </p>
+                  )}
+                  {teaching?.lessons.length
+                    ? teaching.lessons.map((lesson) => (
+                        <article className={styles.lesson} key={lesson.id}>
+                          <h4>{lesson.title}</h4>
+                          <p>{lesson.text}</p>
+                          {lesson.limitations.map((limitation) => (
+                            <p className="fine-text" key={limitation}>
+                              Limit: {limitation}
+                            </p>
+                          ))}
+                          <div className={styles.citations} aria-label={`${lesson.title} sources`}>
+                            {lesson.sources.map((source) => (
+                              <a key={source.id} href={source.url} target="_blank" rel="noreferrer">
+                                {source.title}
+                                {source.locator ? ` · ${source.locator}` : ''}
+                              </a>
+                            ))}
+                          </div>
+                        </article>
+                      ))
+                    : teaching && (
+                        <p className="fine-text">
+                          No curated teaching card matches this exact step yet. The guide’s saved
+                          targets remain authoritative.
+                        </p>
+                      )}
+                  {teaching && teaching.findings.length > 0 && (
                     <div className={styles.teachingFindings}>
                       <strong>Current check explanations</strong>
                       {teaching.findings.map((finding, index) => (

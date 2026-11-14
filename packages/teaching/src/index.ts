@@ -385,29 +385,78 @@ export function validateTeachingContent(catalogInput: unknown): void {
   }
 }
 
+function boundaryFindingExplanation(finding: ValidationFinding): string | null {
+  switch (finding.status) {
+    case 'not_applicable':
+      return 'This check does not apply to the saved graph.';
+    case 'error':
+      return `The ${finding.ruleId} check returned an error. No pass or fail conclusion is available.`;
+    case 'unknown':
+    case 'pass':
+    case 'fail':
+      return null;
+  }
+}
+
 const ruleExplanations: Record<string, (finding: ValidationFinding) => string> = {
-  GRAPH_INTEGRITY: (finding) =>
-    finding.status === 'pass'
-      ? 'The saved graph references resolve against the pinned catalog and declared breadboard topology.'
-      : 'The saved design contains a reference or topology issue. Use the finding details to locate the affected item, then correct it and validate the saved graph again.',
-  POWER_GROUND_SHORT: (finding) =>
-    finding.status === 'fail'
-      ? 'A modeled supply terminal and a modeled ground terminal share one conductive connection group. Compare the listed affected components and separate the unintended connection before continuing.'
-      : 'This check looks for a direct modeled connection between a supply terminal and ground; it does not analyze every possible electrical fault.',
-  LED_POLARITY: (finding) =>
-    finding.status === 'fail'
-      ? 'The modeled LED anode and cathode are reversed or share the same net. Compare the LED terminal labels with the current graph.'
-      : finding.status === 'unknown'
-        ? 'The graph does not identify both a modeled source side and ground return, so the validator cannot determine LED orientation.'
-        : 'The modeled LED is oriented from a modeled source toward ground. This is a connectivity result, not proof of physical operation.',
-  LED_SERIES_RESISTOR: (finding) =>
-    finding.status === 'fail'
-      ? 'At least one modeled source-to-ground path through this LED bypasses every modeled series resistor. Compare the resistor path and the exact endpoints in the graph.'
-      : finding.status === 'unknown'
-        ? 'The graph does not establish a complete source-to-ground path through the LED, so the resistor check is inconclusive.'
-        : 'Each modeled source-to-ground path through this LED contains a modeled resistor. This does not establish that the resistor value is suitable.',
-  ELECTRICAL_SCOPE_LIMIT: () =>
-    'This ruleset checks selected modeled connections only. GPIO current budgets, analog behavior, thermal margins, transient conditions, physical authenticity, wiring quality, and unmodeled components remain unverified.',
+  GRAPH_INTEGRITY: (finding) => {
+    switch (finding.status) {
+      case 'pass':
+        return 'The saved graph references resolve against the pinned catalog and declared breadboard topology.';
+      case 'fail':
+        return 'The saved design contains a reference or topology issue. Use the finding details to locate the affected item, then correct it and validate the saved graph again.';
+      case 'unknown':
+        return 'The graph references could not be fully checked against the pinned catalog and topology.';
+      default:
+        return boundaryFindingExplanation(finding) ?? 'No graph-integrity conclusion is available.';
+    }
+  },
+  POWER_GROUND_SHORT: (finding) => {
+    switch (finding.status) {
+      case 'pass':
+        return 'This check did not find a direct modeled connection between a supply terminal and ground. It does not analyze every possible electrical fault.';
+      case 'fail':
+        return 'A modeled supply terminal and a modeled ground terminal share one conductive connection group. Compare the listed affected components and separate the unintended connection before continuing.';
+      case 'unknown':
+        return 'The graph does not establish whether a modeled supply terminal is directly connected to ground.';
+      default:
+        return boundaryFindingExplanation(finding) ?? 'No power-to-ground conclusion is available.';
+    }
+  },
+  LED_POLARITY: (finding) => {
+    switch (finding.status) {
+      case 'pass':
+        return 'The modeled LED is oriented from a modeled source toward ground. This is a connectivity result, not proof of physical operation.';
+      case 'fail':
+        return 'The modeled LED anode and cathode are reversed or share the same net. Compare the LED terminal labels with the current graph.';
+      case 'unknown':
+        return 'The graph does not identify both a modeled source side and ground return, so the validator cannot determine LED orientation.';
+      default:
+        return boundaryFindingExplanation(finding) ?? 'No LED-polarity conclusion is available.';
+    }
+  },
+  LED_SERIES_RESISTOR: (finding) => {
+    switch (finding.status) {
+      case 'pass':
+        return 'Each modeled source-to-ground path through this LED contains a modeled resistor. This does not establish that the resistor value is suitable.';
+      case 'fail':
+        return 'At least one modeled source-to-ground path through this LED bypasses every modeled series resistor. Compare the resistor path and the exact endpoints in the graph.';
+      case 'unknown':
+        return 'The graph does not establish a complete source-to-ground path through the LED, so the resistor check is inconclusive.';
+      default:
+        return (
+          boundaryFindingExplanation(finding) ?? 'No LED resistor-path conclusion is available.'
+        );
+    }
+  },
+  ELECTRICAL_SCOPE_LIMIT: (finding) => {
+    if (finding.status === 'unknown')
+      return 'This ruleset checks selected modeled connections only. GPIO current budgets, analog behavior, thermal margins, transient conditions, physical authenticity, wiring quality, and unmodeled components remain unverified.';
+    return (
+      boundaryFindingExplanation(finding) ??
+      'Electrical limits outside the modeled checks remain unverified.'
+    );
+  },
 };
 
 function matchesTopics(
@@ -545,10 +594,12 @@ export async function explainAssemblyStep(input: {
       ruleId: finding.ruleId,
       status: finding.status,
       message: finding.message,
-      explanation: (
-        ruleExplanations[finding.ruleId] ??
-        (() => 'No curated explanation is available for this validation rule.')
-      )(finding),
+      explanation:
+        boundaryFindingExplanation(finding) ??
+        (
+          ruleExplanations[finding.ruleId] ??
+          (() => 'No curated explanation is available for this validation rule.')
+        )(finding),
     }));
   return { level: input.level, lessons: contextual, findings };
 }

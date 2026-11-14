@@ -1,0 +1,52 @@
+# Phase 5 — Desk Audit Findings and Evidence Boundary
+
+**Status:** Engineering and protocol desk audit recorded; participant validation remains open.  
+**Branch:** `dev`  
+**Audit scope:** Curated teaching resolver, contextual teaching panel, novice-study protocol, and source/evidence claims.
+
+## Decision
+
+The desk audit identified and corrected status-language defects in validation explanations, added a visible recovery state for explanation loading failures, narrowed screen-reader live announcements, and made the study's reference graph and task scoring reproducible. The changes improve implementation correctness and the quality of the planned evaluation. They do not establish that novices understand the guide, can assemble the reference circuit, or interpret limitations as intended. Phase 5 remains open until operational study prerequisites are approved and real participant rounds are completed.
+
+## Review method
+
+The review combined independent code/protocol inspections, source checks against primary accessibility and user-research guidance, and local regression tests. Reviews were used to find likely defects and challenge the study design; reviewer conclusions are engineering hypotheses, not participant observations. The review did not collect human-subject data, conduct a hardware fit test, measure electrical behavior, or claim formal accessibility conformance.
+
+## Findings and dispositions
+
+| Finding                                                                                                                                                                                                        | Risk                                                                                                       | Disposition                                                                                                                                                                                                                                                                        | Evidence still needed                                                                                                                                |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Several validation rules had only pass/fail wording; an `error` or `not_applicable` could receive a positive-looking explanation, and an unknown graph-integrity result lacked a suitably bounded explanation. | Misleads users about what the validator established.                                                       | Explanations now branch on each supported status. Error and not-applicable states receive generic bounded language; unknown states are rule-specific and do not inherit pass claims. Regression tests exercise all five surfaced rules against unknown, not-applicable, and error. | Domain review of the explanatory wording and novice comprehension in the planned sessions.                                                           |
+| A resolver rejection left the contextual teaching panel empty.                                                                                                                                                 | A source digest or resolver failure looked like missing content, with no recovery path.                    | The panel now shows an unavailable message, preserves the saved assembly guide as authoritative, and offers retry. A browser regression injects digest failure and checks the recovery UI.                                                                                         | Confirm behavior in supported target browsers and observe whether users understand the distinction during sessions.                                  |
+| The active step article used a broad live region.                                                                                                                                                              | Screen readers could repeatedly announce changing controls and content.                                    | The broad live region was removed; a concise active-step status announcement remains.                                                                                                                                                                                              | Manual screen-reader/assistive-technology evaluation; automated/browser checks alone do not establish conformance.                                   |
+| Study scoring depended on facilitator interpretation of a starter design, including unspecified physical placement details.                                                                                    | Inconsistent task scoring and false claims about physical equivalence.                                     | The protocol points to a frozen graph fixture with exact modeled terminals and explicitly scores only its three wire paths; no breadboard hole position is implied. A test validates its schema, graph-integrity result, and guide generation.                                     | Verify the saved session project and physical kit against the fixture before every participant. The fixture is not a physical hardware verification. |
+| The moderator's unpowered-kit instruction contaminated an outcome that could have been scored as product learning.                                                                                             | Protocol compliance could be mistaken for understanding of the checklist.                                  | The protocol says not to score keeping the kit unpowered, delays the non-certification explanation until after comprehension measures, and treats the physical power restriction only as a safety control.                                                                         | Moderator rehearsal and observation of actual sessions.                                                                                              |
+| Accessibility provisions and data handling were not sufficiently operational.                                                                                                                                  | Participants could be excluded or research records mishandled; novice study cannot represent AT usability. | The protocol requires access/consent/storage/retention decisions before recruitment, invites requested accommodations without diagnosis, and keeps an assistive-technology evaluation separate.                                                                                    | Owner approval, applicable organizational review, and an actual AT evaluation.                                                                       |
+
+## Evidence and interpretation rules
+
+Keep these evidence classes distinct in release notes and acceptance records:
+
+1. **Implementation evidence:** deterministic unit tests, browser tests, type checking, builds, and code inspection demonstrate software behavior under tested conditions.
+2. **Source evidence:** manufacturer, standards, and educational references support the narrow claims they actually cover; they do not demonstrate that product users understand those claims.
+3. **Desk-review evidence:** agent and maintainer inspections identify plausible risks and improvements; they are not observations of users.
+4. **Participant evidence:** only consented sessions with eligible novices can establish observed task behavior, confusion, confidence, and comprehension for this formative release.
+5. **Physical/electrical evidence:** the study's disconnected kit and modeled graph do not establish component fit, live electrical behavior, or safety to energize.
+
+For each observed issue, retain the participant's observed behavior or words, researcher interpretation, severity, and proposed action as separate fields. Do not convert interpretations into quotes or desk-audit hypotheses into observed defects. This follows [GOV.UK guidance on analysing a research session](https://www.gov.uk/service-manual/user-research/analyse-a-research-session).
+
+## Research basis
+
+- [GOV.UK moderated usability testing](https://www.gov.uk/service-manual/user-research/using-moderated-usability-testing) supports task-based observation and prepared moderator practice.
+- [GOV.UK informed consent for user research](https://www.gov.uk/service-manual/user-research/getting-users-consent-for-research) informs the consent, voluntariness, data-use, retention, and withdrawal fields.
+- [W3C WCAG-EM](https://www.w3.org/TR/WCAG-EM/) describes an evaluation methodology; this desk review is not a WCAG-EM conformance evaluation.
+- [W3C guidance on selecting evaluation tools](https://www.w3.org/WAI/test-evaluate/tools/selecting/) explains that tools support evaluation but require human judgment and do not by themselves establish accessibility.
+- [GOV.UK assistive-technology testing guidance](https://www.gov.uk/service-manual/technology/testing-with-assistive-technologies) informs the separate AT evaluation boundary.
+- [W3C guidance on labels and instructions](https://www.w3.org/WAI/WCAG22/Understanding/labels-or-instructions) and [meaningful sequence](https://www.w3.org/WAI/WCAG22/Understanding/meaningful-sequence) informed review of instruction clarity and concise status announcements; they do not alone certify this interface.
+
+## Gate status
+
+**Engineering desk-audit actions:** implemented and locally verified (typecheck, unit tests, browser tests, and build).  
+**Study protocol:** ready for operational review; required owner/privacy/data-handling fields remain blank.  
+**Participant recruitment and sessions:** not started.  
+**Phase 5 acceptance:** incomplete. The protocol's two rounds, issue triage, regression, and acceptance thresholds remain required before making usability claims.

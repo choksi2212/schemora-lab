@@ -1,6 +1,6 @@
 # Phase 5 — Beginner teaching engine implementation
 
-**Status:** Deterministic teaching slice implemented; a moderated-study protocol is drafted, while protocol approval, participant sessions, and evidence-driven revisions remain open.
+**Status:** Deterministic teaching slice and desk-audit corrections implemented; a moderated-study protocol is drafted, while operational approval, participant sessions, and evidence-driven revisions remain open.
 **Branch:** `dev`  
 **Content release:** `2026.10.1`
 
@@ -53,6 +53,8 @@ The resolver validates its inputs, confirms report project/graph/revision/catalo
 
 - Package unit tests check strict curated content, all three explanation levels, catalog source/claim resolution, exact model applicability, repeatable step selection, graph/report mismatch rejection, and deterministic validation explanations.
 - The assembly-guide browser flow checks level switching, exact GPIO19 contextual detail, and its ESP32 guide link.
+- Validation explanations are regression-tested across unknown, not-applicable, and error states. The browser flow injects a digest failure and verifies that the guide remains available and the teaching panel offers recovery.
+- The Phase 5 fixture test checks the frozen graph structure, graph-integrity result, and assembly-plan generation. These are model-level checks, not hardware-fit evidence.
 - Type checking, builds, unit tests, browser tests, formatting, and diff checks are run for this implementation before the phase commit.
 
 These checks verify contracts and browser behavior. They do not establish that beginners understand the instructions or can reproduce a physical circuit.
@@ -63,7 +65,7 @@ Phase 5 is not complete. A ready-to-review [beginner teaching usability study pr
 
 Run the consented study with genuine novice users and record task completion, mistakes, hint requests, confusing terms, confidence, physical reproduction differences, and any safety stop. Use observed failures to revise the cards and interface, then retest with new participants. Do not substitute synthetic tests or model-generated summaries for participant evidence.
 
-The guide now includes a validated visual-orientation hint based on the scene’s existing orbit and component-rotation controls. Invalid-wire guidance should be expanded only when the UI provides a current, specific endpoint or rule finding to explain. The exact current guide already lists step targets and prerequisite state; explanations must remain aligned to that state. A model-backed open-ended tutor is a separate future decision and would need authorized minimized context, source grounding, and an explicit distinction between guidance and project truth.
+The [Phase 5 desk audit](Phase-5-Desk-Audit.md) records code, protocol, accessibility, and source-review findings, including their evidence limits. The guide now includes a validated visual-orientation hint based on the scene’s existing orbit and component-rotation controls. Invalid-wire guidance should be expanded only when the UI provides a current, specific endpoint or rule finding to explain. The exact current guide already lists step targets and prerequisite state; explanations must remain aligned to that state. A model-backed open-ended tutor is a separate future decision and would need authorized minimized context, source grounding, and an explicit distinction between guidance and project truth.
 
 ## Operational and product risks
 
