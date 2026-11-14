@@ -567,6 +567,16 @@ The app stores normalized private photo evidence and has a separately consented,
 - A live consented request is tested only after user/provider approval and does not modify graph or pin mapping without a second explicit user action.
 - Retention/deletion semantics for source photo, proposal, inventory, logs, and backups are documented and tested.
 
+### 12.6 Current execution record
+
+**Phase status:** Open. Recognition remains disabled by default; no hardware photo was sent to the remote provider during this work.
+
+**P7-C local hardening:** The browser recognition poll now uses sequential requests, aborts on teardown, exposes a retryable refresh error, and announces concise request states accessibly. A pure API config regression verifies the disabled default and explicit approval gate. The provider adapter's existing local suite remains green. `pnpm typecheck` passed for API and web, and the focused API configuration and provider tests passed.
+
+**Evidence boundary and remaining P7-C work:** The configured test database at `127.0.0.1:55432` refused the connection, so database-backed request/consent, inventory, deletion-race, worker-lease, and quota flows could not be exercised locally. No Phase 7 browser lifecycle suite exists yet. These remain tracked test gaps; this increment does not claim the API/worker/user flow is fully covered.
+
+**Still required before acceptance:** Rights-cleared labeled board photos and held-out benchmark with predeclared thresholds; account-specific provider policy/region/retention/budget review; full database-backed API and worker lifecycle tests; browser flow coverage; one explicitly consented provider acceptance request using a rotated credential; and tested photo/proposal/inventory deletion semantics.
+
 ---
 
 ## 13. Phase 8 — Debugging and real-world verification

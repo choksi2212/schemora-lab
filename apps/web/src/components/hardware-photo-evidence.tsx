@@ -190,6 +190,8 @@ export function HardwarePhotoEvidence({
 }) {
   const [photos, setPhotos] = useState<HardwarePhoto[]>([]);
   const [recognitions, setRecognitions] = useState<HardwareRecognition[]>([]);
+  const [recognitionRefreshError, setRecognitionRefreshError] = useState('');
+  const [recognitionPollEpoch, setRecognitionPollEpoch] = useState(0);
   const [recognitionCapability, setRecognitionCapability] = useState<RecognitionCapability | null>(
     null,
   );
@@ -292,11 +294,34 @@ export function HardwarePhotoEvidence({
     return () => controller.abort();
   }, [projectId, revision]);
 
+  const hasActiveRecognition = recognitions.some(
+    (item) => item.status === 'queued' || item.status === 'running',
+  );
   useEffect(() => {
-    if (!recognitions.some((item) => item.status === 'queued' || item.status === 'running')) return;
-    const timer = window.setInterval(() => void loadRecognitions(), 2500);
-    return () => window.clearInterval(timer);
-  }, [loadRecognitions, recognitions]);
+    if (!hasActiveRecognition) {
+      setRecognitionRefreshError('');
+      return;
+    }
+    let active = true;
+    let timer = 0;
+    const controller = new AbortController();
+    const refresh = async () => {
+      try {
+        await loadRecognitions(controller.signal);
+        if (active) setRecognitionRefreshError('');
+      } catch (cause) {
+        if (active && !controller.signal.aborted) setRecognitionRefreshError(friendlyError(cause));
+      } finally {
+        if (active) timer = window.setTimeout(() => void refresh(), 2500);
+      }
+    };
+    void refresh();
+    return () => {
+      active = false;
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [hasActiveRecognition, loadRecognitions, recognitionPollEpoch]);
 
   function selectFiles(selection: FileList | null) {
     if (!selection) return;
@@ -827,7 +852,7 @@ export function HardwarePhotoEvidence({
                   .slice(0, 1)
                   .map((recognition) => (
                     <div className="hardware-recognition-result" key={recognition.id}>
-                      <strong>
+                      <strong role="status" aria-live="polite" aria-atomic="true">
                         {recognition.status === 'queued'
                           ? 'Waiting for recognition…'
                           : recognition.status === 'running'
@@ -923,6 +948,18 @@ export function HardwarePhotoEvidence({
         <p className="fine-text" role="status">
           Remote recognition is not enabled for this workspace. Saved photos remain available for
           manual review.
+        </p>
+      )}
+      {hasActiveRecognition && recognitionRefreshError && (
+        <p className="fine-text" role="status" aria-live="polite" aria-atomic="true">
+          Recognition status could not be refreshed: {recognitionRefreshError}{' '}
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => setRecognitionPollEpoch((value) => value + 1)}
+          >
+            Retry status refresh
+          </button>
         </p>
       )}
       {inventory.length > 0 && (

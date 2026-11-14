@@ -133,6 +133,24 @@ describe('trusted identity and production configuration', () => {
     expect(() => readConfig({ ...valid, CLAMD_HOST: undefined })).toThrow('scanner host');
     expect(() => readConfig({ ...valid, DATABASE_URL: config.DATABASE_URL })).toThrow('sslmode');
   });
+  it('keeps remote hardware recognition disabled unless API approval is explicit', () => {
+    const base = {
+      NODE_ENV: 'test',
+      DATABASE_URL: config.DATABASE_URL,
+      SESSION_SECRET: secret,
+    };
+    expect(readConfig(base).VISION_RECOGNITION_ENABLED).toBe('false');
+    expect(() => readConfig({ ...base, VISION_RECOGNITION_ENABLED: 'true' })).toThrow(
+      'explicit API-side approval',
+    );
+    expect(
+      readConfig({
+        ...base,
+        VISION_RECOGNITION_ENABLED: 'true',
+        VISION_RECOGNITION_APPROVED: 'true',
+      }).VISION_RECOGNITION_ENABLED,
+    ).toBe('true');
+  });
   it('binds immutable artifact identity to processing metadata for an identical payload', () => {
     const payload = { summary: 'Same source facts', schemaVersion: 1 };
     const first = requestDigest({
