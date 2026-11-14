@@ -4,7 +4,7 @@
 | -------------------- | ------------------------------------------------------- |
 | Phase                | Hardware knowledge and deterministic circuit validation |
 | Status               | Implemented vertical slice on `dev`                     |
-| Reviewed             | 13 October 2026                                         |
+| Reviewed             | 14 November 2026                                        |
 | Product context      | [context.md](context.md)                                |
 | Product requirements | [PRD.md](PRD.md)                                        |
 | Technical contracts  | [TRD.md](TRD.md)                                        |
@@ -19,15 +19,15 @@ The implementation establishes five connected capabilities: immutable source-lin
 
 ### 1.1 Delivery boundary
 
-| Included in this phase                                                                               | Explicitly not included                                                                                               |
-| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| One exact ESP32-DevKitC V4 + WROOM-32E + male-header configuration                                   | Automatic identification of a user's physical board or module                                                         |
-| One exact Kingbright LED, one exact YAGEO resistor, and one exact BB400/BB400T breadboard topology   | Universal ESP32, LED, resistor, or breadboard compatibility                                                           |
-| Source-linked immutable catalog release and content digest                                           | Catalog authoring UI, external catalog marketplace, or automatic catalog migration                                    |
-| Strict typed component, terminal, hole, placement, and wire graph                                    | Three-dimensional scene, geometry, camera state, wire animation, or photo recognition                                 |
-| Deterministic modeled net derivation from explicit wires and catalog topology                        | Firmware execution, analog circuit simulation, transient analysis, thermal simulation, or arbitrary physics           |
-| Structural integrity, direct modeled power/ground short, LED direction, and LED resistor-path checks | Whole-board power budget, GPIO current certification, component authenticity, workmanship, or a general “safe” result |
-| Immutable graph snapshots and immutable validation reports tied to graph/catalog/ruleset identity    | Collaboration, sharing, general generated assembly instructions, or manufacturing outputs                             |
+| Included in this phase                                                                                        | Explicitly not included                                                                                               |
+| ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| One exact ESP32-DevKitC V4 + WROOM-32E + male-header configuration                                            | Automatic identification of a user's physical board or module                                                         |
+| One exact Kingbright LED, one exact YAGEO resistor, one exact OMRON tactile switch, and BB400/BB400T topology | Universal ESP32, LED, resistor, switch, or breadboard compatibility                                                   |
+| Source-linked immutable catalog release and content digest                                                    | Catalog authoring UI, external catalog marketplace, or automatic catalog migration                                    |
+| Strict typed component, terminal, hole, placement, and wire graph                                             | Three-dimensional scene, geometry, camera state, wire animation, or photo recognition                                 |
+| Deterministic modeled net derivation from explicit wires and catalog topology                                 | Firmware execution, analog circuit simulation, transient analysis, thermal simulation, or arbitrary physics           |
+| Structural integrity, direct modeled power/ground short, LED direction, and LED resistor-path checks          | Whole-board power budget, GPIO current certification, component authenticity, workmanship, or a general “safe” result |
+| Immutable graph snapshots and immutable validation reports tied to graph/catalog/ruleset identity             | Collaboration, sharing, general generated assembly instructions, or manufacturing outputs                             |
 
 ## 2. Architecture
 
@@ -78,7 +78,7 @@ The validation request has no graph body: it evaluates the latest persisted grap
 
 ## 3. Catalog release
 
-The current release ID is `schemora-hw-2026.10`, status `curated`, publication date `2026-10-13`. Releases are parsed against strict Zod schemas and the catalog digest is computed from canonical JSON (object keys sorted recursively; arrays retain order). A change to a source fact creates a release change and a new digest; existing graph snapshots continue to name their original release ID.
+The current release ID is `schemora-hw-2026.10.1`, status `curated`, publication date `2026-10-14`. Historical release `schemora-hw-2026.10` remains available. Releases are parsed against strict Zod schemas and the catalog digest is computed from canonical JSON (object keys sorted recursively; arrays retain order). A change to a source fact creates a new release and digest; existing graph snapshots continue to name their original release ID.
 
 ### 3.1 Supported identities
 
@@ -87,6 +87,7 @@ The current release ID is `schemora-hw-2026.10`, status `curated`, publication d
 | `board.espressif.esp32-devkitc-v4.wroom-32e.male` | Espressif ESP32-DevKitC V4 fitted with ESP32-WROOM-32E and male headers | GPIO19 / printed `IO19` at J3 position 8; GND at J3-1 and J3-7; 3V3 at J2-1; documented supply input alternatives                | Other module configurations, WROOM-32UE, WROVER, clones, revisions, header styles, GPIO design current, and full board power budget are not inferred |
 | `led.kingbright.wp7113id`                         | Kingbright WP7113ID, 5 mm high-efficiency red through-hole LED          | Stable anode/cathode terminal IDs; forward-voltage figures at 10 mA; maximum DC current and dissipation values as catalog facts  | No complete I–V curve, thermal design, lead-length inference, flat-side heuristic, or authenticity test                                              |
 | `resistor.yageo.cfr-25jb-52-220r`                 | YAGEO CFR-25JB-52-220R axial carbon-film resistor                       | 220 Ω, ±5%, 0.25 W; two non-polarized terminals                                                                                  | Rating alone does not prove circuit suitability; working voltage, derating, and operating conditions remain unmodeled                                |
+| `button.omron.b3f-1000`                           | OMRON B3F-1000 6 × 6 mm normally-open momentary tactile switch          | Four numbered terminals, two intrinsic contact groups, pressed-state ideal contact bridge                                        | No bounce, debounce, GPIO pull state, lifetime, or mechanical placement model is inferred                                                            |
 | `breadboard.busboard.bb400` topology v1           | BusBoard BB400 white or BB400T transparent physical variants            | 400 tie points: 60 five-hole terminal groups and four continuous 25-hole rail groups; hole naming, pitch, and outline dimensions | Only this topology is resolved. The user must confirm the exact board and rail identity; split rails and lookalike boards are unsupported.           |
 
 ### 3.2 Manufacturer provenance
@@ -100,6 +101,7 @@ The current release ID is `schemora-hw-2026.10`, status `curated`, publication d
 | `yageo-cfr-datasheet`                      | YAGEO, CFR carbon-film resistor specification                       | [Series specification](https://yageogroup.com/content/datasheet/asset/file/YAGEO-CFR_DATASHEET)                     |
 | `busboard-bb400-datasheet`                 | BusBoard Prototype Systems Ltd., BB400 product datasheet            | [Product datasheet](https://www.busboard.com/documents/datasheets/BPS-DAT-%28BB400%29-Datasheet.pdf)                |
 | `busboard-bb400-rev6-internal-connections` | BusBoard Prototype Systems Ltd., BB400 internal connections drawing | [Manufacturer documentation](https://www.busboard.com/documents/datasheets/BPS-DAT-%28BB400%29-Datasheet.pdf)       |
+| `omron-b3f-datasheet`                      | OMRON, B3F Tactile Switch datasheet, model B3F-1000                 | [Manufacturer datasheet](https://omronfs.omron.com/en_US/ecb/products/pdf/en-b3f.pdf)                               |
 
 The catalog detail screen shows source records and claim locators alongside the affected facts and lists the scope limitations. Source availability is not proof that a user's physical part is genuine or that their board matches the selected identity. The catalog page is an information view, not an automatic hardware detector.
 
@@ -107,7 +109,7 @@ The catalog detail screen shows source records and claim locators alongside the 
 
 Each catalog claim carries a subject ID, property, source ID, source locator, and qualification note; the supported value is represented on the strict subject record itself. Every `sourceId` must resolve inside the same release. Part records also carry source IDs and human-readable limitations. Where catalog facts do not support a rule, the rule returns `unknown`; it must not substitute a typical value or a generic part-family fact.
 
-This first release is a single bundled release, not a multi-release registry. The API returns the bundled release and returns not found for any other ID. The graph and report contracts pin release identity and digest, but retaining and serving superseded release content is an explicit gate before publishing a second catalog release or upgrading a project pinned to an older release.
+The API serves both bundled releases by exact ID and returns not found for an unknown ID; it never substitutes the latest release for a historical pin. Graphs and reports bind to the selected release ID and digest. A release upgrade is accepted only when all graph-referenced part/topology records and their claims/source documents are unchanged. Changed or missing references remain blocked until a separate reviewed migration is implemented.
 
 ## 4. Circuit graph and connectivity
 
@@ -157,19 +159,22 @@ It does not use image pixels, physical proximity, overlap, wire color, coordinat
 
 ## 5. Deterministic validation contract
 
-Ruleset ID is `schemora-phase2-basic-circuit`, ruleset version `1.0.0`; validator version is `0.1.0`. Each report records graph ID/revision/digest, project ID, catalog release ID/digest, ruleset and validator versions, overall status, and ordered findings. Each finding has a stable ID, rule ID/version, status, severity, message, affected entity IDs, and source IDs. Results are deterministically sorted and use canonical SHA-256 graph/catalog digests.
+Ruleset ID is `schemora-phase2-basic-circuit`, ruleset version `1.1.0`; validator version is `0.2.0`. Each report records graph ID/revision/digest, project ID, catalog release ID/digest, ruleset and validator versions, overall status, and ordered findings. Each finding has a stable ID, rule ID/version, status, severity, message, affected entity IDs, and source IDs. Results are deterministically sorted and use canonical SHA-256 graph/catalog digests.
 
 ### 5.1 Supported checks
 
-| Rule                     | Meaning                                                                                          | `pass` means                                                                                                                   | `fail` means                                                                                      | `unknown` means                                                                               |
-| ------------------------ | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `GRAPH_INTEGRITY`        | Resolve the graph against the pinned catalog release and topology                                | Every structural reference resolves and declared topology rules hold                                                           | At least one structural reference or constraint is invalid                                        | The rule itself is deterministic; malformed request data is rejected before report creation   |
-| `POWER_GROUND_SHORT`     | Detect one modeled conductive net containing a catalog-role power terminal and a ground terminal | No such modeled net is present                                                                                                 | A direct conductive net joins the modeled roles                                                   | The narrow model cannot detect unmodeled board internals or every indirect electrical fault   |
-| `LED_POLARITY`           | Compare the LED's catalog-defined anode/cathode with a modeled source-to-ground orientation      | A scenario-enabled modeled source can reach the anode and the cathode can reach a ground through modeled resistor connectivity | The LED terminals share a net, or modeled source/ground routing demonstrates reversed orientation | The graph lacks complete orientation context or uses a terminal not enabled for this scenario |
-| `LED_SERIES_RESISTOR`    | Examine directed modeled source-to-ground paths through the LED                                  | Every discovered modeled path through the LED contains a resistor                                                              | At least one modeled path through the LED bypasses all modeled resistors                          | No complete modeled source-to-ground path through that LED can be established                 |
-| `ELECTRICAL_SCOPE_LIMIT` | Report the coverage boundary                                                                     | Never returns pass                                                                                                             | Never asserts a failure                                                                           | Always unknown, with warning severity                                                         |
+| Rule                          | Meaning                                                                                          | `pass` means                                                                                                                   | `fail` means                                                                                      | `unknown` means                                                                               |
+| ----------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `GRAPH_INTEGRITY`             | Resolve the graph against the pinned catalog release and topology                                | Every structural reference resolves and declared topology rules hold                                                           | At least one structural reference or constraint is invalid                                        | The rule itself is deterministic; malformed request data is rejected before report creation   |
+| `POWER_GROUND_SHORT`          | Detect one modeled conductive net containing a catalog-role power terminal and a ground terminal | No such modeled net is present                                                                                                 | A direct conductive net joins the modeled roles                                                   | The narrow model cannot detect unmodeled board internals or every indirect electrical fault   |
+| `LED_POLARITY`                | Compare the LED's catalog-defined anode/cathode with a modeled source-to-ground orientation      | A scenario-enabled modeled source can reach the anode and the cathode can reach a ground through modeled resistor connectivity | The LED terminals share a net, or modeled source/ground routing demonstrates reversed orientation | The graph lacks complete orientation context or uses a terminal not enabled for this scenario |
+| `LED_SERIES_RESISTOR`         | Examine directed modeled source-to-ground paths through the LED                                  | Every discovered modeled path through the LED contains a resistor                                                              | At least one modeled path through the LED bypasses all modeled resistors                          | No complete modeled source-to-ground path through that LED can be established                 |
+| `PUSHBUTTON_ELECTRICAL_SCOPE` | Mark the idealized normally-open button model's electrical limits                                | Never returns pass                                                                                                             | Never returns fail                                                                                | Always unknown, with warning severity; GPIO logic and contact bounce remain unmodeled         |
+| `ELECTRICAL_SCOPE_LIMIT`      | Report the coverage boundary                                                                     | Never returns pass                                                                                                             | Never asserts a failure                                                                           | Always unknown, with warning severity                                                         |
 
 Electrical graph failures are not rejected by the graph-save endpoint; they are durable design state that the validation report should explain. Structural graph errors are rejected because a report against unresolved terminal or hole identities would be misleading. A report with unsupported safety limits remains `unknown` even when all selected checks pass.
+
+Catalog publication history and deltas are checked with `pnpm catalog:validate`. The checked-in release fingerprints detect any content change, even inside a newly added record whose identity-only delta would otherwise appear unchanged. The current history passes structural validation but is not publication-ready: both releases still await independent hardware review.
 
 ### 5.2 Non-claims and known limits
 
@@ -207,6 +212,7 @@ The `/projects/:projectId/circuit` route reads the saved graph and latest report
 - Graph writes and report writes use project-row locking, optimistic revision checks, and idempotency keys.
 - Immutable graph/report rows preserve what was checked and prevent silent mutation of historical evidence.
 - Catalog source URLs are data links rendered with safe anchor attributes; no remote document content is executed or treated as instructions.
+- Catalog upgrades are accepted only when all parts, topology versions, evidence claims, and source records referenced by both the prior and proposed graph are exactly unchanged across the two releases. Additive unused catalog records do not affect existing graph identity; changed or removed referenced facts require a separately reviewed migration.
 - API responses contain rule messages and IDs, not source conversation bodies or private object-storage URLs.
 - Operational logs contain route, response status, timing, and request ID; circuit contents should not be added to logs.
 
@@ -229,16 +235,22 @@ pnpm --filter @schemora/web typecheck
 
 Database-backed API and repository tests run through `pnpm test` with a separate `TEST_DATABASE_URL`; the bootstrap requires database-create permission and rejects a database that is not isolated with a `_test` name. The migration is additive and must be applied with `pnpm db:migrate` before starting an API instance using the new routes.
 
+### 9.3 Catalog upgrade compatibility
+
+`assessCatalogUpgrade` is the shared package-level compatibility policy used by the browser and API. It compares every referenced part and topology plus their attached claims and source records. The browser displays the specific changed/missing references and disables an incompatible upgrade. The API independently evaluates saved and submitted graph references inside the project-locked write transaction, after the idempotency replay check, and returns `CATALOG_UPGRADE_INCOMPATIBLE` (HTTP 409) if a client attempts to bypass the UI. Compatible catalog changes still create an ordinary immutable project revision through the existing expected-revision/idempotency transaction; the old snapshot remains pinned to its old release, and validation must be rerun for the new graph.
+
+This is intentionally a conservative carry-forward policy, not an identity migration engine. It blocks when a referenced item is altered, removed, or first introduced by a newer release. A future reviewed migration must explicitly map old and new identities, show changed claims, preserve the prior graph/report, obtain user confirmation, and create a new revision before such a change is allowed.
+
 ### 9.1 Executed verification
 
-| Check               | Result                                                                                                                  |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `pnpm test`         | Passed: catalog 7, graph 6, validation 6, API/security/integration 31, web authentication 12, and intelligence 58 tests |
-| `pnpm test:e2e`     | Passed: all 3 existing Chromium workspace workflows                                                                     |
-| `pnpm typecheck`    | Passed across the root and workspace packages                                                                           |
-| `pnpm build`        | Passed; `/catalog` and `/projects/[projectId]/circuit` compiled                                                         |
-| `pnpm format:check` | Passed                                                                                                                  |
-| `pnpm db:migrate`   | Applied `0005_circuit_graphs.sql` to the configured local development database                                          |
+| Check               | Result                                                                                                             |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `pnpm check`        | Passed locally: all workspace typechecks, 254 tests, and configured production builds                              |
+| `pnpm test:e2e`     | Passed locally: all 4 Chromium browser workflows                                                                   |
+| `pnpm format:check` | Passed locally for the repository                                                                                  |
+| `pnpm test`         | Database-backed API suite passed, including additive release upgrade preserving both pinned snapshots              |
+| `pnpm db:migrate`   | Applied `0005_circuit_graphs.sql` to the configured local development database in the prior Phase 2 implementation |
+| GitHub Actions      | Disabled repository-wide at the user's direction; no hosted CI run is claimed                                      |
 
 The first browser attempt ran before applying migration 0005 to the local development database. That attempt failed when Phase 1 project mutations encountered the not-yet-created circuit snapshot table. The migration was applied and the complete browser suite then passed; development setup now requires the migration step stated above.
 

@@ -19,7 +19,7 @@ import { FirmwareWorkspace } from './firmware-workspace';
 import type { SceneSimulationRun } from './simulation-scene-state';
 import styles from './circuit-workspace.module.css';
 import type { AssemblyPlan } from '@schemora/assembly-plan';
-import type { CatalogRelease } from '@schemora/catalog';
+import { assessCatalogUpgrade, type CatalogRelease } from '@schemora/catalog';
 import {
   createTransientSwitchOverlay,
   deriveNets,
@@ -399,6 +399,17 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
     () => new Map(catalog?.parts.map((part) => [part.id, part]) ?? []),
     [catalog],
   );
+  const catalogUpgradeAssessment = useMemo(() => {
+    if (!catalog || !latestCatalog || !graph || catalog.releaseId === latestCatalog.releaseId)
+      return null;
+    return assessCatalogUpgrade(catalog, latestCatalog, {
+      componentPartIds: graph.components.map((component) => component.catalogPartId),
+      topologies: graph.breadboards.map((breadboard) => ({
+        id: breadboard.topologyId,
+        version: breadboard.topologyVersion,
+      })),
+    });
+  }, [catalog, latestCatalog, graph]);
   const terminalOptions = useMemo(
     () =>
       graph?.components.flatMap((item) =>
@@ -794,19 +805,32 @@ export function CircuitWorkspace({ projectId }: { projectId: string }) {
         <section className="panel" aria-labelledby="catalog-upgrade-title">
           <h2 id="catalog-upgrade-title">New hardware release available</h2>
           <p className="fine-text">
-            This graph is pinned to {catalog.releaseId}. Upgrade it to {latestCatalog.releaseId} to
-            use newly published parts. Existing part IDs remain available in this release; the
-            upgrade changes the graph's catalog identity and must be saved and validated.
+            This graph is pinned to {catalog.releaseId}. The new release is eligible only if every
+            part, topology, claim, and source it uses remains unchanged. An eligible upgrade creates
+            a new graph revision and requires a fresh validation report.
           </p>
+          {catalogUpgradeAssessment && !catalogUpgradeAssessment.compatible && (
+            <div role="status" className="fine-text">
+              <p>
+                Upgrade is blocked because this release changes or removes catalog facts used by
+                this graph. That change needs an explicit, reviewed migration.
+              </p>
+              <ul>
+                {catalogUpgradeAssessment.differences.slice(0, 5).map((difference) => (
+                  <li key={`${difference.kind}:${difference.id}`}>
+                    {difference.kind} {difference.id}: {difference.reason}
+                  </li>
+                ))}
+                {catalogUpgradeAssessment.differences.length > 5 && (
+                  <li>and {catalogUpgradeAssessment.differences.length - 5} more differences</li>
+                )}
+              </ul>
+            </div>
+          )}
           <button
             type="button"
             className="button secondary"
-            disabled={
-              busy ||
-              !graph.components.every((component) =>
-                latestCatalog.parts.some((part) => part.id === component.catalogPartId),
-              )
-            }
+            disabled={busy || !catalogUpgradeAssessment?.compatible}
             onClick={() => {
               setCatalog(latestCatalog);
               edit({ ...graph, catalogReleaseId: latestCatalog.releaseId });

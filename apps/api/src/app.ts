@@ -38,7 +38,7 @@ import {
   compareCircuitDesigns,
   validateCircuitGraph,
 } from '@schemora/circuit-model';
-import { getCatalogRelease, getCatalogReleaseById } from '@schemora/catalog';
+import { assessCatalogUpgrade, getCatalogRelease, getCatalogReleaseById } from '@schemora/catalog';
 import { validateCircuit, validationReportSchema } from '@schemora/validation';
 import { AssemblyPlanBlockedError, generateAssemblyPlan } from '@schemora/assembly-plan';
 import type { ApiConfig } from './config.js';
@@ -941,6 +941,26 @@ export function buildApp(
         key(request),
         {
           graph: body.graph,
+        },
+        (previousGraphInput) => {
+          if (!previousGraphInput) return;
+          const previousGraph = circuitGraphSchema.parse(previousGraphInput);
+          if (previousGraph.catalogReleaseId === body.graph.catalogReleaseId) return;
+          const previousRelease = getCatalogReleaseById(previousGraph.catalogReleaseId);
+          if (!previousRelease) throw new RepositoryError('CATALOG_RELEASE_UNSUPPORTED', 400);
+          const upgrade = assessCatalogUpgrade(previousRelease, release, {
+            componentPartIds: [
+              ...previousGraph.components.map((component) => component.catalogPartId),
+              ...body.graph.components.map((component) => component.catalogPartId),
+            ],
+            topologies: [previousGraph, body.graph].flatMap((graph) =>
+              graph.breadboards.map((breadboard) => ({
+                id: breadboard.topologyId,
+                version: breadboard.topologyVersion,
+              })),
+            ),
+          });
+          if (!upgrade.compatible) throw new RepositoryError('CATALOG_UPGRADE_INCOMPATIBLE', 409);
         },
       ),
     );

@@ -1115,6 +1115,7 @@ export class Repository {
     expectedRevision: number,
     key: string,
     input: { graph: unknown },
+    validateCatalogTransition?: (previousGraph: unknown | null) => void,
   ) {
     return this.transaction(async (client) => {
       const project = await this.project(client, owner, projectId, true);
@@ -1125,6 +1126,19 @@ export class Repository {
       if (project.revision !== expectedRevision)
         throw new RepositoryError('REVISION_CONFLICT', 409, project.revision);
       if (project.status !== 'active') throw new RepositoryError('PROJECT_ARCHIVED', 409);
+      if (validateCatalogTransition) {
+        const currentGraph = await client.query<{ graph: unknown | null }>(
+          `SELECT snapshot_graph.graph
+           FROM revisions current_revision
+           LEFT JOIN circuit_graph_snapshots snapshot_graph
+             ON snapshot_graph.id::text=current_revision.snapshot->'circuitGraph'->>'id'
+             AND snapshot_graph.project_id=current_revision.project_id
+           WHERE current_revision.project_id=$1 AND current_revision.revision=$2`,
+          [projectId, project.revision],
+        );
+        if (!currentGraph.rows[0]) throw new RepositoryError('GRAPH_SNAPSHOT_CORRUPT', 500);
+        validateCatalogTransition(currentGraph.rows[0].graph);
+      }
       const graphDigest = canonicalDigest(input.graph);
       const id = randomUUID();
       const nextRevision = project.revision + 1;

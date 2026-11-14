@@ -19,7 +19,7 @@ import type { BreadboardTopology, CatalogPart, CatalogRelease } from '@schemora/
 
 `CatalogPart.id` is stable across releases for the same physical model and configuration. The release ID identifies the exact facts snapshot. Board pins map a semantic terminal ID to a manufacturer-documented header, one-based position, printed label, and functions. LED polarity uses `anodeTerminalId` and `cathodeTerminalId`; the catalog schema rejects references that do not resolve to distinct terminals with matching electrical roles. Part terminals are semantic identities; they are not 3D mesh anchors or breadboard holes.
 
-Every part names its source documents, and release claims link a property to a source locator and a short evidence note. Parsing validates source and subject references. Publication tooling still needs to add review identity, content hashing/signature, and immutable persistence before this package can serve as the production catalog.
+Every part names its source documents, and release claims link a property to a source locator and a short evidence note. Parsing rejects non-HTTPS citations, duplicate source/claim identities, invalid terminal mappings, and malformed topology partitions. `pnpm catalog:validate` checks chronological release history, exact declared deltas, and canonical SHA-256 content hashes. The current releases are structurally valid, but independent hardware review is pending; there is no signature system or externally managed immutable publication registry, so this package is not yet a production catalog authority.
 
 ## Initial release boundary
 

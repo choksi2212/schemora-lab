@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "releases": [
+    {
+      "releaseId": "schemora-hw-2026.10",
+      "contentSha256": "cfb9480edfbd5e75e5fd0f22022dcac5d81f04f569a5891d5ecd5ad9f48f6a89",
+      "classification": "initial",
+      "summary": "Initial source-linked ESP32-DevKitC V4, LED, resistor, and BB400 catalog release.",
+      "delta": null,
+      "independentReview": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedOn": null
+      }
+    },
+    {
+      "releaseId": "schemora-hw-2026.10.1",
+      "contentSha256": "7b7f41b7b64e5b1b1835fbc2a8ec3c987dde914f9c7917b9beb04aec623c5806",
+      "classification": "additive-part",
+      "summary": "Add the source-linked OMRON B3F-1000 switch record without modifying existing identities.",
+      "delta": {
+        "parts": {
+          "added": ["button.omron.b3f-1000"],
+          "changed": [],
+          "removed": []
+        },
+        "topologies": {
+          "added": [],
+          "changed": [],
+          "removed": []
+        },
+        "sources": {
+          "added": ["omron-b3f-datasheet"],
+          "changed": [],
+          "removed": []
+        },
+        "claims": {
+          "added": [
+            "button.omron.b3f-1000|model/package/contactType/operatingForceNewton/heightMm|omron-b3f-datasheet|Page 1, 6 × 6 mm model table; page 4, standard flat plunger type without ground terminal",
+            "button.omron.b3f-1000|terminals/terminalGroups/pressedConnection|omron-b3f-datasheet|Page 4, bottom-view terminal numbering and top-view terminal arrangement/internal connections for B3F-1000"
+          ],
+          "changed": [],
+          "removed": []
+        }
+      },
+      "independentReview": {
+        "status": "pending",
+        "reviewer": null,
+        "reviewedOn": null
+      }
+    }
+  ]
+}

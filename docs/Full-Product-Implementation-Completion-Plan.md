@@ -287,7 +287,7 @@ The parser supports bounded text, Markdown, static HTML, selected JSON exports, 
 
 ### 7.1 Current baseline
 
-The repository has immutable catalog releases, a narrow ESP32 DevKitC V4/WROOM-32E identity, BB400 topology, LED/resistor parts, a versioned circuit graph, deterministic connectivity derivation, and limited rules. Unknown electrical facts remain explicit. This is a vertical slice, not universal hardware coverage or comprehensive electrical safety analysis.
+The repository has immutable catalog releases, a narrow ESP32 DevKitC V4/WROOM-32E identity, BB400 topology, LED/resistor/switch parts, a versioned circuit graph, deterministic connectivity derivation, and limited rules. Unknown electrical facts remain explicit. The 2026-11-14 Phase 2 increment adds a shared API/UI guard that permits release carry-forward only when all graph-referenced parts, topology, claims, and sources are unchanged. This remains a vertical slice, not universal hardware coverage or comprehensive electrical safety analysis.
 
 ### 7.2 Workstream P2-A — Catalog governance and provenance
 
@@ -307,6 +307,9 @@ The repository has immutable catalog releases, a narrow ESP32 DevKitC V4/WROOM-3
 - Make catalog upgrade a user-confirmed project mutation with expected revision/idempotency and a fresh validation report.
 - Preserve audit of prior release, mapped part identities, and upgrade outcome in immutable project history.
 - Test rollback of application code while additive catalog data remains present; catalog data itself is not destructively downgraded.
+- **Implemented 2026-11-14:** exact-reference compatibility check protects both browser affordance and API writes. The additive 2026.10 → 2026.10.1 release is accepted only because referenced records remain equivalent; tests prove changed parts, topology, claims, and sources are blocked.
+- **Implemented 2026-11-14:** strict catalog schemas now reject non-HTTPS sources, duplicate source/claim IDs, and duplicated physical board-pin locations. `pnpm catalog:validate` verifies chronological immutable release fingerprints and exact source/claim/part/topology delta records. The command passes structural checks and reports independent review as pending for both releases.
+- **Still open:** explicit reviewed migration records for changed identities, a catalog publication/reviewer workflow, rollback rehearsal, and real hardware reviewer signoff. The compatibility check is a fail-closed carry-forward path, not permission to rewrite an existing released record.
 
 ### 7.4 Workstream P2-C — Rule scope and deterministic validation
 
@@ -756,7 +759,7 @@ Phase 10 is complete only when:
 | Hardware review      | Exact identities, mappings, geometry/anchors, physical instructions, fault expectations                                               | 2–5, 7–9          | Reviewer signoff per catalog/family.                |
 | Operations           | Deployment, scanner, restore, alert routing, incident response, migration/rollback                                                    | 10                | Staging then production evidence.                   |
 
-Every check should publish exact command, commit, environment, output count, pass/fail/skip status, and retained artifacts. Tests that did not run must not be reported as passing. Hosted CI is currently deferred at the user's direction so phase implementation can proceed; this sequencing choice does not convert the blocked run documented in Gate 0 into a pass or waive the release gate. Re-enable and pass hosted CI before release.
+Every check should publish exact command, commit, environment, output count, pass/fail/skip status, and retained artifacts. Tests that did not run must not be reported as passing. On 2026-11-14, at the user's direction, the repository's GitHub Actions setting was changed to `enabled: false` and the sole checked-in workflow was moved to `.github/workflows-disabled/ci.yml`. Local verification is the active delivery policy. No hosted CI pass is claimed; the prior Gate 0 run remains blocked as recorded above. Repository Actions must be deliberately enabled again before a hosted run can occur.
 
 ---
 

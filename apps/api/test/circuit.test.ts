@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getCatalogRelease } from '@schemora/catalog';
+import { getCatalogRelease, getCatalogReleaseById } from '@schemora/catalog';
 import { Repository } from '@schemora/persistence';
 import { FileStorage } from '@schemora/storage';
 import { readConfig } from '../src/config.js';
@@ -248,6 +248,67 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('project circuit API', () => {
       tokenB,
     );
     expect(unauthorizedValidation.status).toBe(404);
+  });
+
+  it('creates a new immutable revision for a compatible additive catalog upgrade', async () => {
+    const created = await request(
+      'POST',
+      '/v1/projects',
+      { title: 'Catalog upgrade test' },
+      tokenA,
+    );
+    expect(created.status).toBe(201);
+    const project = created.body.data;
+    const previousRelease = getCatalogReleaseById('schemora-hw-2026.10');
+    const latestRelease = getCatalogRelease();
+    if (!previousRelease) throw new Error('Historical fixture release is missing.');
+    const graph = {
+      schemaVersion: 1 as const,
+      id: 'upgrade_graph_1',
+      projectId: project.id,
+      projectRevision: project.revision + 1,
+      catalogReleaseId: previousRelease.releaseId,
+      components: [
+        {
+          id: 'upgrade_board',
+          catalogPartId: 'board.espressif.esp32-devkitc-v4.wroom-32e.male',
+        },
+      ],
+      breadboards: [],
+      terminalPlacements: [],
+      wires: [],
+    };
+    const savedOld = await request(
+      'PUT',
+      `/v1/projects/${project.id}/circuit`,
+      { expectedRevision: project.revision, graph },
+      tokenA,
+    );
+    expect(savedOld.status).toBe(200);
+
+    const upgradedGraph = {
+      ...graph,
+      id: 'upgrade_graph_2',
+      projectRevision: savedOld.body.data.project.revision + 1,
+      catalogReleaseId: latestRelease.releaseId,
+    };
+    const upgraded = await request(
+      'PUT',
+      `/v1/projects/${project.id}/circuit`,
+      { expectedRevision: savedOld.body.data.project.revision, graph: upgradedGraph },
+      tokenA,
+    );
+    expect(upgraded.status).toBe(200);
+    expect(upgraded.body.data.graphSnapshot.graph.catalogReleaseId).toBe(latestRelease.releaseId);
+    expect(upgraded.body.data.project.revision).toBe(savedOld.body.data.project.revision + 1);
+    const history = await repository.pool.query(
+      "SELECT graph->>'catalogReleaseId' AS release_id FROM circuit_graph_snapshots WHERE project_id=$1 ORDER BY project_revision",
+      [project.id],
+    );
+    expect(history.rows.map((row) => row.release_id)).toEqual([
+      previousRelease.releaseId,
+      latestRelease.releaseId,
+    ]);
   });
 
   it('confirms an immutable intended graph and compares later saved virtual graphs', async () => {

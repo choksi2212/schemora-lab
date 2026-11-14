@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && pnpm -r --if-present typecheck",
     "test": "node --env-file-if-exists=.env --import tsx scripts/test.ts",
     "benchmark:intelligence": "tsx packages/intelligence/test/benchmark.ts",
+    "catalog:validate": "tsx scripts/validate-catalog-history.ts",
     "build": "pnpm -r --if-present build",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

@@ -4,7 +4,10 @@ const quantity = z.number().finite().positive();
 const sourceReferenceSchema = z
   .object({
     id: z.string().min(1),
-    url: z.string().url(),
+    url: z
+      .string()
+      .url()
+      .refine((value) => new URL(value).protocol === 'https:', 'Catalog sources must use HTTPS.'),
     publisher: z.string().min(1),
     title: z.string().min(1),
     accessedOn: z.string().date(),
@@ -188,7 +191,25 @@ export const boardSchema = basePart
       .min(1),
     supplyOptions: z.array(z.enum(['micro-usb', '5v-and-ground', '3v3-and-ground'])).min(1),
   })
-  .strict();
+  .strict()
+  .superRefine((board, ctx) => {
+    const terminalIds = board.pins.map((pin) => pin.terminalId);
+    const locations = board.pins.map((pin) => `${pin.header}:${pin.position}`);
+    if (new Set(terminalIds).size !== terminalIds.length) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['pins'],
+        message: 'Each semantic terminal may map to only one physical board header location.',
+      });
+    }
+    if (new Set(locations).size !== locations.length) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['pins'],
+        message: 'A physical header location may map to only one semantic terminal.',
+      });
+    }
+  });
 
 export const ledSchema = basePart
   .extend({
@@ -331,6 +352,23 @@ export const catalogReleaseSchema = z
     const partIds = new Set(release.parts.map((part) => part.id));
     const topologyIds = new Set(release.breadboardTopologies.map((topology) => topology.id));
     const sourceIds = new Set(release.sources.map((source) => source.id));
+    if (sourceIds.size !== release.sources.length) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['sources'],
+        message: 'Source IDs must be unique within a release.',
+      });
+    }
+    const claimKeys = release.claims.map((claim) =>
+      JSON.stringify([claim.subjectId, claim.property, claim.sourceId, claim.locator, claim.note]),
+    );
+    if (new Set(claimKeys).size !== claimKeys.length) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['claims'],
+        message: 'Exact duplicate claims are not allowed within a release.',
+      });
+    }
     if (topologyIds.size !== release.breadboardTopologies.length) {
       ctx.addIssue({
         code: 'custom',

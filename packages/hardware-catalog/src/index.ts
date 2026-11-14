@@ -22,6 +22,14 @@ export {
   parseHardwareFamilyContract,
 } from './family-contract.js';
 export type { HardwareFamilyContract } from './family-contract.js';
+export { catalogHistoryManifestSchema, validateCatalogHistory } from './governance.js';
+export type { CatalogHistoryManifest, CatalogHistoryResult } from './governance.js';
+export { assessCatalogUpgrade } from './upgrade-compatibility.js';
+export type {
+  CatalogUpgradeAssessment,
+  CatalogUpgradeDifference,
+  CatalogUpgradeReferences,
+} from './upgrade-compatibility.js';
 
 import { catalogReleaseSchema } from './schema.js';
 import { catalogRelease2026_10 } from './release-2026-10.js';
