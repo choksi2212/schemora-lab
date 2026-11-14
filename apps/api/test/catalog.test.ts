@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { SignJWT } from 'jose';
-import { getCatalogRelease, getCatalogReleaseById } from '@schemora/catalog';
+import { getBoardDirectory, getCatalogRelease, getCatalogReleaseById } from '@schemora/catalog';
 import { Repository } from '@schemora/persistence';
 import { FileStorage } from '@schemora/storage';
 import { readConfig } from '../src/config.js';
@@ -116,5 +116,19 @@ describe('immutable hardware catalog API', () => {
     });
     expect(response.statusCode).toBe(404);
     expect(response.json().error.code).toBe('NOT_FOUND');
+  });
+
+  it('returns the manufacturer board discovery index without treating it as circuit-ready', async () => {
+    const token = await authToken();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/catalog/board-directory',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const directory = getBoardDirectory();
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toEqual(directory);
+    expect(directory.entries.every((entry) => entry.supportLevel === 'discovery-only')).toBe(true);
+    expect(getCatalogRelease().parts.map((part) => part.id)).not.toContain('arduino.uno-r3');
   });
 });

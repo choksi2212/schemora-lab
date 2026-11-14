@@ -9,6 +9,9 @@ import {
   getCatalogReleaseById,
   getCatalogReleases,
   getHardwareFamilyContract,
+  boardDirectory2026_11,
+  boardDirectorySchema,
+  getBoardDirectory,
 } from '../src/index.js';
 
 describe('curated hardware catalog release', () => {
@@ -301,5 +304,39 @@ describe('curated hardware catalog release', () => {
       tolerancePercent: 5,
       ratedPowerWatt: 0.25,
     });
+  });
+});
+
+describe('official board discovery directory', () => {
+  it('lists manufacturer board models separately from immutable circuit-ready releases', () => {
+    const directory = getBoardDirectory();
+    expect(directory.directoryId).toBe('schemora-board-directory-2026.11');
+    expect(directory.checkedOn).toBe('2026-11-14');
+    expect(directory.entries.length).toBeGreaterThan(50);
+    expect(new Set(directory.entries.map((entry) => entry.id)).size).toBe(directory.entries.length);
+    expect(directory.entries.every((entry) => entry.supportLevel === 'discovery-only')).toBe(true);
+    expect(directory.entries.some((entry) => entry.id === 'espressif.esp32-c6-devkitc-1')).toBe(
+      true,
+    );
+    expect(directory.entries.some((entry) => entry.id === 'arduino.uno-r3')).toBe(true);
+    expect(
+      directory.entries.find((entry) => entry.id === 'arduino.nano-33-ble')?.listingStatus,
+    ).toBe('end-of-life');
+    expect(
+      directory.entries.find((entry) => entry.id === 'arduino.opta-lite')?.orderableVariants,
+    ).toEqual(['AFX00003']);
+    expect(getCatalogRelease().parts.map((part) => part.id)).not.toContain(
+      'espressif.esp32-c6-devkitc-1',
+    );
+  });
+
+  it('rejects duplicate board identities and non-HTTPS manufacturer pages', () => {
+    const duplicate = structuredClone(boardDirectory2026_11);
+    duplicate.entries.push(structuredClone(duplicate.entries[0]!));
+    expect(boardDirectorySchema.safeParse(duplicate).success).toBe(false);
+
+    const insecure = structuredClone(boardDirectory2026_11);
+    insecure.sources[0]!.url = insecure.sources[0]!.url.replace('https:', 'http:');
+    expect(boardDirectorySchema.safeParse(insecure).success).toBe(false);
   });
 });

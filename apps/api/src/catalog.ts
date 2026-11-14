@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
-import { getCatalogRelease, getCatalogReleaseById, getCatalogReleases } from '@schemora/catalog';
+import {
+  getBoardDirectory,
+  getCatalogRelease,
+  getCatalogReleaseById,
+  getCatalogReleases,
+} from '@schemora/catalog';
 
 /** JSON canonicalization used for stable release identity across processes. */
 function canonicalJson(value: unknown): string {
@@ -22,6 +27,11 @@ export function catalogReleaseById(releaseId: string) {
 
 export function currentCatalogRelease() {
   return catalogReleaseById(getCatalogRelease().releaseId)!;
+}
+
+/** Return the strictly parsed manufacturer discovery index, not circuit-ready parts. */
+export function currentBoardDirectory() {
+  return getBoardDirectory();
 }
 
 export function catalogReleaseIndex() {

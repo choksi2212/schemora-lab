@@ -99,6 +99,28 @@ type Release = {
 };
 type CatalogIndex = { releases: { releaseId: string; publishedOn: string; status: string }[] };
 type CatalogSection = 'all' | 'boards' | 'components' | 'breadboards';
+type CatalogView = 'curated' | 'board-directory';
+type BoardDirectoryEntry = {
+  id: string;
+  manufacturer: 'Arduino' | 'Espressif Systems';
+  family: string;
+  model: string;
+  processorFamily: string;
+  recordType: 'development-board' | 'system-module' | 'industrial-controller';
+  listingStatus: 'listed' | 'end-of-life' | 'legacy';
+  productUrl: string;
+  documentationUrl: string | null;
+  orderableVariants: string[];
+  variantCoverage: 'selected-only' | 'not-reviewed';
+  supportLevel: 'discovery-only';
+};
+type BoardDirectory = {
+  directoryId: string;
+  checkedOn: string;
+  coverageNote: string;
+  sources: { id: string; manufacturer: string; title: string; url: string; checkedOn: string }[];
+  entries: BoardDirectoryEntry[];
+};
 
 const partIcon = (category: Part['category']) =>
   category === 'development-board' ? Cpu : category === 'led' ? Zap : Cable;
@@ -110,6 +132,15 @@ export function HardwareCatalog() {
   const [section, setSection] = useState<CatalogSection>('all');
   const [selectedId, setSelectedId] = useState('');
   const [query, setQuery] = useState('');
+  const [catalogView, setCatalogView] = useState<CatalogView>('curated');
+  const [boardDirectory, setBoardDirectory] = useState<BoardDirectory | null>(null);
+  const [boardDirectoryError, setBoardDirectoryError] = useState<unknown>(null);
+  const [boardDirectoryRequested, setBoardDirectoryRequested] = useState(false);
+  const [boardQuery, setBoardQuery] = useState('');
+  const [boardManufacturer, setBoardManufacturer] = useState<
+    'all' | 'Arduino' | 'Espressif Systems'
+  >('all');
+  const [selectedBoardId, setSelectedBoardId] = useState('');
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<unknown>(null);
 
@@ -156,6 +187,18 @@ export function HardwareCatalog() {
     return () => controller.abort();
   }, [releaseId]);
 
+  useEffect(() => {
+    if (catalogView !== 'board-directory' || boardDirectory || boardDirectoryRequested) return;
+    setBoardDirectoryRequested(true);
+    setBoardDirectoryError(null);
+    void api<BoardDirectory>('/catalog/board-directory')
+      .then((data) => {
+        setBoardDirectory(data);
+        setSelectedBoardId((current) => current || data.entries[0]?.id || '');
+      })
+      .catch(setBoardDirectoryError);
+  }, [catalogView, boardDirectory, boardDirectoryRequested]);
+
   const filteredParts = useMemo(() => {
     const parts = release?.release.parts ?? [];
     const q = query.trim().toLowerCase();
@@ -172,6 +215,18 @@ export function HardwareCatalog() {
   }, [release, section, query]);
   const selected = filteredParts.find((part) => part.id === selectedId) ?? filteredParts[0];
   const topology = release?.release.breadboardTopologies[0];
+  const filteredBoards = (boardDirectory?.entries ?? []).filter((entry) => {
+    const matchesManufacturer =
+      boardManufacturer === 'all' || entry.manufacturer === boardManufacturer;
+    const matchesQuery =
+      !boardQuery.trim() ||
+      `${entry.manufacturer} ${entry.family} ${entry.model} ${entry.processorFamily} ${entry.id}`
+        .toLowerCase()
+        .includes(boardQuery.trim().toLowerCase());
+    return matchesManufacturer && matchesQuery;
+  });
+  const selectedBoard =
+    filteredBoards.find((entry) => entry.id === selectedBoardId) ?? filteredBoards[0];
 
   return (
     <div className="page catalog-page">
@@ -200,101 +255,231 @@ export function HardwareCatalog() {
         </p>
       </section>
 
-      <section className="catalog-browser" aria-label="Hardware parts">
-        <aside className="catalog-list-panel">
-          <div className="catalog-list-heading">
-            <span className="eyebrow">RELEASE CONTENTS</span>
-            <strong>{release?.release.parts.length ?? '—'} exact parts</strong>
-          </div>
-          <div className="catalog-search">
-            <Search size={16} />
-            <label className="sr-only" htmlFor="catalog-search">
-              Search hardware catalog
-            </label>
-            <input
-              id="catalog-search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search parts…"
-            />
-          </div>
-          <div className="catalog-filters" role="group" aria-label="Filter catalog">
-            {(
-              [
-                ['all', 'All'],
-                ['boards', 'Boards'],
-                ['components', 'Components'],
-              ] as [CatalogSection, string][]
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                className={section === value ? 'selected' : ''}
-                onClick={() => setSection(value)}
-                aria-pressed={section === value}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          {busy ? (
-            <Loading />
-          ) : (
-            <div className="catalog-part-list" role="listbox" aria-label="Select a part">
-              {filteredParts.map((part) => {
-                const Icon = partIcon(part.category);
-                return (
-                  <button
-                    key={part.id}
-                    className={`catalog-part-option ${selected?.id === part.id ? 'selected' : ''}`}
-                    role="option"
-                    aria-selected={selected?.id === part.id}
-                    onClick={() => setSelectedId(part.id)}
-                  >
-                    <span className="catalog-part-icon">
-                      <Icon size={17} />
-                    </span>
-                    <span>
-                      <small>{part.manufacturer}</small>
-                      <strong>{part.model}</strong>
-                      <em>{categoryName(part.category)}</em>
-                    </span>
-                  </button>
-                );
-              })}
-              {!filteredParts.length && !error && (
-                <p className="catalog-empty">No catalog entries match this search.</p>
-              )}
-            </div>
-          )}
-        </aside>
+      <div className="catalog-view-tabs" role="group" aria-label="Catalog view">
+        <button
+          type="button"
+          aria-pressed={catalogView === 'curated'}
+          onClick={() => setCatalogView('curated')}
+        >
+          Circuit-ready catalog
+        </button>
+        <button
+          type="button"
+          aria-pressed={catalogView === 'board-directory'}
+          onClick={() => setCatalogView('board-directory')}
+        >
+          Official board index
+        </button>
+      </div>
 
-        <div className="catalog-detail-panel">
-          <ErrorNotice error={error} onRetry={() => void loadIndex()} />
-          {busy && !release ? (
-            <Loading />
-          ) : selected ? (
-            <PartDetail
-              part={selected}
+      {catalogView === 'curated' ? (
+        <>
+          <section className="catalog-browser" aria-label="Hardware parts">
+            <aside className="catalog-list-panel">
+              <div className="catalog-list-heading">
+                <span className="eyebrow">RELEASE CONTENTS</span>
+                <strong>{release?.release.parts.length ?? '—'} exact parts</strong>
+              </div>
+              <div className="catalog-search">
+                <Search size={16} />
+                <label className="sr-only" htmlFor="catalog-search">
+                  Search hardware catalog
+                </label>
+                <input
+                  id="catalog-search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search parts…"
+                />
+              </div>
+              <div className="catalog-filters" role="group" aria-label="Filter catalog">
+                {(
+                  [
+                    ['all', 'All'],
+                    ['boards', 'Boards'],
+                    ['components', 'Components'],
+                  ] as [CatalogSection, string][]
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    className={section === value ? 'selected' : ''}
+                    onClick={() => setSection(value)}
+                    aria-pressed={section === value}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {busy ? (
+                <Loading />
+              ) : (
+                <div className="catalog-part-list" role="listbox" aria-label="Select a part">
+                  {filteredParts.map((part) => {
+                    const Icon = partIcon(part.category);
+                    return (
+                      <button
+                        key={part.id}
+                        className={`catalog-part-option ${selected?.id === part.id ? 'selected' : ''}`}
+                        role="option"
+                        aria-selected={selected?.id === part.id}
+                        onClick={() => setSelectedId(part.id)}
+                      >
+                        <span className="catalog-part-icon">
+                          <Icon size={17} />
+                        </span>
+                        <span>
+                          <small>{part.manufacturer}</small>
+                          <strong>{part.model}</strong>
+                          <em>{categoryName(part.category)}</em>
+                        </span>
+                      </button>
+                    );
+                  })}
+                  {!filteredParts.length && !error && (
+                    <p className="catalog-empty">No catalog entries match this search.</p>
+                  )}
+                </div>
+              )}
+            </aside>
+
+            <div className="catalog-detail-panel">
+              <ErrorNotice error={error} onRetry={() => void loadIndex()} />
+              {busy && !release ? (
+                <Loading />
+              ) : selected ? (
+                <PartDetail
+                  part={selected}
+                  sources={release?.release.sources ?? []}
+                  claims={release?.release.claims ?? []}
+                />
+              ) : !error ? (
+                <div className="catalog-empty-detail">
+                  Choose a catalog entry to inspect its reviewed details.
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          {topology && (
+            <BreadboardDetail
+              topology={topology}
               sources={release?.release.sources ?? []}
               claims={release?.release.claims ?? []}
             />
-          ) : !error ? (
-            <div className="catalog-empty-detail">
-              Choose a catalog entry to inspect its reviewed details.
+          )}
+        </>
+      ) : (
+        <section
+          className="catalog-browser board-directory-browser"
+          aria-label="Official board index"
+        >
+          <aside className="catalog-list-panel">
+            <div className="catalog-list-heading">
+              <span className="eyebrow">MANUFACTURER LISTINGS</span>
+              <strong>
+                {boardDirectory ? `${boardDirectory.entries.length} models` : 'Loading…'}
+              </strong>
             </div>
-          ) : null}
-        </div>
-      </section>
-
-      {topology && (
-        <BreadboardDetail
-          topology={topology}
-          sources={release?.release.sources ?? []}
-          claims={release?.release.claims ?? []}
-        />
+            <div className="catalog-search">
+              <Search size={16} />
+              <label className="sr-only" htmlFor="board-directory-search">
+                Search official board index
+              </label>
+              <input
+                id="board-directory-search"
+                value={boardQuery}
+                onChange={(event) => setBoardQuery(event.target.value)}
+                placeholder="Search board, family, processor…"
+              />
+            </div>
+            <div className="catalog-filters" role="group" aria-label="Filter board manufacturer">
+              {(['all', 'Espressif Systems', 'Arduino'] as const).map((manufacturer) => (
+                <button
+                  key={manufacturer}
+                  type="button"
+                  className={boardManufacturer === manufacturer ? 'selected' : ''}
+                  aria-pressed={boardManufacturer === manufacturer}
+                  onClick={() => setBoardManufacturer(manufacturer)}
+                >
+                  {manufacturer === 'all'
+                    ? 'All'
+                    : manufacturer === 'Arduino'
+                      ? 'Arduino'
+                      : 'Espressif'}
+                </button>
+              ))}
+            </div>
+            {boardDirectoryError ? (
+              <ErrorNotice
+                error={boardDirectoryError}
+                onRetry={() => {
+                  setBoardDirectoryRequested(false);
+                  setBoardDirectoryError(null);
+                }}
+              />
+            ) : !boardDirectory ? (
+              <Loading />
+            ) : (
+              <div className="catalog-part-list" role="listbox" aria-label="Select a board model">
+                {filteredBoards.map((entry) => (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    className={`catalog-part-option ${selectedBoard?.id === entry.id ? 'selected' : ''}`}
+                    role="option"
+                    aria-selected={selectedBoard?.id === entry.id}
+                    onClick={() => setSelectedBoardId(entry.id)}
+                  >
+                    <span className="catalog-part-icon">
+                      <Cpu size={17} />
+                    </span>
+                    <span>
+                      <small>
+                        {entry.manufacturer} · {entry.family}
+                      </small>
+                      <strong>{entry.model}</strong>
+                      <em>
+                        {entry.listingStatus === 'end-of-life'
+                          ? 'End of life'
+                          : entry.listingStatus === 'legacy'
+                            ? 'Legacy listing'
+                            : entry.recordType.replaceAll('-', ' ')}
+                      </em>
+                    </span>
+                  </button>
+                ))}
+                {filteredBoards.length === 0 && (
+                  <p className="catalog-empty">No board models match this search.</p>
+                )}
+              </div>
+            )}
+          </aside>
+          <div className="catalog-detail-panel">
+            {selectedBoard ? (
+              <BoardDirectoryDetail entry={selectedBoard} />
+            ) : boardDirectoryError ? null : (
+              <div className="catalog-empty-detail">
+                Choose a board model to inspect its official sources.
+              </div>
+            )}
+          </div>
+          {boardDirectory && (
+            <div className="board-directory-notice">
+              <strong>Discovery index · checked {boardDirectory.checkedOn}</strong>
+              <p>{boardDirectory.coverageNote}</p>
+              <div>
+                {boardDirectory.sources.map((source) => (
+                  <a key={source.id} href={source.url} target="_blank" rel="noreferrer">
+                    {source.title} <ArrowUpRight size={14} />
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
       )}
 
-      {release && (
+      {catalogView === 'curated' && release && (
         <footer className="catalog-provenance">
           <span>Release digest · SHA-256</span>
           <code>{release.sha256}</code>
@@ -302,6 +487,72 @@ export function HardwareCatalog() {
         </footer>
       )}
     </div>
+  );
+}
+
+function BoardDirectoryDetail({ entry }: { entry: BoardDirectoryEntry }) {
+  return (
+    <article className="catalog-part-detail board-directory-detail">
+      <div className="detail-kicker">
+        <span className="eyebrow">{entry.manufacturer} · BOARD DISCOVERY</span>
+        <span className="identity-chip">Discovery only</span>
+      </div>
+      <h2>{entry.model}</h2>
+      <p className="catalog-part-summary">
+        This is a manufacturer-indexed board identity. Schemora has not verified its pin map,
+        physical revision, or electrical compatibility for circuit editing.
+      </p>
+      <div className="catalog-fact-grid">
+        <Fact label="Board family" value={entry.family} />
+        <Fact label="Processor family" value={entry.processorFamily} />
+        <Fact label="Product type" value={formatWords(entry.recordType)} />
+        <Fact
+          label="Manufacturer listing status"
+          value={
+            entry.listingStatus === 'end-of-life'
+              ? 'End of life'
+              : entry.listingStatus === 'legacy'
+                ? 'Legacy listing; current availability unverified'
+                : 'Listed on current manufacturer index'
+          }
+        />
+        <Fact
+          label="Orderable variant coverage"
+          value={
+            entry.variantCoverage === 'selected-only'
+              ? 'Selected variants only; not exhaustive'
+              : 'Not reviewed in this index'
+          }
+        />
+      </div>
+      {entry.orderableVariants.length > 0 && (
+        <section className="catalog-subsection">
+          <h3>Selected manufacturer order codes</h3>
+          <ul className="board-variants">
+            {entry.orderableVariants.map((variant) => (
+              <li key={variant}>{variant}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+      <section className="catalog-subsection">
+        <h3>Official references</h3>
+        <div className="board-source-links">
+          <a href={entry.productUrl} target="_blank" rel="noreferrer">
+            Manufacturer product directory <ArrowUpRight size={15} />
+          </a>
+          {entry.documentationUrl && (
+            <a href={entry.documentationUrl} target="_blank" rel="noreferrer">
+              Board documentation <ArrowUpRight size={15} />
+            </a>
+          )}
+        </div>
+      </section>
+      <p className="board-support-boundary">
+        Check the exact order code, module, antenna, memory, headers, and PCB revision in the source
+        documents. Do not use this discovery entry to wire a circuit or choose a firmware target.
+      </p>
+    </article>
   );
 }
 

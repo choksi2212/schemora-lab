@@ -8,7 +8,12 @@ import {
   hardwareRecognitionProposalSchema,
 } from '@schemora/contracts';
 import { canonicalDigest } from '@schemora/assembly-plan';
-import { catalogReleaseById, catalogReleaseIndex, currentCatalogRelease } from './catalog.js';
+import {
+  catalogReleaseById,
+  catalogReleaseIndex,
+  currentBoardDirectory,
+  currentCatalogRelease,
+} from './catalog.js';
 import {
   Repository,
   RepositoryError,
@@ -625,6 +630,9 @@ export function buildApp(
       releases: [...releases].reverse(),
     });
   });
+  app.get('/v1/catalog/board-directory', async (request) =>
+    envelope(request, currentBoardDirectory()),
+  );
   app.get('/v1/catalog/:releaseId', async (request) => {
     const { releaseId } = z
       .object({

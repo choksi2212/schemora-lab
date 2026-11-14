@@ -18,6 +18,8 @@ The catalog exposes an exact ESP32-DevKitC V4 / WROOM-32E / male-header configur
 
 See [Phase 2 implementation details and limits](docs/Phase-2-Implementation.md) for catalog sources, graph contracts, rules, APIs, persistence, and verification.
 
+The hardware catalog also includes an **Official board index** for discovering Arduino and Espressif models. It is separate from circuit-ready support: indexed models have no inferred pin maps or electrical validation and cannot be placed into a circuit until an exact configuration receives its own source-reviewed catalog release. The snapshot and its coverage limits are documented in [`@schemora/catalog`](packages/hardware-catalog/README.md#official-board-discovery-directory).
+
 ## Phase 3 — Interactive 3D workbench (in progress)
 
 The circuit workspace now renders the saved graph in a browser 3D scene with camera orbit, zoom, and reset controls. Users can move and rotate selected components, add a wire by choosing two exact terminals, remove wires, and undo or redo edits before saving. Component poses are stored in a bounded visual-layout contract separate from electrical connectivity. The existing editor remains available for optional breadboard-hole assignments. Geometry is illustrative and is not dimension-accurate CAD, a physical-fit guarantee, or electrical validation. Firmware simulation and photo recognition remain later, separately gated work.

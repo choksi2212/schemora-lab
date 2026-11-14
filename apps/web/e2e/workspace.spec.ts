@@ -136,6 +136,27 @@ test('selects one account-export conversation before extraction', async ({ page 
   await expect(page.locator('.message-content').filter({ hasText: 'BME280' })).toHaveCount(0);
 });
 
+test('indexes official Arduino and Espressif boards as discovery-only identities', async ({
+  page,
+}) => {
+  await page.goto('/catalog');
+  await page.getByRole('button', { name: 'Official board index' }).click();
+  await expect(page.getByText(/manufacturer-indexed board identity/)).toBeVisible();
+  await page
+    .getByRole('textbox', { name: 'Search official board index' })
+    .fill('ESP32-C6-DevKitC-1');
+  await expect(page.getByRole('heading', { name: 'ESP32-C6-DevKitC-1' })).toBeVisible();
+  await expect(page.getByText('Discovery only')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Board documentation' })).toHaveAttribute(
+    'href',
+    /esp32-c6-devkitc-1/,
+  );
+  await page.getByRole('button', { name: 'Arduino', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Search official board index' }).fill('Arduino UNO R3');
+  await expect(page.getByRole('heading', { name: 'Arduino UNO R3' })).toBeVisible();
+  await expect(page.getByText('ATmega328P')).toBeVisible();
+});
+
 test('connects exact terminals in the 3D workbench and persists graph edits', async ({ page }) => {
   const title = `3D wiring ${Date.now()}`;
   await createImport(

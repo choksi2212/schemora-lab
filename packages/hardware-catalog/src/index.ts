@@ -30,6 +30,12 @@ export type {
   CatalogUpgradeDifference,
   CatalogUpgradeReferences,
 } from './upgrade-compatibility.js';
+export {
+  boardDirectory2026_11,
+  boardDirectorySchema,
+  getBoardDirectory,
+} from './board-directory.js';
+export type { BoardDirectory } from './board-directory.js';
 
 import { catalogReleaseSchema } from './schema.js';
 import { catalogRelease2026_10 } from './release-2026-10.js';
