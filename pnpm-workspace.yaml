@@ -1,6 +1,14 @@
 packages:
   - apps/*
   - packages/*
+# Advisory remediations for affected transitive packages. Remove a pin only after
+# dependent ranges resolve fixed releases and the complete dependency audit is clean.
+overrides:
+  dompurify: 3.4.17
+  esbuild: 0.28.2
+  fast-uri@^3: 3.1.9
+  fast-uri@^4: 4.2.3
+  undici@^7: 7.30.2
 allowBuilds:
   esbuild: true
   sharp: true

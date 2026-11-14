@@ -11,13 +11,13 @@
   "dependencies": {
     "@schemora/contracts": "workspace:*",
     "cheerio": "1.2.0",
-    "yauzl": "3.4.0",
-    "pdfjs-dist": "5.7.284"
+    "pdfjs-dist": "6.5.438",
+    "yauzl": "3.4.0"
   },
   "devDependencies": {
-    "@types/yauzl": "^3.2.0",
     "@types/node": "^24.0.0",
+    "@types/yauzl": "^3.2.0",
     "typescript": "^5.9.0",
-    "vitest": "^3.2.0"
+    "vitest": "^4.1.12"
   }
 }

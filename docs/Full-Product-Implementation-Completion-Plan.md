@@ -1,6 +1,6 @@
 # Schemora Full-Product Implementation and Completion Plan
 
-**Document status:** Planning baseline; no implementation work is authorized or represented by this document.  
+**Document status:** Living implementation and completion record; Gate 0 execution evidence is recorded in §5.5.
 **Planning date:** 14 November 2026  
 **Branch baseline reviewed:** `dev` at `1913b7a`  
 **Roadmap authority:** [`context.md`](./context.md), ten product phases  
@@ -204,6 +204,36 @@ Run in order on the final dependency tree:
 - Green verification record including environment and test counts.
 - Committed lockfile and any package manifests changed.
 - Updated baseline version and verification instructions in the appropriate runbook.
+
+### 5.5 Gate 0 execution record
+
+**Status:** Local acceptance passed on the `dev` worktree. Hosted CI is still required on the pushed implementation commit; Gate 0 remains in progress until that result is checked.
+
+#### Dependency and advisory disposition
+
+- Upgraded the web framework from Next.js `16.4.0` to stable `16.4.6`. The official `16.4.5` release includes the November security fixes; `16.4.6` is the latest stable `16.4.x` release verified on 14 November 2026. The release branch was used rather than a canary. See the [Next.js 16.4.5 security release](https://github.com/vercel/next.js/releases/tag/v16.4.5), [Next.js 16.4.6 release](https://github.com/vercel/next.js/releases/tag/v16.4.6), and [Next.js security advisories](https://github.com/vercel/next.js/security/advisories).
+- Updated PDF.js to `6.5.438`, Zod to `4.6.7` across workspace consumers, and Vitest to `4.1.12` across workspace test packages. The test runner update also resolves the affected TinyPool dependency.
+- Added explicit workspace overrides for DOMPurify `3.4.17`, esbuild `0.28.2`, undici `7.30.2`, and fast-uri `3.1.9`/`4.2.3` for dependency ranges still selecting vulnerable transitive versions. These are pinned in `pnpm-workspace.yaml`, represented in the lockfile, and validated through the full test and build matrix.
+- `pnpm audit --prod` and the full `pnpm audit` both report **no known vulnerabilities**. No audit finding is suppressed.
+
+#### Verification evidence
+
+| Gate 0 check                   | Result  | Environment/evidence                                                                                                      |
+| ------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Frozen dependency install      | Pass    | Node `24.16.0`, pnpm `11.5.2`; `pnpm install --frozen-lockfile`.                                                          |
+| Formatting                     | Pass    | `pnpm format:check`.                                                                                                      |
+| Type checking                  | Pass    | `pnpm typecheck`; all workspace projects completed.                                                                       |
+| Development database migration | Pass    | `pnpm db:migrate` against the Compose PostgreSQL 17 service.                                                              |
+| Full workspace suite           | Pass    | `pnpm test`; 246 tests passed, no failures or skipped tests. The test harness uses the separate `schemora_test` database. |
+| Production build               | Pass    | `pnpm build`; Next.js `16.4.6` compiled and generated all routes.                                                         |
+| Production dependency audit    | Pass    | `pnpm audit --prod`; no known vulnerabilities.                                                                            |
+| Full dependency audit          | Pass    | `pnpm audit`; no known vulnerabilities.                                                                                   |
+| Container builds               | Pass    | `Dockerfile.web`, `Dockerfile.api`, and `Dockerfile.worker` built successfully from the final lockfile.                   |
+| Chromium browser workflow      | Pass    | `pnpm test:e2e`; all 4 Playwright tests passed.                                                                           |
+| Repository hygiene             | Pending | Run `git diff --check`, confirm a clean `dev` worktree after commit, and verify `main` remains README-only.               |
+| Hosted CI                      | Pending | Verify the `Verify development` workflow for the pushed implementation commit.                                            |
+
+The browser run emitted existing Three.js deprecation warnings for `THREE.Clock` and `PCFSoftShadowMap`; these did not fail the workflow and are recorded for a later rendering maintenance pass. Hosted CI and repository hygiene remain explicit gates rather than inferred from local success.
 
 ---
 

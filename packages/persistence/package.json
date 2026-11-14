@@ -13,14 +13,14 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "drizzle-orm": "0.45.4",
-    "pg": "8.23.1",
     "@schemora/contracts": "workspace:*",
-    "@schemora/simulation": "workspace:*"
+    "@schemora/simulation": "workspace:*",
+    "drizzle-orm": "0.45.4",
+    "pg": "8.23.1"
   },
   "devDependencies": {
     "@types/pg": "8.15.6",
     "tsx": "4.20.6",
-    "vitest": "^3.2.0"
+    "vitest": "^4.1.12"
   }
 }

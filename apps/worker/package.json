@@ -19,6 +19,6 @@
     "@schemora/simulation": "workspace:*",
     "@schemora/storage": "workspace:*",
     "tsx": "4.20.6",
-    "zod": "4.3.6"
+    "zod": "4.6.7"
   }
 }
