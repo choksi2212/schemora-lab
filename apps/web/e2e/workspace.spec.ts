@@ -136,9 +136,7 @@ test('selects one account-export conversation before extraction', async ({ page 
   await expect(page.locator('.message-content').filter({ hasText: 'BME280' })).toHaveCount(0);
 });
 
-test('indexes official Arduino and Espressif boards as discovery-only identities', async ({
-  page,
-}) => {
+test('indexes manufacturer boards as discovery-only identities', async ({ page }) => {
   await page.goto('/catalog');
   await page.getByRole('button', { name: 'Official board index' }).click();
   await expect(page.getByText(/manufacturer-indexed board identity/)).toBeVisible();
@@ -155,6 +153,16 @@ test('indexes official Arduino and Espressif boards as discovery-only identities
   await page.getByRole('textbox', { name: 'Search official board index' }).fill('Arduino UNO R3');
   await expect(page.getByRole('heading', { name: 'Arduino UNO R3' })).toBeVisible();
   await expect(page.getByText('ATmega328P')).toBeVisible();
+  await page.getByRole('button', { name: 'Raspberry Pi', exact: true }).click();
+  await page
+    .getByRole('textbox', { name: 'Search official board index' })
+    .fill('Pico 2 W with headers');
+  await expect(
+    page.getByRole('heading', { name: 'Raspberry Pi Pico 2 W with headers' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Component discovery' }).click();
+  await expect(page.getByRole('heading', { name: 'NE555 timer' })).toBeVisible();
+  await expect(page.getByText('family-level record')).toBeVisible();
 });
 
 test('connects exact terminals in the 3D workbench and persists graph edits', async ({ page }) => {

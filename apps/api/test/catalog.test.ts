@@ -1,7 +1,12 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { SignJWT } from 'jose';
-import { getBoardDirectory, getCatalogRelease, getCatalogReleaseById } from '@schemora/catalog';
+import {
+  getBoardDirectory,
+  getCatalogRelease,
+  getCatalogReleaseById,
+  getComponentDirectory,
+} from '@schemora/catalog';
 import { Repository } from '@schemora/persistence';
 import { FileStorage } from '@schemora/storage';
 import { readConfig } from '../src/config.js';
@@ -130,5 +135,23 @@ describe('immutable hardware catalog API', () => {
     expect(response.json().data).toEqual(directory);
     expect(directory.entries.every((entry) => entry.supportLevel === 'discovery-only')).toBe(true);
     expect(getCatalogRelease().parts.map((part) => part.id)).not.toContain('arduino.uno-r3');
+  });
+
+  it('returns the component discovery index separately from circuit-ready releases', async () => {
+    const token = await authToken();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/catalog/component-directory',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toEqual(getComponentDirectory());
+    expect(
+      response
+        .json()
+        .data.entries.every(
+          (entry: { supportLevel: string }) => entry.supportLevel === 'discovery-only',
+        ),
+    ).toBe(true);
   });
 });

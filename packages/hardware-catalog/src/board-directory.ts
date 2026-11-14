@@ -11,7 +11,14 @@ const httpsUrl = z
 const boardDirectoryEntrySchema = z
   .object({
     id: z.string().regex(/^[a-z0-9][a-z0-9.-]+$/),
-    manufacturer: z.enum(['Arduino', 'Espressif Systems']),
+    manufacturer: z.enum([
+      'Adafruit',
+      'Arduino',
+      'Espressif Systems',
+      'Raspberry Pi',
+      'SparkFun Electronics',
+      'STMicroelectronics',
+    ]),
     sourceId: z.string().min(1),
     family: z.string().min(1),
     model: z.string().min(1),
@@ -54,7 +61,14 @@ export const boardDirectorySchema = z
         z
           .object({
             id: z.string().min(1),
-            manufacturer: z.enum(['Arduino', 'Espressif Systems']),
+            manufacturer: z.enum([
+              'Adafruit',
+              'Arduino',
+              'Espressif Systems',
+              'Raspberry Pi',
+              'SparkFun Electronics',
+              'STMicroelectronics',
+            ]),
             title: z.string().min(1),
             url: httpsUrl,
             checkedOn: z.string().date(),
@@ -83,8 +97,15 @@ export const boardDirectorySchema = z
       });
     }
     for (const [index, entry] of directory.entries.entries()) {
-      const expectedManufacturer = entry.manufacturer === 'Arduino' ? 'arduino' : 'espressif';
-      if (!entry.id.startsWith(`${expectedManufacturer}.`)) {
+      const expectedManufacturer: Record<string, string> = {
+        Adafruit: 'adafruit',
+        Arduino: 'arduino',
+        'Espressif Systems': 'espressif',
+        'Raspberry Pi': 'raspberry-pi',
+        'SparkFun Electronics': 'sparkfun',
+        STMicroelectronics: 'st',
+      };
+      if (!entry.id.startsWith(`${expectedManufacturer[entry.manufacturer]}.`)) {
         ctx.addIssue({
           code: 'custom',
           path: ['entries', index, 'id'],
@@ -105,6 +126,12 @@ const espDirectory = 'https://www.espressif.com/en/products/devkits';
 const arduinoDirectory = 'https://www.arduino.cc/hardware';
 const arduinoOlderDirectory = 'https://www.arduino.cc/en/Main/Hardware';
 const arduinoRetiredDirectory = 'https://docs.arduino.cc/retired/';
+const raspberryPiPicoDirectory =
+  'https://www.raspberrypi.com/documentation/microcontrollers/pico-series.html';
+const stNucleoDirectory =
+  'https://www.st.com/en/evaluation-tools/stm32-nucleo-boards/products.html';
+const adafruitDirectory = 'https://www.adafruit.com/category/851';
+const sparkfunDirectory = 'https://www.sparkfun.com/development-boards.html';
 const espDocs = (path: string) =>
   `https://docs.espressif.com/projects/esp-dev-kits/en/latest/${path}`;
 const arduinoDocs = (path: string) => `https://docs.arduino.cc/hardware/${path}/`;
@@ -181,6 +208,31 @@ const arduinoRetired = (
   documentationUrl: null,
 });
 
+const indexedBoard = (
+  manufacturer: 'Raspberry Pi' | 'STMicroelectronics' | 'Adafruit' | 'SparkFun Electronics',
+  prefix: string,
+  sourceId: string,
+  family: string,
+  model: string,
+  processorFamily: string,
+  productUrl: string,
+  documentationUrl: string | null = null,
+) => ({
+  id: `${prefix}.${model.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+  manufacturer,
+  sourceId,
+  family,
+  model,
+  processorFamily,
+  recordType: 'development-board' as const,
+  listingStatus: 'listed' as const,
+  productUrl,
+  documentationUrl,
+  orderableVariants: [],
+  variantCoverage: 'not-reviewed' as const,
+  supportLevel: 'discovery-only' as const,
+});
+
 /**
  * Manufacturer-linked board discovery snapshot checked on 2026-11-14.
  * These entries help makers find exact vendor documentation; they are not
@@ -192,7 +244,7 @@ export const boardDirectory2026_11 = boardDirectorySchema.parse({
   checkedOn: '2026-11-14',
   status: 'discovery-index',
   coverageNote:
-    'Snapshot of models shown in the official Espressif DevKits page, the current Arduino Hardware page, Arduino’s older hardware index, and its official retired-board list on the checked date. It excludes third-party boards, accessories, kits, and Arduino shields/carriers. Manufacturer pages can change. The older Arduino index is a legacy source and does not establish present availability. Model-family entries do not enumerate every package, flash, PSRAM, antenna, header, PCB-revision, or regional orderable SKU. Every entry is discovery-only: inspect the exact board revision and its official pinout before circuit use. Discovery entries cannot be added to circuit graphs or used as firmware targets.',
+    'Snapshot of selected models shown in official Espressif, Arduino, Raspberry Pi, STMicroelectronics, Adafruit, and SparkFun board directories on the checked date. It excludes many vendor models, third-party boards, accessories, kits, and shields/carriers. Manufacturer pages can change; a directory listing does not establish present orderability. The older Arduino index is a legacy source and does not establish present availability. Model-family entries do not enumerate every package, flash, PSRAM, antenna, header, PCB revision, or regional SKU. Every entry is discovery-only: inspect the exact board revision and official pinout before circuit use. Discovery entries cannot be added to circuit graphs or used as firmware targets.',
   sources: [
     {
       id: 'espressif',
@@ -220,6 +272,34 @@ export const boardDirectory2026_11 = boardDirectorySchema.parse({
       manufacturer: 'Arduino',
       title: 'Arduino Legacy Documentation — retired products',
       url: arduinoRetiredDirectory,
+      checkedOn: '2026-11-14',
+    },
+    {
+      id: 'raspberry-pi-pico',
+      manufacturer: 'Raspberry Pi',
+      title: 'Raspberry Pi Pico series documentation',
+      url: raspberryPiPicoDirectory,
+      checkedOn: '2026-11-14',
+    },
+    {
+      id: 'st-nucleo',
+      manufacturer: 'STMicroelectronics',
+      title: 'STMicroelectronics STM32 Nucleo board product directory',
+      url: stNucleoDirectory,
+      checkedOn: '2026-11-14',
+    },
+    {
+      id: 'adafruit-board-index',
+      manufacturer: 'Adafruit',
+      title: 'Adafruit development board product category',
+      url: adafruitDirectory,
+      checkedOn: '2026-11-14',
+    },
+    {
+      id: 'sparkfun-board-index',
+      manufacturer: 'SparkFun Electronics',
+      title: 'SparkFun development board product category',
+      url: sparkfunDirectory,
       checkedOn: '2026-11-14',
     },
   ],
@@ -619,6 +699,176 @@ export const boardDirectory2026_11 = boardDirectorySchema.parse({
     arduinoRetired('lily-pad-simple', 'Retired', 'LilyPad Arduino Simple'),
     arduinoRetired('lily-pad-simplesnap', 'Retired', 'LilyPad Arduino SimpleSnap'),
     arduinoRetired('lily-pad-usb', 'Retired', 'LilyPad Arduino USB'),
+    indexedBoard(
+      'Raspberry Pi',
+      'raspberry-pi',
+      'raspberry-pi-pico',
+      'Pico',
+      'Raspberry Pi Pico',
+      'RP2040',
+      raspberryPiPicoDirectory,
+    ),
+    indexedBoard(
+      'Raspberry Pi',
+      'raspberry-pi',
+      'raspberry-pi-pico',
+      'Pico',
+      'Raspberry Pi Pico H',
+      'RP2040',
+      raspberryPiPicoDirectory,
+    ),
+    indexedBoard(
+      'Raspberry Pi',
+      'raspberry-pi',
+      'raspberry-pi-pico',
+      'Pico W',
+      'Raspberry Pi Pico W',
+      'RP2040',
+      raspberryPiPicoDirectory,
+    ),
+    indexedBoard(
+      'Raspberry Pi',
+      'raspberry-pi',
+      'raspberry-pi-pico',
+      'Pico W',
+      'Raspberry Pi Pico WH',
+      'RP2040',
+      raspberryPiPicoDirectory,
+    ),
+    indexedBoard(
+      'Raspberry Pi',
+      'raspberry-pi',
+      'raspberry-pi-pico',
+      'Pico 2',
+      'Raspberry Pi Pico 2',
+      'RP2350',
+      raspberryPiPicoDirectory,
+    ),
+    indexedBoard(
+      'Raspberry Pi',
+      'raspberry-pi',
+      'raspberry-pi-pico',
+      'Pico 2',
+      'Raspberry Pi Pico 2 with headers',
+      'RP2350',
+      raspberryPiPicoDirectory,
+    ),
+    indexedBoard(
+      'Raspberry Pi',
+      'raspberry-pi',
+      'raspberry-pi-pico',
+      'Pico 2 W',
+      'Raspberry Pi Pico 2 W',
+      'RP2350',
+      raspberryPiPicoDirectory,
+    ),
+    indexedBoard(
+      'Raspberry Pi',
+      'raspberry-pi',
+      'raspberry-pi-pico',
+      'Pico 2 W',
+      'Raspberry Pi Pico 2 W with headers',
+      'RP2350',
+      raspberryPiPicoDirectory,
+    ),
+    ...[
+      ['NUCLEO-U575ZI-Q', 'STM32U575ZIT6Q', 'Nucleo-144'],
+      ['NUCLEO-F446RE', 'STM32F446RE', 'Nucleo-64'],
+      ['NUCLEO-U5A5ZJ-Q', 'STM32U5A5ZJ', 'Nucleo-144'],
+      ['NUCLEO-G491RE', 'STM32G491RE', 'Nucleo-64'],
+      ['NUCLEO-H723ZG', 'STM32H723ZG', 'Nucleo-144'],
+      ['NUCLEO-U545RE-Q', 'STM32U545RE', 'Nucleo-64'],
+      ['NUCLEO-G431KB', 'STM32G431KB', 'Nucleo-32'],
+      ['NUCLEO-L496ZG-P', 'STM32L496ZGTP', 'Nucleo-144'],
+      ['NUCLEO-L152RE', 'STM32L152RE', 'Nucleo-64'],
+      ['NUCLEO-F303K8', 'STM32F303K8', 'Nucleo-32'],
+      ['NUCLEO-F072RB', 'STM32F072RB', 'Nucleo-64'],
+      ['NUCLEO-F334R8', 'STM32F334R8', 'Nucleo-64'],
+      ['NUCLEO-L432KC', 'STM32L432KC', 'Nucleo-32'],
+      ['NUCLEO-F401RE', 'STM32F401RE', 'Nucleo-64'],
+      ['NUCLEO-F411RE', 'STM32F411RE', 'Nucleo-64'],
+      ['NUCLEO-L053R8', 'STM32L053R8', 'Nucleo-64'],
+      ['NUCLEO-C071RB', 'STM32C071RB', 'Nucleo-64'],
+      ['NUCLEO-H553ZG', 'STM32H553ZG', 'Nucleo-144'],
+      ['NUCLEO-H7S3L8', 'STM32H7S3L8', 'Nucleo-144'],
+      ['NUCLEO-C542RC', 'STM32C542RC', 'Nucleo-64'],
+      ['NUCLEO-G031K8', 'STM32G031K8', 'Nucleo-32'],
+      ['NUCLEO-WB55RG', 'STM32WB55RG', 'Nucleo-64'],
+      ['NUCLEO-H563ZI', 'STM32H563ZI', 'Nucleo-144'],
+      ['NUCLEO-WBA25CE1', 'STM32WBA25CE', 'Nucleo-64'],
+      ['NUCLEO-H503RB', 'STM32H503RB', 'Nucleo-64'],
+      ['NUCLEO-G474RE', 'STM32G474RE', 'Nucleo-64'],
+      ['NUCLEO-H753ZI', 'STM32H753ZI', 'Nucleo-144'],
+      ['NUCLEO-WBA65RI', 'STM32WBA65RI', 'Nucleo-64'],
+      ['NUCLEO-N657X0-Q', 'STM32N657X0', 'Nucleo-144'],
+      ['NUCLEO-L4R5ZI-P', 'STM32L4R5ZI', 'Nucleo-144'],
+      ['NUCLEO-F303ZE', 'STM32F303ZE', 'Nucleo-144'],
+      ['NUCLEO-G431RB', 'STM32G431RB', 'Nucleo-64'],
+      ['NUCLEO-L476RG', 'STM32L476RG', 'Nucleo-64'],
+      ['NUCLEO-C562RE', 'STM32C562RE', 'Nucleo-64'],
+      ['NUCLEO-WL55JC', 'STM32WL55JC', 'Nucleo-64'],
+      ['NUCLEO-U083RC', 'STM32U083RC', 'Nucleo-64'],
+      ['NUCLEO-WB07CC', 'STM32WB07CC', 'Nucleo-64'],
+      ['NUCLEO-F767ZI', 'STM32F767ZI', 'Nucleo-144'],
+      ['NUCLEO-F756ZG', 'STM32F756ZG', 'Nucleo-144'],
+      ['NUCLEO-F070RB', 'STM32F070RB', 'Nucleo-64'],
+      ['NUCLEO-L011K4', 'STM32L011K4', 'Nucleo-32'],
+    ].map(([model, mcu, family]) =>
+      indexedBoard(
+        'STMicroelectronics',
+        'st',
+        'st-nucleo',
+        family!,
+        model!,
+        mcu!,
+        stNucleoDirectory,
+      ),
+    ),
+    ...[
+      ['QT Py ESP32-S3', 'ESP32-S3'],
+      ['QT Py S3', 'ESP32-S3'],
+      ['ESP32-S3 Feather 8MB', 'ESP32-S3'],
+      ['Feather RP2040', 'RP2040'],
+      ['QT Py RP2040', 'RP2040'],
+      ['ESP32-S3 Reverse TFT Feather', 'ESP32-S3'],
+      ['Feather RP2040 Adalogger', 'RP2040'],
+      ['QT Py ESP32-S2', 'ESP32-S2'],
+      ['QT Py ESP32 Pico', 'ESP32'],
+    ].map(([model, mcu]) =>
+      indexedBoard(
+        'Adafruit',
+        'adafruit',
+        'adafruit-board-index',
+        'Maker board',
+        `Adafruit ${model}`,
+        mcu!,
+        adafruitDirectory,
+      ),
+    ),
+    ...[
+      ['IoT RedBoard ESP32-P4 & ESP32-C5', 'ESP32-P4 + ESP32-C5'],
+      ['ESP32-P4 PoE', 'ESP32-P4'],
+      ['Thing Plus ESP32-WROOM', 'ESP32'],
+      ['Thing Plus ESP32-S3', 'ESP32-S3'],
+      ['RedBoard Qwiic', 'Not recorded on directory'],
+      ['IoT RedBoard ESP32 MicroPython', 'ESP32'],
+      ['IoT RedBoard RP2350', 'RP2350'],
+      ['RedBoard Plus', 'ATmega328P'],
+      ['Qwiic Pro Micro USB-C', 'ATmega32U4'],
+      ['Pro nRF52840 Mini', 'nRF52840'],
+      ['Thing Plus STM32', 'STM32'],
+      ['RedBoard Artemis Nano', 'Artemis'],
+    ].map(([model, mcu]) =>
+      indexedBoard(
+        'SparkFun Electronics',
+        'sparkfun',
+        'sparkfun-board-index',
+        'Development board',
+        `SparkFun ${model}`,
+        mcu!,
+        sparkfunDirectory,
+      ),
+    ),
   ],
 });
 

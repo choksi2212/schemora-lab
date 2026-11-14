@@ -18,7 +18,7 @@ The catalog exposes an exact ESP32-DevKitC V4 / WROOM-32E / male-header configur
 
 See [Phase 2 implementation details and limits](docs/Phase-2-Implementation.md) for catalog sources, graph contracts, rules, APIs, persistence, and verification.
 
-The hardware catalog also includes an **Official board index** for discovering Arduino and Espressif models. It is separate from circuit-ready support: indexed models have no inferred pin maps or electrical validation and cannot be placed into a circuit until an exact configuration receives its own source-reviewed catalog release. The snapshot and its coverage limits are documented in [`@schemora/catalog`](packages/hardware-catalog/README.md#official-board-discovery-directory).
+The hardware catalog has separate **Official board index** and **Component discovery** views for manufacturer-linked discovery across board vendors and common component families. Discovery entries do not have inferred pin maps, package-specific ratings, or electrical validation and cannot be placed into a circuit until their exact configuration receives its own source-reviewed catalog release. Coverage and limits are documented in [`@schemora/catalog`](packages/hardware-catalog/README.md#official-board-discovery-directory).
 
 ## Phase 3 — Interactive 3D workbench (in progress)
 

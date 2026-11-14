@@ -12,6 +12,9 @@ import {
   boardDirectory2026_11,
   boardDirectorySchema,
   getBoardDirectory,
+  componentDirectory2026_11,
+  componentDirectorySchema,
+  getComponentDirectory,
 } from '../src/index.js';
 
 describe('curated hardware catalog release', () => {
@@ -320,6 +323,16 @@ describe('official board discovery directory', () => {
     );
     expect(directory.entries.some((entry) => entry.id === 'arduino.uno-r3')).toBe(true);
     expect(
+      directory.entries.some(
+        (entry) => entry.id === 'raspberry-pi.raspberry-pi-pico-2-w-with-headers',
+      ),
+    ).toBe(true);
+    expect(directory.entries.some((entry) => entry.id === 'st.nucleo-f446re')).toBe(true);
+    expect(directory.entries.some((entry) => entry.manufacturer === 'Adafruit')).toBe(true);
+    expect(directory.entries.some((entry) => entry.manufacturer === 'SparkFun Electronics')).toBe(
+      true,
+    );
+    expect(
       directory.entries.find((entry) => entry.id === 'arduino.nano-33-ble')?.listingStatus,
     ).toBe('end-of-life');
     expect(
@@ -338,5 +351,24 @@ describe('official board discovery directory', () => {
     const insecure = structuredClone(boardDirectory2026_11);
     insecure.sources[0]!.url = insecure.sources[0]!.url.replace('https:', 'http:');
     expect(boardDirectorySchema.safeParse(insecure).success).toBe(false);
+  });
+});
+
+describe('common component discovery directory', () => {
+  it('lists source-linked component families without claiming exact parts', () => {
+    const directory = getComponentDirectory();
+    expect(directory.entries.length).toBeGreaterThanOrEqual(10);
+    expect(directory.entries.every((entry) => entry.supportLevel === 'discovery-only')).toBe(true);
+    expect(directory.entries.every((entry) => !entry.exactPartNumber)).toBe(true);
+    expect(directory.entries.some((entry) => entry.model.includes('SN74HC595'))).toBe(true);
+  });
+
+  it('rejects unresolved source IDs and insecure source pages', () => {
+    const unresolved = structuredClone(componentDirectory2026_11);
+    unresolved.entries[0]!.sourceId = 'missing';
+    expect(componentDirectorySchema.safeParse(unresolved).success).toBe(false);
+    const insecure = structuredClone(componentDirectory2026_11);
+    insecure.sources[0]!.url = insecure.sources[0]!.url.replace('https:', 'http:');
+    expect(componentDirectorySchema.safeParse(insecure).success).toBe(false);
   });
 });

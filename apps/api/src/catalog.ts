@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   getBoardDirectory,
+  getComponentDirectory,
   getCatalogRelease,
   getCatalogReleaseById,
   getCatalogReleases,
@@ -32,6 +33,11 @@ export function currentCatalogRelease() {
 /** Return the strictly parsed manufacturer discovery index, not circuit-ready parts. */
 export function currentBoardDirectory() {
   return getBoardDirectory();
+}
+
+/** Return manufacturer-linked component families, not circuit-ready parts. */
+export function currentComponentDirectory() {
+  return getComponentDirectory();
 }
 
 export function catalogReleaseIndex() {

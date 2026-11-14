@@ -12,6 +12,7 @@ import {
   catalogReleaseById,
   catalogReleaseIndex,
   currentBoardDirectory,
+  currentComponentDirectory,
   currentCatalogRelease,
 } from './catalog.js';
 import {
@@ -632,6 +633,9 @@ export function buildApp(
   });
   app.get('/v1/catalog/board-directory', async (request) =>
     envelope(request, currentBoardDirectory()),
+  );
+  app.get('/v1/catalog/component-directory', async (request) =>
+    envelope(request, currentComponentDirectory()),
   );
   app.get('/v1/catalog/:releaseId', async (request) => {
     const { releaseId } = z

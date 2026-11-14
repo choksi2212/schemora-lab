@@ -99,10 +99,10 @@ type Release = {
 };
 type CatalogIndex = { releases: { releaseId: string; publishedOn: string; status: string }[] };
 type CatalogSection = 'all' | 'boards' | 'components' | 'breadboards';
-type CatalogView = 'curated' | 'board-directory';
+type CatalogView = 'curated' | 'board-directory' | 'component-directory';
 type BoardDirectoryEntry = {
   id: string;
-  manufacturer: 'Arduino' | 'Espressif Systems';
+  manufacturer: string;
   family: string;
   model: string;
   processorFamily: string;
@@ -121,6 +121,23 @@ type BoardDirectory = {
   sources: { id: string; manufacturer: string; title: string; url: string; checkedOn: string }[];
   entries: BoardDirectoryEntry[];
 };
+type ComponentDirectory = {
+  directoryId: string;
+  checkedOn: string;
+  coverageNote: string;
+  sources: { id: string; title: string; url: string }[];
+  entries: {
+    id: string;
+    manufacturer: string;
+    family: string;
+    model: string;
+    componentType: 'family' | 'series';
+    category: string;
+    productUrl: string;
+    exactPartNumber: boolean;
+    caution: string;
+  }[];
+};
 
 const partIcon = (category: Part['category']) =>
   category === 'development-board' ? Cpu : category === 'led' ? Zap : Cable;
@@ -136,10 +153,11 @@ export function HardwareCatalog() {
   const [boardDirectory, setBoardDirectory] = useState<BoardDirectory | null>(null);
   const [boardDirectoryError, setBoardDirectoryError] = useState<unknown>(null);
   const [boardDirectoryRequested, setBoardDirectoryRequested] = useState(false);
+  const [componentDirectory, setComponentDirectory] = useState<ComponentDirectory | null>(null);
+  const [componentDirectoryError, setComponentDirectoryError] = useState<unknown>(null);
+  const [selectedComponentFamilyId, setSelectedComponentFamilyId] = useState('');
   const [boardQuery, setBoardQuery] = useState('');
-  const [boardManufacturer, setBoardManufacturer] = useState<
-    'all' | 'Arduino' | 'Espressif Systems'
-  >('all');
+  const [boardManufacturer, setBoardManufacturer] = useState('all');
   const [selectedBoardId, setSelectedBoardId] = useState('');
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<unknown>(null);
@@ -199,6 +217,16 @@ export function HardwareCatalog() {
       .catch(setBoardDirectoryError);
   }, [catalogView, boardDirectory, boardDirectoryRequested]);
 
+  useEffect(() => {
+    if (catalogView !== 'component-directory' || componentDirectory) return;
+    void api<ComponentDirectory>('/catalog/component-directory')
+      .then((data) => {
+        setComponentDirectory(data);
+        setSelectedComponentFamilyId((current) => current || data.entries[0]?.id || '');
+      })
+      .catch(setComponentDirectoryError);
+  }, [catalogView, componentDirectory]);
+
   const filteredParts = useMemo(() => {
     const parts = release?.release.parts ?? [];
     const q = query.trim().toLowerCase();
@@ -227,6 +255,9 @@ export function HardwareCatalog() {
   });
   const selectedBoard =
     filteredBoards.find((entry) => entry.id === selectedBoardId) ?? filteredBoards[0];
+  const boardManufacturers = [
+    ...new Set((boardDirectory?.entries ?? []).map((entry) => entry.manufacturer)),
+  ];
 
   return (
     <div className="page catalog-page">
@@ -269,6 +300,13 @@ export function HardwareCatalog() {
           onClick={() => setCatalogView('board-directory')}
         >
           Official board index
+        </button>
+        <button
+          type="button"
+          aria-pressed={catalogView === 'component-directory'}
+          onClick={() => setCatalogView('component-directory')}
+        >
+          Component discovery
         </button>
       </div>
 
@@ -368,7 +406,7 @@ export function HardwareCatalog() {
             />
           )}
         </>
-      ) : (
+      ) : catalogView === 'board-directory' ? (
         <section
           className="catalog-browser board-directory-browser"
           aria-label="Official board index"
@@ -393,7 +431,7 @@ export function HardwareCatalog() {
               />
             </div>
             <div className="catalog-filters" role="group" aria-label="Filter board manufacturer">
-              {(['all', 'Espressif Systems', 'Arduino'] as const).map((manufacturer) => (
+              {['all', ...boardManufacturers].map((manufacturer) => (
                 <button
                   key={manufacturer}
                   type="button"
@@ -401,11 +439,7 @@ export function HardwareCatalog() {
                   aria-pressed={boardManufacturer === manufacturer}
                   onClick={() => setBoardManufacturer(manufacturer)}
                 >
-                  {manufacturer === 'all'
-                    ? 'All'
-                    : manufacturer === 'Arduino'
-                      ? 'Arduino'
-                      : 'Espressif'}
+                  {manufacturer === 'all' ? 'All' : manufacturer}
                 </button>
               ))}
             </div>
@@ -476,6 +510,104 @@ export function HardwareCatalog() {
               </div>
             </div>
           )}
+        </section>
+      ) : (
+        <section
+          className="catalog-browser board-directory-browser"
+          aria-label="Component discovery index"
+        >
+          <aside className="catalog-list-panel">
+            <div className="catalog-list-heading">
+              <span className="eyebrow">COMMON COMPONENT FAMILIES</span>
+              <strong>
+                {componentDirectory ? `${componentDirectory.entries.length} families` : 'Loading…'}
+              </strong>
+            </div>
+            {componentDirectoryError ? (
+              <ErrorNotice
+                error={componentDirectoryError}
+                onRetry={() => {
+                  setComponentDirectoryError(null);
+                  setComponentDirectory(null);
+                }}
+              />
+            ) : !componentDirectory ? (
+              <Loading />
+            ) : (
+              <div
+                className="catalog-part-list"
+                role="listbox"
+                aria-label="Select a component family"
+              >
+                {componentDirectory.entries.map((entry) => (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    className={`catalog-part-option ${selectedComponentFamilyId === entry.id ? 'selected' : ''}`}
+                    role="option"
+                    aria-selected={selectedComponentFamilyId === entry.id}
+                    onClick={() => setSelectedComponentFamilyId(entry.id)}
+                  >
+                    <span className="catalog-part-icon">
+                      <Layers3 size={17} />
+                    </span>
+                    <span>
+                      <small>
+                        {entry.manufacturer} · {formatWords(entry.category)}
+                      </small>
+                      <strong>{entry.model}</strong>
+                      <em>{entry.componentType} · discovery only</em>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </aside>
+          <div className="catalog-detail-panel">
+            {componentDirectory &&
+              (() => {
+                const entry = componentDirectory.entries.find(
+                  (item) => item.id === selectedComponentFamilyId,
+                );
+                return entry ? (
+                  <>
+                    <div className="detail-kicker">
+                      <span className="eyebrow">
+                        {entry.manufacturer.toUpperCase()} · COMPONENT DISCOVERY
+                      </span>
+                      <span className="identity-chip">Discovery only</span>
+                    </div>
+                    <h2>{entry.model}</h2>
+                    <div className="catalog-fact-grid">
+                      <Fact label="Category" value={formatWords(entry.category)} />
+                      <Fact label="Record type" value={entry.componentType} />
+                      <Fact
+                        label="Exact part number"
+                        value={entry.exactPartNumber ? 'Yes' : 'No; family-level record'}
+                      />
+                      <Fact label="Circuit-ready support" value="Not included" />
+                    </div>
+                    <p className="catalog-part-summary">{entry.caution}</p>
+                    <p>{componentDirectory.coverageNote}</p>
+                    <h3>Manufacturer references</h3>
+                    <div className="board-source-links">
+                      <a href={entry.productUrl} target="_blank" rel="noreferrer">
+                        Manufacturer product page <ArrowUpRight size={14} />
+                      </a>
+                      {componentDirectory.sources
+                        .filter((source) => source.id === entry.id.split('.')[0])
+                        .map((source) => (
+                          <a key={source.id} href={source.url} target="_blank" rel="noreferrer">
+                            {source.title} <ArrowUpRight size={14} />
+                          </a>
+                        ))}
+                    </div>
+                  </>
+                ) : (
+                  <Loading />
+                );
+              })()}
+          </div>
         </section>
       )}
 

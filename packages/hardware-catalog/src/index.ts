@@ -36,6 +36,12 @@ export {
   getBoardDirectory,
 } from './board-directory.js';
 export type { BoardDirectory } from './board-directory.js';
+export {
+  componentDirectory2026_11,
+  componentDirectorySchema,
+  getComponentDirectory,
+} from './component-directory.js';
+export type { ComponentDirectory } from './component-directory.js';
 
 import { catalogReleaseSchema } from './schema.js';
 import { catalogRelease2026_10 } from './release-2026-10.js';
