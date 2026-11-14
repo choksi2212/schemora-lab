@@ -1,6 +1,6 @@
 # Schemora Phase 3 — Interactive 3D Workbench Implementation Plan
 
-- **Status:** In progress — graph-derived scene, wire editing, component arrangement, persistence, and undo/redo are implemented; physical placement and fit evidence remain open
+- **Status:** In progress — the scene now resolves declared BB400 hole targets from the pinned catalog release and supports confirmed terminal/hole wire editing; direct scene placement, drag arrangement, physical fit evidence, and release gates remain open
 - **Product phase:** Phase 3 — Interactive 3D Workbench
 - **Baseline:** Phase 1 conversation intelligence and Phase 2 hardware knowledge/circuit validation are implemented on `dev`; Phase 3 is the work described here.
 - **Primary user:** A desktop or laptop user who has a reviewed hardware design and wants to see and edit its physical arrangement without editing graph JSON.
@@ -28,7 +28,7 @@ The current circuit page is a semantic graph editor: it provides catalog termina
 
 ### 2.3 Implemented first slice
 
-The first Phase 3 increment adds a client-side React Three Fiber scene to the circuit workspace. The scene renders the saved graph's breadboard topology, supported board and component silhouettes, and wires derived from graph endpoints. It supports camera orbit, zoom, and reset; terminal selection with an explicit proposed-wire review and confirmation; wire removal in the scene and semantic list; a semantic wire list with both endpoint identities; selected terminal identity shared by canvas and DOM controls; selecting, moving and rotating components with keyboard-accessible workbench-step controls; versioned layout persistence in the graph snapshot; undo/redo; and a WebGL/render failure fallback with retry. Existing terminal selectors and hole-placement controls remain available.
+The current Phase 3 increment adds a client-side React Three Fiber scene to the circuit workspace. The scene renders the saved graph's breadboard topology, supported board and component silhouettes, and wires derived from graph endpoints. It supports camera orbit, zoom, and reset; terminal and catalog-derived BB400 hole selection; explicit proposed-wire review and confirmation for graph endpoint combinations; wire removal in the scene and semantic list; a semantic wire list with both endpoint identities; keyboard-selectable BB400 holes; selecting, moving and rotating components with keyboard-accessible workbench-step controls; versioned layout persistence in the graph snapshot; undo/redo; and a WebGL/render failure fallback with retry. Existing terminal placement controls remain available.
 
 This increment does **not** yet allow users to drag parts or assign terminal-to-hole placements through the scene. The layout contract stores only bounded scene X/Z coordinates and quarter-turn rotation; it carries no physical scale, fit, height, or electrical meaning. The view uses illustrative procedural geometry; it is not a dimension-accurate assembly or fit guarantee. These limits are reflected in the UI and README. Firmware simulation is Phase 6 in the product roadmap and is not part of this Phase 3 delivery.
 

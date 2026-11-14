@@ -334,21 +334,21 @@ The repository has immutable catalog releases, a narrow ESP32 DevKitC V4/WROOM-3
 
 ### 8.1 Current baseline
 
-The browser renders a graph-derived illustrative scene with camera controls, selectable catalog terminals, terminal-to-terminal wire creation, wire removal, keyboard-based component arrangement, graph persistence, and a semantic alternative. The scene explicitly does not promise physical fit or dimension-accurate CAD. Breadboard holes are rendered, but do not currently serve as graph-authoritative scene wire targets; terminal placement is available in a separate editor.
+The browser renders a graph-derived illustrative scene with camera controls, selectable catalog terminals and catalog-derived BB400 hole targets, confirmed graph wire creation between terminal/hole endpoint combinations, wire removal, keyboard-based component arrangement, graph persistence, and a semantic alternative. The scene explicitly does not promise physical fit or dimension-accurate CAD. Terminal placement remains available in a separate editor; direct scene part dragging and scene placement editing remain open.
 
 ### 8.2 Workstream P3-A — Exact graph-to-scene projection
 
 - Define a pure, testable scene view model derived from graph snapshot, exact catalog release, visual asset metadata, and saved presentation layout.
 - Every rendered object/target must carry the exact graph entity ID and catalog identity that produced it.
 - Replace scattered identity assumptions with reviewed mappings for supported board terminals, component terminals, breadboard instances, and hole IDs.
-- Derive breadboard hole targets from catalog topology metadata rather than labels guessed from screen position.
+- Derive breadboard hole targets from catalog topology metadata rather than labels guessed from screen position. **Implemented locally:** current exact BB400 topology IDs are enumerated from the graph’s pinned release and only those IDs receive scene anchors; coordinate coverage tests cover all 400 declared holes.
 - Add deterministic coordinate conversion tests for all 400 BB400 terminal/rail holes and edge cases; unknown hole IDs return no scene target and remain visible as unavailable in the semantic list.
 - Separate view-model/controller logic into testable modules so graph interpretation is not buried in a large React scene component.
 
 ### 8.3 Workstream P3-B — Scene-based hole and wire operations
 
-- Implement selectable hole targets with stable `{breadboardInstanceId, holeId}` identities.
-- Support the exact endpoint combinations allowed by the graph schema: terminal-to-terminal, terminal-to-hole, hole-to-terminal, and hole-to-hole.
+- Implement selectable hole targets with stable `{breadboardInstanceId, holeId}` identities. **Implemented locally:** scene and keyboard selection use the same catalog-derived targets.
+- Support the exact endpoint combinations allowed by the graph schema: terminal-to-terminal, terminal-to-hole, hole-to-terminal, and hole-to-hole. **Implemented locally:** endpoints are selected semantically, reviewed, and confirmed before graph mutation.
 - Provide a clear wiring mode: select source, select destination, review the proposed edge, confirm or cancel. Do not commit graph mutations on a single ambiguous click.
 - For overlapping targets, show an explicit disambiguation list; never snap to the nearest endpoint without identifying it.
 - Render existing wire endpoints from canonical graph endpoint types, including breadboard holes and component placements.

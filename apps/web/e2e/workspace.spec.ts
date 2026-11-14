@@ -209,7 +209,7 @@ test('connects exact terminals in the 3D workbench and persists graph edits', as
 
   const terminalList = page.getByRole('list', { name: 'Connectable circuit terminals' });
   await terminalList.getByRole('button', { name: /ESP32-DevKitC V4.*GPIO19/ }).click();
-  await expect(page.getByText(/Selected endpoint:.*catalog terminal ID gpio19/)).toBeVisible();
+  await expect(page.getByText(/Selected endpoint:.*GPIO19 \/ IO19/)).toBeVisible();
   await terminalList.getByRole('button', { name: /YAGEO 220 Ω resistor: Lead B/ }).click();
   await expect(page.getByRole('button', { name: 'Confirm wire' })).toBeVisible();
   await expect(page.getByText(/Proposed connection:.*GPIO19.*Lead B/)).toBeVisible();
@@ -234,6 +234,22 @@ test('connects exact terminals in the 3D workbench and persists graph edits', as
   await expect(page.getByRole('status').filter({ hasText: 'Circuit saved.' })).toBeVisible();
   await page.reload();
   await expect(page.getByText('3 graph wires')).toBeVisible();
+
+  await page
+    .getByRole('list', { name: 'Connectable circuit terminals' })
+    .getByRole('button', { name: /Kingbright WP7113ID red LED: Anode/ })
+    .click();
+  await page
+    .getByRole('combobox', { name: 'Select a BB400 hole for wire connection' })
+    .selectOption({ label: 'breadboard-1 · A1' });
+  await page.getByRole('button', { name: 'Select hole endpoint' }).click();
+  await expect(page.getByText(/Proposed connection:.*Anode.*hole A1/)).toBeVisible();
+  await page.getByRole('button', { name: 'Confirm wire' }).click();
+  await expect(page.getByText('4 graph wires')).toBeVisible();
+  await page.getByRole('button', { name: 'Save circuit' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Circuit saved.' })).toBeVisible();
+  await page.reload();
+  await expect(page.getByText(/Wire 4:.*Anode.*hole A1/)).toBeVisible();
 });
 
 test('keeps file validation local and exposes keyboard-operable import', async ({ page }) => {

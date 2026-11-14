@@ -14,6 +14,7 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { resolveSimulationLedStates, type SceneSimulationRun } from './simulation-scene-state';
+import { getWorkbenchHoleTargets, type WorkbenchHoleTarget } from './workbench-topology';
 import styles from './circuit-scene.module.css';
 
 type Endpoint =
@@ -50,6 +51,7 @@ export type CircuitWorkbenchGraph = {
 };
 
 type TerminalRef = { componentInstanceId: string; catalogTerminalId: string };
+type WorkbenchEndpoint = Endpoint;
 type Props = {
   graph: CircuitWorkbenchGraph;
   onGraphChange: (graph: CircuitWorkbenchGraph) => void;
@@ -127,30 +129,16 @@ class SceneBoundary extends Component<
   }
 }
 
-function pointForHole(holeId: string): Vec3 | null {
-  const terminal = /^([A-J])(\d{1,2})$/.exec(holeId);
-  if (terminal) {
-    const row = terminal[1]!.charCodeAt(0) - 65;
-    const column = Number(terminal[2]);
-    if (column < 1 || column > 30) return null;
-    return [
-      -3.65 + (column - 1) * 0.25,
-      0.23,
-      row < 5 ? 0.55 + row * 0.25 : -0.55 - (row - 5) * 0.25,
-    ];
-  }
-  const rail = /^rail-([1-4]):(\d{1,2})$/.exec(holeId);
-  if (rail) {
-    const row = Number(rail[1]);
-    const column = Number(rail[2]);
-    if (column < 1 || column > 25) return null;
-    return [
-      -3.15 + (column - 1) * 0.25,
-      0.23,
-      row < 3 ? 1.55 + (row - 1) * 0.18 : -1.55 - (row - 3) * 0.18,
-    ];
-  }
-  return null;
+function pointForHole(
+  holeId: string,
+  breadboardInstanceId: string,
+  targets: WorkbenchHoleTarget[],
+): Vec3 | null {
+  return (
+    targets.find(
+      (target) => target.breadboardInstanceId === breadboardInstanceId && target.holeId === holeId,
+    )?.position ?? null
+  );
 }
 
 function terminalPoint(partId: string, terminalId: string): Vec3 | null {
@@ -193,15 +181,18 @@ function endpointPoint(
   endpoint: Endpoint,
   graph: CircuitWorkbenchGraph,
   partById: Map<string, string>,
+  holeTargets: WorkbenchHoleTarget[],
 ): Vec3 | null {
-  if (endpoint.kind === 'hole') return pointForHole(endpoint.hole.holeId);
+  if (endpoint.kind === 'hole')
+    return pointForHole(endpoint.hole.holeId, endpoint.hole.breadboardInstanceId, holeTargets);
   const ref = endpoint.terminal;
   const placement = graph.terminalPlacements.find(
     (entry) =>
       entry.terminal.componentInstanceId === ref.componentInstanceId &&
       entry.terminal.catalogTerminalId === ref.catalogTerminalId,
   );
-  if (placement) return pointForHole(placement.hole.holeId);
+  if (placement)
+    return pointForHole(placement.hole.holeId, placement.hole.breadboardInstanceId, holeTargets);
   const catalogPartId = partById.get(ref.componentInstanceId) ?? '';
   const point = terminalPoint(catalogPartId, ref.catalogTerminalId);
   return point
@@ -289,31 +280,47 @@ function Wire({
   );
 }
 
-function InstancedHoles({
-  positions,
-  radius,
-  color,
+function PickableHoles({
+  targets,
+  onSelect,
 }: {
-  positions: Vec3[];
-  radius: number;
-  color: string;
+  targets: WorkbenchHoleTarget[];
+  onSelect: (endpoint: WorkbenchEndpoint) => void;
 }) {
   const instanceRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   useEffect(() => {
     const mesh = instanceRef.current;
     if (!mesh) return;
-    positions.forEach(([x, y, z], index) => {
+    targets.forEach(({ position: [x, y, z] }, index) => {
       dummy.position.set(x, y, z);
       dummy.updateMatrix();
       mesh.setMatrixAt(index, dummy.matrix);
     });
     mesh.instanceMatrix.needsUpdate = true;
-  }, [positions, dummy]);
+  }, [targets, dummy]);
   return (
-    <instancedMesh ref={instanceRef} args={[undefined, undefined, positions.length]}>
-      <cylinderGeometry args={[radius, radius, 0.012, 10]} />
-      <meshStandardMaterial color={color} />
+    <instancedMesh
+      ref={instanceRef}
+      args={[undefined, undefined, targets.length]}
+      onClick={(event) => {
+        event.stopPropagation();
+        const target = event.instanceId === undefined ? undefined : targets[event.instanceId];
+        if (target)
+          onSelect({
+            kind: 'hole',
+            hole: { breadboardInstanceId: target.breadboardInstanceId, holeId: target.holeId },
+          });
+      }}
+      onPointerOver={() => {
+        document.body.style.cursor = 'crosshair';
+      }}
+      onPointerOut={() => {
+        document.body.style.cursor = '';
+      }}
+    >
+      <cylinderGeometry args={[0.04, 0.04, 0.018, 10]} />
+      <meshStandardMaterial color="#667780" roughness={0.7} />
     </instancedMesh>
   );
 }
@@ -324,6 +331,8 @@ function BoardScene({
   buttonStates,
   selected,
   onSelect,
+  holeTargets,
+  onSelectHole,
   onRemoveWire,
   onSelectComponent,
 }: {
@@ -332,40 +341,14 @@ function BoardScene({
   buttonStates: Readonly<Record<string, boolean>>;
   selected: TerminalRef | null;
   onSelect: (terminal: TerminalRef) => void;
+  holeTargets: WorkbenchHoleTarget[];
+  onSelectHole: (endpoint: WorkbenchEndpoint) => void;
   onRemoveWire: (wireId: string) => void;
   onSelectComponent: (componentId: string) => void;
 }) {
   const parts = useMemo(
     () => new Map(graph.components.map((entry) => [entry.id, entry.catalogPartId])),
     [graph.components],
-  );
-  const tiePointPositions = useMemo(
-    () =>
-      Array.from({ length: 30 }, (_, col) =>
-        Array.from(
-          { length: 10 },
-          (_, row): Vec3 => [
-            -3.65 + col * 0.25,
-            0.185,
-            row < 5 ? 0.55 + row * 0.25 : -0.55 - (row - 5) * 0.25,
-          ],
-        ),
-      ).flat(),
-    [],
-  );
-  const railPositions = useMemo(
-    () =>
-      Array.from({ length: 4 }, (_, rail) =>
-        Array.from(
-          { length: 25 },
-          (_, col): Vec3 => [
-            -3.15 + col * 0.25,
-            0.185,
-            rail < 2 ? 1.55 + rail * 0.18 : -1.55 - (rail - 2) * 0.18,
-          ],
-        ),
-      ).flat(),
-    [],
   );
   const wireColors = ['#f05c43', '#2585d8', '#35a66d', '#e1a52f', '#ab6ac7'];
   return (
@@ -382,8 +365,7 @@ function BoardScene({
           <boxGeometry args={[7.85, 0.08, 5.0]} />
           <meshStandardMaterial color="#fdfefe" roughness={0.72} />
         </mesh>
-        <InstancedHoles positions={tiePointPositions} radius={0.038} color="#8c9da7" />
-        <InstancedHoles positions={railPositions} radius={0.032} color="#9eabb2" />
+        <PickableHoles targets={holeTargets} onSelect={onSelectHole} />
         <mesh position={[0, 0.178, 0]}>
           <boxGeometry args={[7.8, 0.015, 0.08]} />
           <meshStandardMaterial color="#d0d9dd" />
@@ -514,6 +496,7 @@ function BoardScene({
               },
               graph,
               parts,
+              holeTargets,
             );
             if (!point) return [];
             const isSelected =
@@ -544,8 +527,8 @@ function BoardScene({
           });
         })}
         {graph.wires.map((wire, index) => {
-          const start = endpointPoint(wire.source, graph, parts);
-          const end = endpointPoint(wire.target, graph, parts);
+          const start = endpointPoint(wire.source, graph, parts, holeTargets);
+          const end = endpointPoint(wire.target, graph, parts, holeTargets);
           return start && end ? (
             <Wire
               key={wire.id}
@@ -603,11 +586,12 @@ export function CircuitScene({
 }: Props) {
   const [webgl, setWebgl] = useState<boolean | null>(null);
   const [resetKey, setResetKey] = useState(0);
-  const [selected, setSelected] = useState<TerminalRef | null>(null);
+  const [selected, setSelected] = useState<WorkbenchEndpoint | null>(null);
   const [pendingWire, setPendingWire] = useState<{
-    source: TerminalRef;
-    target: TerminalRef;
+    source: WorkbenchEndpoint;
+    target: WorkbenchEndpoint;
   } | null>(null);
+  const [semanticHoleId, setSemanticHoleId] = useState('');
   const [selectedComponentId, setSelectedComponentId] = useState<string | null>(null);
   const [editMessage, setEditMessage] = useState('Choose a terminal to start a wire.');
   const ledStates = resolveSimulationLedStates({
@@ -634,44 +618,47 @@ export function CircuitScene({
       part: partNames[component.catalogPartId] ?? component.catalogPartId,
     })),
   );
+  const holeTargets = useMemo(
+    () => getWorkbenchHoleTargets(graph.catalogReleaseId, graph.breadboards),
+    [graph.catalogReleaseId, graph.breadboards],
+  );
   const arrangedComponent = graph.components.find(
     (component) => component.id === selectedComponentId,
   );
   const arrangedPose = arrangedComponent
     ? poseFor(graph, arrangedComponent.id, arrangedComponent.catalogPartId)
     : null;
-  function selectTerminal(terminal: TerminalRef) {
+  function selectEndpoint(endpoint: WorkbenchEndpoint) {
     if (pendingWire) return;
     if (!selected) {
-      setSelected(terminal);
-      setEditMessage('Start terminal selected. Choose a destination, then confirm the wire.');
+      setSelected(endpoint);
+      setEditMessage('Start endpoint selected. Choose a destination, then confirm the wire.');
       return;
     }
-    if (
-      selected.componentInstanceId === terminal.componentInstanceId &&
-      selected.catalogTerminalId === terminal.catalogTerminalId
-    ) {
+    const endpointKey = (value: WorkbenchEndpoint) =>
+      value.kind === 'terminal'
+        ? JSON.stringify([
+            'terminal',
+            value.terminal.componentInstanceId,
+            value.terminal.catalogTerminalId,
+          ])
+        : JSON.stringify(['hole', value.hole.breadboardInstanceId, value.hole.holeId]);
+    if (endpointKey(selected) === endpointKey(endpoint)) {
       setSelected(null);
-      setEditMessage('Wire selection cleared. Choose a terminal to start a wire.');
+      setEditMessage('Wire selection cleared. Choose an endpoint to start a wire.');
       return;
     }
     const sameConnection = (wire: CircuitWorkbenchGraph['wires'][number]) =>
-      wire.source.kind === 'terminal' &&
-      wire.target.kind === 'terminal' &&
-      ((wire.source.terminal.componentInstanceId === selected.componentInstanceId &&
-        wire.source.terminal.catalogTerminalId === selected.catalogTerminalId &&
-        wire.target.terminal.componentInstanceId === terminal.componentInstanceId &&
-        wire.target.terminal.catalogTerminalId === terminal.catalogTerminalId) ||
-        (wire.target.terminal.componentInstanceId === selected.componentInstanceId &&
-          wire.target.terminal.catalogTerminalId === selected.catalogTerminalId &&
-          wire.source.terminal.componentInstanceId === terminal.componentInstanceId &&
-          wire.source.terminal.catalogTerminalId === terminal.catalogTerminalId));
+      (endpointKey(wire.source) === endpointKey(selected) &&
+        endpointKey(wire.target) === endpointKey(endpoint)) ||
+      (endpointKey(wire.target) === endpointKey(selected) &&
+        endpointKey(wire.source) === endpointKey(endpoint));
     if (graph.wires.some(sameConnection)) {
       setSelected(null);
       setEditMessage('Those terminals already have a wire.');
       return;
     }
-    setPendingWire({ source: selected, target: terminal });
+    setPendingWire({ source: selected, target: endpoint });
     setSelected(null);
     setEditMessage('Review the proposed connection and confirm or cancel it.');
   }
@@ -687,13 +674,31 @@ export function CircuitScene({
         ...graph.wires,
         {
           id,
-          source: { kind: 'terminal', terminal: pendingWire.source },
-          target: { kind: 'terminal', terminal: pendingWire.target },
+          source: pendingWire.source,
+          target: pendingWire.target,
         },
       ],
     });
     setPendingWire(null);
     setEditMessage('Wire added between the selected terminals.');
+  }
+  function selectHole(breadboardInstanceId: string, holeId: string) {
+    selectEndpoint({ kind: 'hole', hole: { breadboardInstanceId, holeId } });
+  }
+  function selectSceneHole(endpoint: WorkbenchEndpoint) {
+    if (endpoint.kind !== 'hole') return;
+    const matchingBoards = new Set(
+      holeTargets
+        .filter((target) => target.holeId === endpoint.hole.holeId)
+        .map((target) => target.breadboardInstanceId),
+    );
+    if (matchingBoards.size > 1) {
+      setEditMessage(
+        `Hole ${endpoint.hole.holeId} overlaps across breadboards. Choose the exact breadboard and hole from the accessible hole selector.`,
+      );
+      return;
+    }
+    selectEndpoint(endpoint);
   }
   function cancelPendingWire() {
     setPendingWire(null);
@@ -754,8 +759,9 @@ export function CircuitScene({
       </p>
       <div className={styles.editTools}>
         <p>
-          Connect terminals: choose a start and destination, review the proposed connection, then
-          confirm it. Click an existing wire to remove it. Drag to orbit; scroll or pinch to zoom.
+          Connect terminals and BB400 holes: choose a start and destination, review the proposed
+          connection, then confirm it. Click an existing wire to remove it. Drag to orbit; scroll or
+          pinch to zoom.
         </p>
         <p className={styles.editStatus} role="status" aria-live="polite">
           {editMessage}
@@ -763,12 +769,15 @@ export function CircuitScene({
         <ul aria-label="Connectable circuit terminals">
           {terminals.map(({ ref, label, part }) => {
             const isSelected =
-              (selected?.componentInstanceId === ref.componentInstanceId &&
-                selected.catalogTerminalId === ref.catalogTerminalId) ||
-              (pendingWire?.source.componentInstanceId === ref.componentInstanceId &&
-                pendingWire.source.catalogTerminalId === ref.catalogTerminalId) ||
-              (pendingWire?.target.componentInstanceId === ref.componentInstanceId &&
-                pendingWire.target.catalogTerminalId === ref.catalogTerminalId);
+              (selected?.kind === 'terminal' &&
+                selected.terminal.componentInstanceId === ref.componentInstanceId &&
+                selected.terminal.catalogTerminalId === ref.catalogTerminalId) ||
+              (pendingWire?.source.kind === 'terminal' &&
+                pendingWire.source.terminal.componentInstanceId === ref.componentInstanceId &&
+                pendingWire.source.terminal.catalogTerminalId === ref.catalogTerminalId) ||
+              (pendingWire?.target.kind === 'terminal' &&
+                pendingWire.target.terminal.componentInstanceId === ref.componentInstanceId &&
+                pendingWire.target.terminal.catalogTerminalId === ref.catalogTerminalId);
             return (
               <li key={`${ref.componentInstanceId}:${ref.catalogTerminalId}`}>
                 <button
@@ -776,7 +785,7 @@ export function CircuitScene({
                   aria-pressed={isSelected}
                   disabled={Boolean(pendingWire)}
                   aria-label={`${part}: ${label}; component instance ${ref.componentInstanceId}; catalog terminal ${ref.catalogTerminalId}`}
-                  onClick={() => selectTerminal(ref)}
+                  onClick={() => selectEndpoint({ kind: 'terminal', terminal: ref })}
                 >
                   {part}: {label}
                 </button>
@@ -784,19 +793,43 @@ export function CircuitScene({
             );
           })}
         </ul>
+        <label className={styles.holeSelector}>
+          Select a BB400 hole
+          <select
+            aria-label="Select a BB400 hole for wire connection"
+            value={semanticHoleId}
+            disabled={Boolean(pendingWire) || holeTargets.length === 0}
+            onChange={(event) => setSemanticHoleId(event.target.value)}
+          >
+            <option value="">Choose a hole</option>
+            {holeTargets.map((target, index) => (
+              <option key={`${target.breadboardInstanceId}:${target.holeId}`} value={String(index)}>
+                {target.breadboardInstanceId} · {target.holeId}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            disabled={!semanticHoleId || Boolean(pendingWire)}
+            onClick={() => {
+              const index = Number(semanticHoleId);
+              const target = Number.isInteger(index) ? holeTargets[index] : undefined;
+              if (target) selectHole(target.breadboardInstanceId, target.holeId);
+            }}
+          >
+            Select hole endpoint
+          </button>
+        </label>
         {selected && (
           <p className={styles.editStatus} aria-live="polite">
-            Selected endpoint: {endpointLabel({ kind: 'terminal', terminal: selected }, graph)} ·
-            component ID {selected.componentInstanceId} · catalog terminal ID{' '}
-            {selected.catalogTerminalId}
+            Selected endpoint: {endpointLabel(selected, graph)}
           </p>
         )}
         {pendingWire && (
           <div className={styles.pendingWire} role="group" aria-label="Confirm proposed wire">
             <p>
-              Proposed connection:{' '}
-              {endpointLabel({ kind: 'terminal', terminal: pendingWire.source }, graph)} →{' '}
-              {endpointLabel({ kind: 'terminal', terminal: pendingWire.target }, graph)}
+              Proposed connection: {endpointLabel(pendingWire.source, graph)} →{' '}
+              {endpointLabel(pendingWire.target, graph)}
             </p>
             <button type="button" className="button primary small" onClick={confirmWire}>
               Confirm wire
@@ -910,8 +943,10 @@ export function CircuitScene({
                   graph={graph}
                   ledStates={ledStates}
                   buttonStates={buttonStates}
-                  selected={selected}
-                  onSelect={selectTerminal}
+                  selected={selected?.kind === 'terminal' ? selected.terminal : null}
+                  onSelect={(terminal) => selectEndpoint({ kind: 'terminal', terminal })}
+                  holeTargets={holeTargets}
+                  onSelectHole={selectSceneHole}
                   onRemoveWire={removeWire}
                   onSelectComponent={setSelectedComponentId}
                 />

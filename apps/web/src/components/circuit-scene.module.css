@@ -68,6 +68,24 @@
   border-radius: 0.6rem;
   background: var(--surface, #fff);
 }
+.holeSelector {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0;
+  color: #53646d;
+  font-size: 12px;
+}
+.holeSelector select {
+  max-width: 280px;
+  padding: 6px 9px;
+  color: #28434f;
+  font: inherit;
+  background: #fff;
+  border: 1px solid #cbd8de;
+  border-radius: 7px;
+}
 .pendingWire p {
   flex: 1 1 100%;
   margin: 0;
