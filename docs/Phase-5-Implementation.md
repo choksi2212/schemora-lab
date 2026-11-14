@@ -1,6 +1,6 @@
 # Phase 5 — Beginner teaching engine implementation
 
-**Status:** Initial deterministic teaching slice implemented; beginner study and completion criteria remain open.  
+**Status:** Deterministic teaching slice implemented; a moderated-study protocol is drafted, while protocol approval, participant sessions, and evidence-driven revisions remain open.
 **Branch:** `dev`  
 **Content release:** `2026.10.1`
 
@@ -59,7 +59,9 @@ These checks verify contracts and browser behavior. They do not establish that b
 
 ## Remaining acceptance work
 
-Phase 5 is not complete. The completion criterion requires genuine people with little or no electronics experience to use supported projects and reproduce the physical build. Run a consented usability study and record at least project completion, mistakes, hint requests, confusing terms, and physical reproduction accuracy. Use observed failures to revise the cards and interface. Do not substitute synthetic tests or model-generated summaries for participant evidence.
+Phase 5 is not complete. A ready-to-review [beginner teaching usability study protocol](Phase-5-Usability-Study-Protocol.md) now defines the novice cohort, consent and safety preconditions, five study tasks, comprehension rubric, observation record, defect severity, two-round iteration, and proposed acceptance thresholds. It intentionally leaves the study owner, approved data handling, participant contact, and organizational/privacy/ethics review as pre-recruitment decisions; no participants have been contacted or studied. The protocol owner must approve or revise the thresholds and fill those operational fields before inviting participants.
+
+Run the consented study with genuine novice users and record task completion, mistakes, hint requests, confusing terms, confidence, physical reproduction differences, and any safety stop. Use observed failures to revise the cards and interface, then retest with new participants. Do not substitute synthetic tests or model-generated summaries for participant evidence.
 
 The guide now includes a validated visual-orientation hint based on the scene’s existing orbit and component-rotation controls. Invalid-wire guidance should be expanded only when the UI provides a current, specific endpoint or rule finding to explain. The exact current guide already lists step targets and prerequisite state; explanations must remain aligned to that state. A model-backed open-ended tutor is a separate future decision and would need authorized minimized context, source grounding, and an explicit distinction between guidance and project truth.
 
@@ -81,3 +83,4 @@ The guide now includes a validated visual-orientation hint based on the scene’
 - `apps/web/src/components/circuit-workspace.tsx` — level controls and contextual lesson rendering.
 - `apps/web/src/components/circuit-workspace.module.css` — panel and citation presentation.
 - `apps/web/e2e/workspace.spec.ts` — assembly-guide teaching interaction.
+- `docs/Phase-5-Usability-Study-Protocol.md` — prepared study protocol and session record; requires owner approval and participant execution.

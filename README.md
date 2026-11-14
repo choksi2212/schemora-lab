@@ -32,7 +32,7 @@ See [Phase 4 implementation status and remaining work](docs/Phase-4-Implementati
 
 ## Phase 5 — Beginner teaching engine (in progress)
 
-The assembly guide includes a deterministic, source-linked “Why this step?” panel with Quick, Beginner, and Detailed explanations. Cards are selected from the exact active step, catalog components, current graph, and validation findings. The panel states when firmware behavior or electrical safety cannot be established by the current model. Real beginner usability sessions remain necessary before Phase 5 can be considered complete.
+The assembly guide includes a deterministic, source-linked “Why this step?” panel with Quick, Beginner, and Detailed explanations. Cards are selected from the exact active step, catalog components, current graph, and validation findings. The panel states when firmware behavior or electrical safety cannot be established by the current model. A moderated novice-study protocol is prepared; participant sessions and observed iterations remain necessary before Phase 5 can be considered complete.
 
 See [Phase 5 implementation status and remaining work](docs/Phase-5-Implementation.md).
 
