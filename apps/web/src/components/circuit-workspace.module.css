@@ -7,6 +7,18 @@
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1rem;
   align-items: start;
+  min-width: 0;
+}
+.grid > * {
+  min-width: 0;
+}
+.designPanel :global(.panel-heading) {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.designPanel :global(.panel-heading .fine-text) {
+  margin-left: auto;
+  text-align: right;
 }
 .responsivePanelNav {
   display: none;
@@ -476,10 +488,8 @@
     break-inside: avoid;
   }
 }
-@media (max-width: 850px) {
-  .grid,
-  .firmwareGrid,
-  .coverageGrid {
+@media (max-width: 1480px) {
+  .grid {
     grid-template-columns: 1fr;
   }
   .responsivePanelNav {
@@ -502,6 +512,12 @@
   }
   .designPanel[data-visible='false'] {
     display: none;
+  }
+}
+@media (max-width: 1180px) {
+  .firmwareGrid,
+  .coverageGrid {
+    grid-template-columns: 1fr;
   }
 }
 @media (max-width: 560px) {

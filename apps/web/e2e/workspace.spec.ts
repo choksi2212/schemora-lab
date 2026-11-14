@@ -38,6 +38,13 @@ async function createImport(page: Page, filename: string, source: string, title:
   await page.goto('/');
   await expect(page.getByRole('heading', { name: /Good ideas deserve/ })).toBeVisible();
   await page.getByRole('button', { name: 'Import conversation' }).click();
+  const importDialog = page.locator('dialog.import-dialog');
+  await expect(importDialog).toBeVisible();
+  const dialogCenter = await importDialog.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return bounds.x + bounds.width / 2;
+  });
+  expect(dialogCenter).toBeCloseTo((await page.evaluate(() => window.innerWidth)) / 2, 0);
   await page.getByRole('textbox', { name: 'Project name' }).fill(title);
   await page.locator('#new-file').setInputFiles({
     name: filename,
@@ -140,11 +147,16 @@ test('connects exact terminals in the 3D workbench and persists graph edits', as
   await page.getByRole('link', { name: /Open circuit workspace/ }).click();
   await expect(page.getByRole('heading', { name: 'Circuit workbench 3D view' })).toBeVisible();
   await expect(page.getByRole('region', { name: /Illustrative circuit workbench/ })).toBeVisible();
-  await page.setViewportSize({ width: 800, height: 900 });
+  await page.setViewportSize({ width: 1100, height: 900 });
   await page.getByRole('button', { name: 'Terminal placement', exact: true }).click();
   await expect(page.getByText(/Assign a lead to a labeled hole/)).toBeVisible();
   await page.getByRole('button', { name: 'Wiring', exact: true }).click();
   await expect(page.getByText(/Choose the two exact catalog terminals/)).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  await page.setViewportSize({ width: 800, height: 900 });
+  await expect(page.getByRole('button', { name: 'Terminal placement', exact: true })).toBeVisible();
   await page.setViewportSize({ width: 1280, height: 900 });
 
   const arrangeList = page.getByRole('list', { name: 'Components to arrange' });
